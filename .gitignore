@@ -1,0 +1,22 @@
+# .NET build output
+bin/
+obj/
+
+# IDE and user-specific files
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Local BepInEx runtime output
+BepInEx/config/
+BepInEx/LogOutput.log
+
+# Keep public documentation limited to the project README
+*.md
+!README.md
+
+# Packaged releases
+artifacts/
+releases/
+*.zip

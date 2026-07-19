@@ -1,0 +1,91 @@
+using BepInEx;
+using BepInEx.Logging;
+using BepInEx.Unity.IL2CPP;
+using HarmonyLib;
+using System.Reflection;
+
+namespace ER2RealismOverhaul;
+
+internal static class RuntimeLifecycle
+{
+    internal static bool IsQuitting { get; set; }
+}
+
+[BepInPlugin(PluginGuid, PluginName, PluginVersion)]
+public sealed class Plugin : BasePlugin
+{
+    public const string PluginGuid = "ca.antoi.er2.tacticalai";
+    public const string PluginName = "Easy Red 2 Realism Overhaul";
+    public const string PluginVersion = "1.0";
+
+    internal static ManualLogSource LogSource { get; private set; } = null!;
+    private Harmony? _harmony;
+    private AtmosphericParticlePersistenceController? _atmosphericParticlePersistenceController;
+    private SettingsSyncController? _settingsSyncController;
+    private SettingsMenuController? _settingsMenuController;
+    private AircraftFlightInstrumentsController? _aircraftFlightInstrumentsController;
+    private FirstPersonPlayerShadowController? _firstPersonPlayerShadowController;
+    private MultiplayerPlayerNameController? _multiplayerPlayerNameController;
+    private BulletPenetrationController? _bulletPenetrationController;
+
+    public override void Load()
+    {
+        LogSource = Log;
+        StartupSplashSkipper.TrySkip();
+        Settings.Bind(Config);
+        SettingsCatalog.Initialize();
+        _atmosphericParticlePersistenceController = AddComponent<AtmosphericParticlePersistenceController>();
+        _settingsSyncController = AddComponent<SettingsSyncController>();
+        _settingsMenuController = AddComponent<SettingsMenuController>();
+        _aircraftFlightInstrumentsController = AddComponent<AircraftFlightInstrumentsController>();
+        _firstPersonPlayerShadowController = AddComponent<FirstPersonPlayerShadowController>();
+        _multiplayerPlayerNameController = AddComponent<MultiplayerPlayerNameController>();
+        _bulletPenetrationController = AddComponent<BulletPenetrationController>();
+
+        _harmony = new Harmony(PluginGuid);
+        PatchModules(_harmony, typeof(Plugin).Assembly);
+
+        Log.LogInfo($"{PluginName} {PluginVersion} loaded. attackerBonus={Settings.AttackingForceBonusEnabled.Value}, " +
+                    $"FOV={Settings.PerceptionEnabled.Value}, " +
+                    $"contact={Settings.ContactResponseEnabled.Value}, reports={Settings.ContactReportingEnabled.Value}, " +
+                    $"sharing={Settings.InterSquadContactSharingEnabled.Value}, " +
+                    $"commander={Settings.CommanderEnabled.Value}, " +
+                    $"danger={Settings.DangerReactionsEnabled.Value}, tankFear={Settings.TankFearEnabled.Value}, " +
+                    $"gunnerDuck={Settings.MountedGunnerSuppressionEnabled.Value}, " +
+                    $"fireSafety={Settings.FriendlyFireChecksEnabled.Value}, safeGrenades={Settings.SafeAiGrenadeThrowsEnabled.Value}, " +
+                    $"tankTactics={Settings.TankTacticsEnabled.Value}, tankAcceleration={Settings.TankAccelerationMultiplier.Value:F2}x, smoke={Settings.SmokeSupportEnabled.Value}, " +
+                    $"longBarrage={Settings.ArtilleryMissionLengthEnabled.Value}, persistentSmoke={Settings.SmokePersistenceEnabled.Value}, " +
+                    $"persistentDust={Settings.ExplosionDustPersistenceEnabled.Value}, " +
+                    $"largeCraters={Settings.HeavyOrdnanceCratersEnabled.Value}, " +
+                    $"layeredBlast={Settings.LayeredBlastEffectsEnabled.Value}, " +
+                    $"fragmentation={Settings.EnhancedFragmentationEnabled.Value}, aircraftSafety={Settings.AircraftSafetyEnabled.Value}, " +
+                    $"aircraftPhysics={Settings.AircraftFlightPhysicsEnabled.Value}, " +
+                    $"bulletPenetration={Settings.BulletPenetrationEnabled.Value}, " +
+                    $"addedRicochets={Settings.AddedSmallArmsRicochetsEnabled.Value}, " +
+                    $"tracers={Settings.TracerReductionEnabled.Value}, chatter={Settings.BattleChatterEnabled.Value}, " +
+                    $"playerSuppressionVignette={Settings.PlayerSuppressionVignetteMultiplier.Value}, " +
+                    $"playerSuppressionWobble={Settings.PlayerSuppressionWobbleMultiplier.Value}, " +
+                    $"playerSuppressionDirectionMarker={Settings.ShowPlayerSuppressionDirectionMarker.Value}, " +
+                    $"meleeHitRegistration={Settings.ImprovedMeleeHitRegistrationEnabled.Value}, " +
+                    $"meleeReachExtension={Settings.MeleeAdditionalReach.Value:F2}m, " +
+                    $"firstPersonPlayerShadow={Settings.FirstPersonPlayerShadowEnabled.Value}, " +
+                    $"namesWithHudDisabled={Settings.KeepMultiplayerPlayerNamesWithHudDisabled.Value}, " +
+                    $"highQualityDistantAnimations={Settings.KeepHighQualityDistantAnimations.Value}, " +
+                    $"audioBalance={Settings.AudioBalanceEnabled.Value}, " +
+                    $"distantSound={Settings.DistantSoundShapingEnabled.Value}");
+    }
+
+    private static void PatchModules(Harmony harmony, Assembly assembly)
+    {
+        var patchTypes = assembly.GetTypes()
+            .Where(type => type.GetCustomAttributes(typeof(HarmonyPatch), false).Length != 0)
+            .OrderBy(type => type.FullName, StringComparer.Ordinal);
+
+        foreach (var patchType in patchTypes)
+        {
+            LogSource.LogInfo($"Applying patch module {patchType.FullName}");
+            harmony.CreateClassProcessor(patchType).Patch();
+            LogSource.LogInfo($"Applied patch module {patchType.FullName}");
+        }
+    }
+}

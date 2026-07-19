@@ -1,0 +1,273 @@
+using System.Text;
+using ExitGames.Client.Photon;
+using Il2CppInterop.Runtime;
+using Il2CppInterop.Runtime.Attributes;
+using Photon.Pun;
+using UnityEngine;
+
+namespace ER2RealismOverhaul;
+
+internal sealed class SettingsSyncController : MonoBehaviour
+{
+    private const string ProtocolMarker = "ER2RO_SETTINGS_1";
+    private const string RoomPropertyKey = "er2ro.settings";
+
+    private static SettingsSyncController? _instance;
+
+    private readonly Dictionary<string, string> _localBackup = new(StringComparer.Ordinal);
+    private string? _publishedPayload;
+    private string? _appliedPayload;
+    private string? _roomName;
+    private float _nextCheckAt;
+    private float _nextFailureLogAt;
+    private bool _clientOverrideActive;
+    private bool _isRemoteClient;
+
+    internal static bool IsClientOverrideActive => _instance?._clientOverrideActive == true;
+    internal static bool AreSettingsReadOnly => _instance?._isRemoteClient == true;
+    internal static bool ShouldPersistAppliedSettings => _instance == null || _instance._localBackup.Count == 0;
+    internal static string StatusLabel { get; private set; } = "Offline - local settings";
+
+    [HideFromIl2Cpp]
+    internal static void NotifySettingsChanged()
+    {
+        if (_instance == null)
+            return;
+
+        _instance._publishedPayload = null;
+        _instance._nextCheckAt = 0f;
+    }
+
+    private void Awake()
+    {
+        _instance = this;
+    }
+
+    private void Update()
+    {
+        if (Time.unscaledTime < _nextCheckAt)
+            return;
+
+        _nextCheckAt = Time.unscaledTime + 0.5f;
+        try
+        {
+            Synchronize();
+        }
+        catch (Exception ex)
+        {
+            StatusLabel = "Settings sync temporarily unavailable";
+            if (Time.unscaledTime >= _nextFailureLogAt)
+            {
+                _nextFailureLogAt = Time.unscaledTime + 30f;
+                Plugin.LogSource.LogWarning($"Settings synchronization failed and will retry: {ex.Message}");
+            }
+        }
+    }
+
+    private void OnDestroy()
+    {
+        RestoreLocalSettings();
+        if (_instance == this)
+            _instance = null;
+    }
+
+    private void OnApplicationQuit()
+    {
+        RuntimeLifecycle.IsQuitting = true;
+    }
+
+    [HideFromIl2Cpp]
+    private void Synchronize()
+    {
+        if (!PhotonNetwork.InRoom || PhotonNetwork.CurrentRoom == null)
+        {
+            LeaveSession();
+            return;
+        }
+
+        var room = PhotonNetwork.CurrentRoom;
+        var currentRoomName = (string?)room.Name ?? string.Empty;
+        if (!string.Equals(_roomName, currentRoomName, StringComparison.Ordinal))
+        {
+            _roomName = currentRoomName;
+            _publishedPayload = null;
+            _appliedPayload = null;
+        }
+
+        if (PhotonNetwork.IsMasterClient)
+        {
+            _clientOverrideActive = false;
+            _isRemoteClient = false;
+            StatusLabel = _localBackup.Count == 0
+                ? "Host - your settings control this session"
+                : "Host - inherited session settings (host migration)";
+            PublishHostSettings(room);
+        }
+        else
+        {
+            _isRemoteClient = true;
+            ReadHostSettings(room);
+        }
+    }
+
+    [HideFromIl2Cpp]
+    private void PublishHostSettings(Photon.Realtime.Room room)
+    {
+        var payload = BuildPayload();
+        if (payload == _publishedPayload)
+            return;
+
+        var properties = new Hashtable();
+        Il2CppSystem.String key = RoomPropertyKey;
+        Il2CppSystem.String value = payload;
+        properties[key] = value;
+
+        if (room.SetCustomProperties(properties))
+        {
+            _publishedPayload = payload;
+            Plugin.LogSource.LogDebug($"Published {SettingsCatalog.All.Count} host settings for the multiplayer session.");
+        }
+    }
+
+    [HideFromIl2Cpp]
+    private void ReadHostSettings(Photon.Realtime.Room room)
+    {
+        Il2CppSystem.String key = RoomPropertyKey;
+        var raw = room.CustomProperties?[key];
+        var payloadValue = raw?.TryCast<Il2CppSystem.String>();
+        if (payloadValue == null)
+        {
+            StatusLabel = "Client - waiting for host settings";
+            return;
+        }
+
+        var payload = (string)payloadValue;
+        if (payload == _appliedPayload)
+        {
+            _clientOverrideActive = true;
+            StatusLabel = "Client - host settings active";
+            return;
+        }
+
+        if (!TryReadPayload(payload, out var values, out var error))
+        {
+            _clientOverrideActive = false;
+            StatusLabel = "Client - " + error;
+            return;
+        }
+
+        CaptureLocalSettings();
+        ApplySessionValues(values);
+        _appliedPayload = payload;
+        _clientOverrideActive = true;
+        StatusLabel = "Client - host settings active";
+        Plugin.LogSource.LogInfo($"Applied {values.Count} host settings for this multiplayer session. The local config file was not changed.");
+    }
+
+    [HideFromIl2Cpp]
+    private void LeaveSession()
+    {
+        RestoreLocalSettings();
+        _roomName = null;
+        _publishedPayload = null;
+        _appliedPayload = null;
+        _clientOverrideActive = false;
+        _isRemoteClient = false;
+        StatusLabel = "Offline - local settings";
+    }
+
+    [HideFromIl2Cpp]
+    private void CaptureLocalSettings()
+    {
+        if (_localBackup.Count != 0)
+            return;
+
+        foreach (var setting in SettingsCatalog.All)
+            _localBackup[setting.Id] = setting.Entry.GetSerializedValue();
+    }
+
+    [HideFromIl2Cpp]
+    private void RestoreLocalSettings()
+    {
+        if (_localBackup.Count == 0)
+            return;
+
+        var config = Settings.ConfigFile;
+        var saveOnSet = config.SaveOnConfigSet;
+        try
+        {
+            config.SaveOnConfigSet = false;
+            foreach (var setting in SettingsCatalog.All)
+            {
+                if (_localBackup.TryGetValue(setting.Id, out var value))
+                    setting.Entry.SetSerializedValue(value);
+            }
+        }
+        finally
+        {
+            config.SaveOnConfigSet = saveOnSet;
+            _localBackup.Clear();
+        }
+
+        Plugin.LogSource.LogInfo("Restored local settings after leaving the multiplayer session.");
+    }
+
+    [HideFromIl2Cpp]
+    private static void ApplySessionValues(IReadOnlyList<string> values)
+    {
+        var config = Settings.ConfigFile;
+        var saveOnSet = config.SaveOnConfigSet;
+        try
+        {
+            config.SaveOnConfigSet = false;
+            for (var index = 0; index < SettingsCatalog.All.Count; index++)
+                SettingsCatalog.All[index].Entry.SetSerializedValue(values[index]);
+        }
+        finally
+        {
+            config.SaveOnConfigSet = saveOnSet;
+        }
+    }
+
+    [HideFromIl2Cpp]
+    private static string BuildPayload()
+    {
+        var builder = new StringBuilder(2048);
+        builder.Append(ProtocolMarker).Append('\n');
+        builder.Append(Plugin.PluginVersion).Append('\n');
+        builder.Append(SettingsCatalog.All.Count);
+        foreach (var setting in SettingsCatalog.All)
+            builder.Append('\n').Append(setting.Entry.GetSerializedValue());
+        return builder.ToString();
+    }
+
+    [HideFromIl2Cpp]
+    private static bool TryReadPayload(string payload, out IReadOnlyList<string> values, out string error)
+    {
+        var lines = payload.Split('\n');
+        if (lines.Length < 3 || lines[0] != ProtocolMarker)
+        {
+            values = Array.Empty<string>();
+            error = "host uses an unknown settings protocol";
+            return false;
+        }
+
+        if (lines[1] != Plugin.PluginVersion)
+        {
+            values = Array.Empty<string>();
+            error = $"version mismatch (host {lines[1]}, local {Plugin.PluginVersion})";
+            return false;
+        }
+
+        if (!int.TryParse(lines[2], out var count) || count != SettingsCatalog.All.Count || lines.Length != count + 3)
+        {
+            values = Array.Empty<string>();
+            error = "host has a different settings catalog";
+            return false;
+        }
+
+        values = lines.Skip(3).ToArray();
+        error = string.Empty;
+        return true;
+    }
+}
