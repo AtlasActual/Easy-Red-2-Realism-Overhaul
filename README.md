@@ -83,7 +83,7 @@ Do not place the DLL in `Easy Red 2_Data`.
 
 ### Updating
 
-Close the game and replace the existing `ER2RealismOverhaul.dll` with the new one. Your settings remain in `BepInEx\config\ca.antoi.er2.tacticalai.cfg`.
+Close the game and replace the existing `ER2RealismOverhaul.dll` with the new one. Your settings remain in `BepInEx\config\`.
 
 ### Uninstalling
 
