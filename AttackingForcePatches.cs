@@ -7,11 +7,10 @@ internal static class AttackingForceBonus
 {
     internal static bool AppliesTo(Soldier soldier)
     {
-        if (soldier == null || !soldier.IsAI())
+        if (!AiOwnership.IsAutonomous(soldier))
             return false;
 
-        var battle = BattleManager.GetCurrentBattleData();
-        return battle != null && battle.IsInvaderFaction(soldier.faction);
+        return GroundAiDirector.IsAttackingFaction(soldier.faction);
     }
 }
 

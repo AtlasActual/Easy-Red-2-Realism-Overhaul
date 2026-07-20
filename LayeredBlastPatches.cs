@@ -130,7 +130,7 @@ internal static class SmallExplosionAiThrowForcePatch
             return;
 
         var soldier = __instance.GetComponentInParent<Soldier>();
-        if (soldier == null || !soldier.IsAI())
+        if (!AiOwnership.IsAutonomous(soldier))
             return;
 
         var nativeMagnitude = direction.magnitude;

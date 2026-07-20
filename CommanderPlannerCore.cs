@@ -585,3 +585,45 @@ internal static class CommanderPlannerCore
             Array.Empty<CommanderDirective>());
     }
 }
+
+internal static class DefensivePositioningCore
+{
+    internal static bool ShouldAssumeCommand(
+        bool offensive,
+        bool alreadyOwned,
+        bool occupiesFortification,
+        MapPoint squadPosition,
+        MapPoint objective,
+        float objectiveRadius,
+        float arrivalMargin)
+    {
+        if (offensive || alreadyOwned || occupiesFortification)
+            return true;
+
+        return IsInsideArea(squadPosition, objective, objectiveRadius, arrivalMargin);
+    }
+
+    internal static bool ShouldPreserveFortification(
+        bool hasDefensiveOrder,
+        bool onUsableCover,
+        bool onStaticWeapon)
+        => onStaticWeapon || hasDefensiveOrder && onUsableCover;
+
+    internal static bool IsInsideArea(
+        MapPoint position,
+        MapPoint center,
+        float radius,
+        float tolerance = 0f)
+    {
+        if (!position.IsFinite || !center.IsFinite || !float.IsFinite(radius) ||
+            !float.IsFinite(tolerance))
+        {
+            return false;
+        }
+
+        var allowed = Math.Max(0f, radius) + Math.Max(0f, tolerance);
+        var dx = (double)position.X - center.X;
+        var dz = (double)position.Z - center.Z;
+        return dx * dx + dz * dz <= (double)allowed * allowed;
+    }
+}

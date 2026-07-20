@@ -22,7 +22,7 @@ internal static class IncomingFireCuePatch
         {
             if (__instance == null || shooter == null ||
                 !__instance.IsAlive || !shooter.IsAlive ||
-                !__instance.IsAI() || __instance.IsFPSPlayer() || __instance.IsOnVehicle() ||
+                !AiOwnership.IsAutonomous(__instance) || __instance.IsOnVehicle() ||
                 __instance.GetInstanceID() == shooter.GetInstanceID())
             {
                 return;
@@ -154,7 +154,7 @@ internal static class GunfireAwareness
     internal static void Poll(Soldier listener, float now)
     {
         if (!EnsureEnabled() || listener == null || !listener.IsAlive ||
-            !listener.IsAI() || listener.IsFPSPlayer() || listener.IsOnVehicle())
+            !AiOwnership.IsAutonomous(listener) || listener.IsOnVehicle())
         {
             return;
         }
@@ -315,6 +315,7 @@ internal static class GunfireAwarenessBattleResetPatch
         MountedGunnerSuppression.ResetBattle();
         KnownTargetSuppressiveFire.ResetBattle();
         ContactResponse.ResetBattleAttackEvidence();
+        CasualtySuppression.ResetBattle();
     }
 }
 
@@ -443,7 +444,7 @@ internal static class IncomingFireAwareness
         }
 
         if (!Settings.PerceptionEnabled.Value || now >= state.IncomingFireUntil ||
-            !soldier.IsAlive || soldier.IsFPSPlayer() || soldier.IsOnVehicle())
+            !soldier.IsAlive || !AiOwnership.IsAutonomous(soldier) || soldier.IsOnVehicle())
         {
             Clear(state);
             return;
@@ -566,7 +567,7 @@ internal static class IncomingFireOrientationPatch
         try
         {
             var soldier = __instance.GetSoldier();
-            if (soldier != null && soldier.IsAI() &&
+            if (AiOwnership.IsAutonomous(soldier) &&
                 !KnownTargetSuppressiveFire.OwnsAim(soldier.GetInstanceID(), Time.time))
             {
                 IncomingFireAwareness.Update(__instance, soldier, Time.time);
@@ -596,7 +597,7 @@ internal static class SoldierVisibilityConePatch
         {
             var soldier = __instance.TryCast<Soldier>();
             if (ReferenceEquals(soldier, null) || soldier == null ||
-                !soldier.IsAI() || soldier.IsFPSPlayer() || soldier.IsOnVehicle())
+                !AiOwnership.IsAutonomous(soldier) || soldier.IsOnVehicle())
             {
                 return true;
             }
@@ -740,14 +741,47 @@ internal static class SoldierTargetAcquisitionPatch
         => Settings.PerceptionEnabled.Value &&
            MultiplayerAuthority.CanMutateGameplay() &&
            soldier != null &&
-           soldier.IsAI() &&
-           !soldier.IsFPSPlayer() &&
+           AiOwnership.IsAutonomous(soldier) &&
            !soldier.IsOnVehicle();
 }
 
 [HarmonyPatch(typeof(SoldierAI), "SequentialUpdate")]
 internal static class SoldierSequentialUpdatePatch
 {
+    [HarmonyPrefix]
+    private static void Prefix(SoldierAI __instance)
+    {
+        try
+        {
+            if (!MultiplayerAuthority.CanMutateGameplay())
+                return;
+
+            var soldier = __instance.GetSoldier();
+            if (!AiOwnership.IsAutonomous(soldier) ||
+                soldier.IsOnVehicle())
+            {
+                return;
+            }
+
+            // Establish and enforce the persistent defensive-position owner before
+            // native SequentialUpdate gets a chance to turn HoldArea into another
+            // walk. The lower movement executors below enforce the same invariant.
+            if (ContactResponse.ShouldHoldDefensivePosition(soldier, Time.time))
+            {
+                ContactResponse.StopTacticalMovement(
+                    __instance,
+                    soldier,
+                    ContactResponse.StationaryHoldPose(soldier),
+                    Time.deltaTime);
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogSource.LogWarning(
+                $"Defensive position pre-update failed: {ex.Message}");
+        }
+    }
+
     [HarmonyPostfix]
     private static void Postfix(SoldierAI __instance)
     {
@@ -773,7 +807,7 @@ internal static class SoldierSequentialUpdatePatch
             ContactKnowledge.RegisterSquad(soldier, now);
             ContactKnowledge.Update(now);
 
-            if (!soldier.IsAI() || soldier.IsFPSPlayer())
+            if (!AiOwnership.IsAutonomous(soldier))
                 return;
 
             if (soldier.IsOnVehicle())
@@ -784,54 +818,7 @@ internal static class SoldierSequentialUpdatePatch
                 return;
             }
 
-            var squad = soldier.joinedSquad;
-            var leader = squad?.Leader;
-            if (squad != null && leader != null && leader.GetInstanceID() == soldier.GetInstanceID())
-            {
-                SquadRadioSupport.Update(squad, now);
-                StaticAntiTankStaffing.Update(squad, now);
-            }
-
-            if (Settings.PerceptionEnabled.Value)
-            {
-                GunfireAwareness.Poll(soldier, now);
-                ApplyPerception(__instance, soldier);
-            }
-            else
-                AiState.TargetMemory.Remove(soldier.GetInstanceID());
-
-            // Tank fear owns its hide marker. Remove it before contact evaluation
-            // when the setting is switched off so no stale stationary owner remains.
-            if (!Settings.TankFearEnabled.Value)
-                AiState.TankCoverHideUntil.Remove(soldier.GetInstanceID());
-
-            // Suppression belongs to Danger Reactions, not Contact Response. Run it
-            // independently so pinning and live-toggle cleanup remain deterministic
-            // when contact movement is disabled.
-            ContactResponse.UpdateSuppressionReaction(__instance, soldier, now, Time.deltaTime);
-
-            // This action is scheduled after perception and suppression state are
-            // current, but before Contact Response decides whether target loss may
-            // release movement. Both systems therefore share one stationary owner.
-            KnownTargetSuppressiveFire.Schedule(__instance, soldier, now);
-
-            if (Settings.ContactResponseEnabled.Value)
-                ContactResponse.Update(__instance, soldier);
-            else
-                ContactResponse.Disable(__instance, soldier);
-
-            if (Settings.TankFearEnabled.Value)
-                ApplyTankFear(__instance, soldier);
-
-            ContactResponse.MaintainOwnedPose(__instance, soldier, now);
-
-            InfantryAntiArmorFireDiscipline.Update(__instance, soldier);
-            HandheldWeaponClassifier.EnforceEngagementRange(soldier, __instance);
-            SoldierTacticalSprintPatch.UpdateMovingFireInhibition(__instance, soldier);
-            ContactResponse.RestoreFireAfterOwnedInhibition(__instance, soldier);
-
-            if (Settings.BattleChatterEnabled.Value)
-                BattleChatter.Update(__instance, soldier, now);
+            GroundAiDirector.UpdateSoldier(__instance, soldier, now);
         }
         catch (Exception ex)
         {
@@ -839,7 +826,7 @@ internal static class SoldierSequentialUpdatePatch
         }
     }
 
-    private static void ApplyPerception(SoldierAI ai, Soldier soldier)
+    internal static void ApplyPerception(SoldierAI ai, Soldier soldier)
     {
         var target = TargetAcquisition.ResolveObservedTarget(ai, soldier);
         if (!TargetAcquisition.TryGetTargetSnapshot(target, out var targetToken, out var targetPosition))
@@ -911,11 +898,11 @@ internal static class SoldierSequentialUpdatePatch
 
         // Stop the stale shot, but do not latch allowFireAtEnemy off. The native AI
         // remains free to scan, acquire, and fire at the next confirmed target.
-        soldier.StopFire();
+        GroundAiDirector.ExecuteSoldierStopFire(soldier);
         AiState.Trace($"FOV: soldier {id} rejected out-of-cone target at {distance:0}m ({reason})");
     }
 
-    private static void ApplyTankFear(SoldierAI ai, Soldier soldier)
+    internal static void ApplyTankFear(SoldierAI ai, Soldier soldier)
     {
         var now = Time.time;
         var id = soldier.GetInstanceID();
@@ -1049,6 +1036,36 @@ internal static class SoldierSequentialUpdatePatch
         ContactResponse.StopDangerMovement(ai, soldier, SoldierPose.Prone, Time.deltaTime);
         if (!wasProneHiding)
             AiState.Trace($"Tank fear: soldier {id} went prone while waiting for tank-masked cover at {distance:0}m");
+    }
+
+    internal static bool HasNearbyTankThreat(Soldier soldier)
+    {
+        if (soldier == null || soldier.IsATUnit())
+            return false;
+
+        var vehicles = Vehicle.allVehicles;
+        if (vehicles == null)
+            return false;
+
+        var maximumSqr = Settings.TankAwarenessDistance.Value *
+                         Settings.TankAwarenessDistance.Value;
+        var position = soldier.transform.position;
+        for (var i = 0; i < vehicles.Count; i++)
+        {
+            var vehicle = vehicles[i];
+            if (vehicle == null || vehicle.life <= 0 ||
+                vehicle.GetComponent<VehicleTank>() == null ||
+                string.Equals(vehicle.GetVehicleFaction(), soldier.faction,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if ((vehicle.GetCenterOfUnit() - position).sqrMagnitude < maximumSqr)
+                return true;
+        }
+
+        return false;
     }
 
     private static bool IsAdvancingToward(SoldierAI ai, Soldier soldier, Vector3 threatPosition)

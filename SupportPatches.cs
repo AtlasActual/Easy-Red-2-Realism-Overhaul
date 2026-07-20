@@ -560,7 +560,7 @@ internal static class SquadRadioSupport
         try
         {
             var leader = squad.Leader;
-            if (leader == null || !leader.IsAI() || leader.IsFPSPlayer())
+            if (!AiOwnership.IsAutonomous(leader))
                 return;
             if (squad.order != Order.charge && squad.order != Order.attackFromSide)
                 return;

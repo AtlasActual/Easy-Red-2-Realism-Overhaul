@@ -4,9 +4,9 @@ using UnityEngine;
 namespace ER2RealismOverhaul;
 
 /// <summary>
-/// Marks the short interval in which Soldier.Melee starts its native damage
-/// coroutine. Unity runs a newly started coroutine through its first yield
-/// immediately, so the native OverlapCapsule call remains inside this scope.
+/// Marks only an invocation of the native melee coroutine's MoveNext method.
+/// The damage query occurs after the coroutine's opening wait, rather than in
+/// the Soldier.Melee call that starts it.
 /// </summary>
 internal static class MeleeHitQueryScope
 {
@@ -31,15 +31,19 @@ internal static class MeleeHitQueryScope
     }
 }
 
-[HarmonyPatch(typeof(Soldier), nameof(Soldier.Melee))]
-internal static class SoldierMeleeHitQueryScopePatch
+[HarmonyPatch(typeof(Soldier._MeleeDamageCR_d__362), "MoveNext")]
+internal static class SoldierMeleeDamageCoroutinePatch
 {
     [HarmonyPrefix]
-    private static void Prefix(Soldier __instance, out bool __state)
+    private static void Prefix(
+        Soldier._MeleeDamageCR_d__362 __instance,
+        out bool __state)
     {
+        var attacker = __instance.__4__this;
         __state = Settings.ImprovedMeleeHitRegistrationEnabled.Value &&
                   MultiplayerAuthority.CanMutateGameplay() &&
-                  MeleeHitQueryScope.TryEnter(__instance);
+                  attacker != null &&
+                  MeleeHitQueryScope.TryEnter(attacker);
     }
 
     [HarmonyFinalizer]

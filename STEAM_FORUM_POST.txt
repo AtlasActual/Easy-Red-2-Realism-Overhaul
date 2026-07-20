@@ -1,0 +1,66 @@
+Title: [Mod Release] Easy Red 2 Realism Overhaul
+
+[h1]Easy Red 2 Realism Overhaul[/h1]
+
+[b]Current version:[/b] 1.0
+[b]Download:[/b] [url={{https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul}}]Easy Red 2 Realism Overhaul[/url]
+
+I've been working on this overhaul to make Easy Red 2's battles feel less mechanical without changing what makes the game fun. Version 1.0 is ready for public release.
+
+The main focus is battlefield behaviour. Infantry react more naturally to contact and suppression, squads work with imperfect information, and vehicles and aircraft make better tactical decisions. It is not a health or damage multiplier mod; the game's missions, armour system, and basic damage model remain intact.
+
+[h2]Main features[/h2]
+
+[list]
+[*]Improved infantry awareness, suppressive fire, and movement under fire, with defenders strongly preferring protected trenches and buildings that retain useful firing lanes
+[*]Suppression that slows reactions, limits awareness, pins exposed troops, and makes mounted gunners duck
+[*]Squad contact reports passed by voice and radio instead of perfect enemy tracking
+[*]Optional unified High Command coordination for attacks, flanks, reserves, armour, aircraft, artillery, smoke, and compulsory staffing of viable static weapons during defence
+[*]Safer AI firing and grenade use, better anti-tank reactions, and more reliable melee hits
+[*]Better tank positioning and reversing, plus safer aircraft targeting and configurable realistic flight physics
+[*]Material-aware bullet penetration with energy loss, exit effects, tracers, and ricochets
+[*]Reworked explosions, smoke and dust durations, audio rebalance, tracers quantity, battle chatter, and many more visual options
+[*]True 10x Caps Lock binocular zoom without range markings and with the weapon model hidden, 200-degree hold-Alt freelook, and a map-aligned scrolling compass band shown for five seconds with K, faded edges, NATO mils by default, optional degrees, and an always-visible option
+[*]A built-in settings menu available with [b]F10[/b] or from the main and pause menus
+[/list]
+
+Most features can be tuned or switched off, so you can keep the parts that suit the way you play.
+
+[h2]Coming soon[/h2]
+
+Tank ballistics, armour values, and internal vehicle subsystems are all being reworked for a future release. These changes are still work in progress and are not part of v1.0; for now, the mod leaves Easy Red 2's existing tank ballistics and armour model alone.
+
+[h2]Installation[/h2]
+
+ER2RealismOverhaul requires BepInEx 6 for Unity IL2CPP.
+
+[olist]
+[*]Download a build whose filename contains [b]Unity.IL2CPP-win-x64[/b] from the [url=https://builds.bepinex.dev/projects/bepinex_be]official BepInEx builds page[/url]. The [url=https://docs.bepinex.dev/master/articles/user_guide/installation/unity_il2cpp.html]official IL2CPP installation guide[/url] is also available.
+[*]In Steam, right-click Easy Red 2 and select [b]Manage > Browse local files[/b].
+[*]Extract BepInEx into that folder, beside [b]Easy Red 2.exe[/b].
+[*]Start the game once, then close it. The first launch may take longer while BepInEx generates its files.
+[*]Create [b]BepInEx\plugins\ER2RealismOverhaul[/b].
+[*]Place [b]ER2RealismOverhaul.dll[/b] inside that folder.
+[*]Start the game and press [b]F10[/b] to confirm the mod is loaded.
+[/olist]
+
+To update, close the game and replace the existing DLL. To uninstall, close the game and delete it. Saved settings are kept in [b]BepInEx\config\ca.antoi.er2.tacticalai.cfg[/b].
+
+[h2]Multiplayer[/h2]
+
+Only the host needs the mod for its host-authoritative gameplay systems. Friends without BepInEx or ER2RealismOverhaul can join normally and experience the battlefield state synchronized by Easy Red 2, including the results of the host-controlled AI behaviour.
+
+[list]
+[*][b]Without the mod:[/b] Players do not receive the F10 menu, the host's settings, or local HUD, audio, and first-person options.
+[*][b]With the same version:[/b] Players receive the host's settings for the session. Their menu stays read-only and their own configuration returns after disconnecting.
+[/list]
+
+If an unmodded player becomes host after the original host leaves, the host-authoritative overhaul systems stop running. A player with the same mod version should remain host.
+
+[h2]Compatibility and feedback[/h2]
+
+Version 1.0 was tested with the Easy Red 2 build available on July 19, 2026. Game updates can sometimes break BepInEx mods, so please report loading problems, unusual AI behaviour, multiplayer issues, or settings that need adjustment.
+
+[h2]License[/h2]
+
+ER2RealismOverhaul is source-available for personal, non-commercial use. It may not be re-uploaded, redistributed, sold, included in mod packs, or released in modified form. Please share a link to the official project page instead. Complete terms are in the project's [b]LICENSE[/b] file.

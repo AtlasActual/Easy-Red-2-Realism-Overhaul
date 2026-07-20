@@ -55,17 +55,23 @@ internal sealed class ContactReport
 
 internal static class ContactKnowledge
 {
+    private const float ObservationCadenceSeconds = 0.35f;
+    private const float DeliveryUpdateCadenceSeconds = 0.1f;
     private static readonly Dictionary<int, Dictionary<int, ContactReport>> ReportsBySquad = new();
     private static readonly Dictionary<int, SquadEndpoint> KnownSquads = new();
     private static readonly Dictionary<PendingDeliveryKey, PendingDelivery> PendingDeliveries = new();
+    private static readonly Dictionary<ObservationKey, float> LastObservationAt = new();
     private static float _nextMaintenanceAt;
+    private static float _nextDeliveryUpdateAt;
 
     internal static void ResetBattle()
     {
         ReportsBySquad.Clear();
         KnownSquads.Clear();
         PendingDeliveries.Clear();
+        LastObservationAt.Clear();
         _nextMaintenanceAt = 0f;
+        _nextDeliveryUpdateAt = 0f;
     }
 
     internal static void RegisterSquad(Soldier soldier, float now)
@@ -134,6 +140,15 @@ internal static class ContactKnowledge
     {
         var soldierId = observer.GetInstanceID();
         var sourceSquadId = GetSquadId(observer);
+        var reportTargetId = targetSquadId != 0 ? targetSquadId : targetId;
+        var observationKey = new ObservationKey(sourceSquadId, reportTargetId);
+        if (LastObservationAt.TryGetValue(observationKey, out var lastObservedAt) &&
+            now - lastObservedAt < ObservationCadenceSeconds)
+        {
+            return;
+        }
+
+        LastObservationAt[observationKey] = now;
         var suppression = Settings.SuppressionAwarenessEnabled.Value
             ? Mathf.Clamp01(observer.GetSuppressionValue() / 255f)
             : 0f;
@@ -163,6 +178,10 @@ internal static class ContactKnowledge
     {
         if (!Settings.ContactReportingEnabled.Value && !Settings.CommanderEnabled.Value)
             return;
+
+        if (now < _nextDeliveryUpdateAt)
+            return;
+        _nextDeliveryUpdateAt = now + DeliveryUpdateCadenceSeconds;
 
         if (PendingDeliveries.Count > 0)
         {
@@ -629,4 +648,5 @@ internal static class ContactKnowledge
     }
 
     private readonly record struct PendingDeliveryKey(int SourceSquadId, int RecipientSquadId, int TargetId);
+    private readonly record struct ObservationKey(int SourceSquadId, int TargetId);
 }

@@ -16,7 +16,11 @@ public sealed class Plugin : BasePlugin
 {
     public const string PluginGuid = "ca.antoi.er2.tacticalai";
     public const string PluginName = "Easy Red 2 Realism Overhaul";
+<<<<<<< Updated upstream
     public const string PluginVersion = "1.0";
+=======
+    public const string PluginVersion = "1.0.2";
+>>>>>>> Stashed changes
 
     internal static ManualLogSource LogSource { get; private set; } = null!;
     private Harmony? _harmony;
@@ -25,7 +29,10 @@ public sealed class Plugin : BasePlugin
     private SettingsMenuController? _settingsMenuController;
     private AircraftFlightInstrumentsController? _aircraftFlightInstrumentsController;
     private FirstPersonPlayerShadowController? _firstPersonPlayerShadowController;
+    private PlayerViewFeaturesController? _playerViewFeaturesController;
+    private PlayerSuppressionBlurController? _playerSuppressionBlurController;
     private MultiplayerPlayerNameController? _multiplayerPlayerNameController;
+    private MultiplayerSharedSquadController? _multiplayerSharedSquadController;
     private BulletPenetrationController? _bulletPenetrationController;
 
     public override void Load()
@@ -39,13 +46,16 @@ public sealed class Plugin : BasePlugin
         _settingsMenuController = AddComponent<SettingsMenuController>();
         _aircraftFlightInstrumentsController = AddComponent<AircraftFlightInstrumentsController>();
         _firstPersonPlayerShadowController = AddComponent<FirstPersonPlayerShadowController>();
+        _playerViewFeaturesController = AddComponent<PlayerViewFeaturesController>();
+        _playerSuppressionBlurController = AddComponent<PlayerSuppressionBlurController>();
         _multiplayerPlayerNameController = AddComponent<MultiplayerPlayerNameController>();
+        _multiplayerSharedSquadController = AddComponent<MultiplayerSharedSquadController>();
         _bulletPenetrationController = AddComponent<BulletPenetrationController>();
 
         _harmony = new Harmony(PluginGuid);
         PatchModules(_harmony, typeof(Plugin).Assembly);
 
-        Log.LogInfo($"{PluginName} {PluginVersion} loaded. attackerBonus={Settings.AttackingForceBonusEnabled.Value}, " +
+        Log.LogInfo($"{PluginName} {PluginVersion} loaded. attackPostureBonus={Settings.AttackingForceBonusEnabled.Value}, " +
                     $"FOV={Settings.PerceptionEnabled.Value}, " +
                     $"contact={Settings.ContactResponseEnabled.Value}, reports={Settings.ContactReportingEnabled.Value}, " +
                     $"sharing={Settings.InterSquadContactSharingEnabled.Value}, " +
@@ -65,10 +75,17 @@ public sealed class Plugin : BasePlugin
                     $"tracers={Settings.TracerReductionEnabled.Value}, chatter={Settings.BattleChatterEnabled.Value}, " +
                     $"playerSuppressionVignette={Settings.PlayerSuppressionVignetteMultiplier.Value}, " +
                     $"playerSuppressionWobble={Settings.PlayerSuppressionWobbleMultiplier.Value}, " +
+                    $"playerSuppressionRadius={Settings.PlayerSuppressionNearMissRadiusMultiplier.Value:F2}x, " +
+                    $"playerSuppressionBlur={Settings.PlayerSuppressionBlurEnabled.Value}, " +
                     $"playerSuppressionDirectionMarker={Settings.ShowPlayerSuppressionDirectionMarker.Value}, " +
+                    $"aiCasualtySuppression={Settings.AiCasualtySuppressionEnabled.Value}, " +
                     $"meleeHitRegistration={Settings.ImprovedMeleeHitRegistrationEnabled.Value}, " +
                     $"meleeReachExtension={Settings.MeleeAdditionalReach.Value:F2}m, " +
                     $"firstPersonPlayerShadow={Settings.FirstPersonPlayerShadowEnabled.Value}, " +
+                    $"binoculars={Settings.BinocularsEnabled.Value}, binocularZoom={Settings.BinocularZoomMultiplier.Value:F1}x, " +
+                    $"freeLook={Settings.FreeLookEnabled.Value}, freeLookArc={Settings.FreeLookHorizontalArcDegrees.Value:F0}deg, " +
+                    $"compassAlwaysVisible={Settings.CompassAlwaysVisible.Value}, " +
+                    $"compassUnits={(Settings.CompassUseMils.Value ? "mils" : "degrees")}, " +
                     $"namesWithHudDisabled={Settings.KeepMultiplayerPlayerNamesWithHudDisabled.Value}, " +
                     $"highQualityDistantAnimations={Settings.KeepHighQualityDistantAnimations.Value}, " +
                     $"audioBalance={Settings.AudioBalanceEnabled.Value}, " +

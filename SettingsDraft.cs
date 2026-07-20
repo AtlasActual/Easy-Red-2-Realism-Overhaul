@@ -151,37 +151,37 @@ internal sealed class SettingsDraft
 
     private static bool ValidateRelationships(IReadOnlyDictionary<string, object> parsed, out string error)
     {
-        if (!LessOrEqual(parsed, "1. Perception", "CloseTargetAcquisitionSeconds", "DistantTargetAcquisitionSeconds"))
+        if (!LessOrEqual(parsed, "AI - Infantry tactics - Perception", "CloseTargetAcquisitionSeconds", "DistantTargetAcquisitionSeconds"))
         {
             error = "Close target-acquisition time cannot exceed distant target-acquisition time.";
             return false;
         }
 
-        if (!LessOrEqual(parsed, "2b. Combat safety", "GrenadeMinimumRangeMeters", "GrenadeMaximumRangeMeters"))
+        if (!LessOrEqual(parsed, "AI - Infantry tactics - Combat safety", "GrenadeMinimumRangeMeters", "GrenadeMaximumRangeMeters"))
         {
             error = "Grenade minimum range cannot exceed grenade maximum range.";
             return false;
         }
 
-        if (!Less(parsed, "2. Infantry danger", "ProneReleaseSuppressionThreshold", "ProneSuppressionThreshold"))
+        if (!Less(parsed, "AI - Infantry tactics - Danger", "ProneReleaseSuppressionThreshold", "ProneSuppressionThreshold"))
         {
             error = "Prone release suppression must be lower than prone suppression.";
             return false;
         }
 
-        if (!Less(parsed, "2. Infantry danger", "CrouchSuppressionThreshold", "ProneSuppressionThreshold"))
+        if (!Less(parsed, "AI - Infantry tactics - Danger", "CrouchSuppressionThreshold", "ProneSuppressionThreshold"))
         {
             error = "Crouch suppression must be lower than prone suppression.";
             return false;
         }
 
-        if (!Less(parsed, "2. Infantry danger", "MountedGunnerRiseSuppressionThreshold", "MountedGunnerDuckSuppressionThreshold"))
+        if (!Less(parsed, "AI - Infantry tactics - Danger", "MountedGunnerRiseSuppressionThreshold", "MountedGunnerDuckSuppressionThreshold"))
         {
             error = "Mounted-gunner rise suppression must be lower than duck suppression.";
             return false;
         }
 
-        if (!LessOrEqual(parsed, "7c. AI battle chatter", "RoutineMinimumIntervalSeconds", "RoutineMaximumIntervalSeconds"))
+        if (!LessOrEqual(parsed, "AI - Infantry tactics - Battle chatter", "RoutineMinimumIntervalSeconds", "RoutineMaximumIntervalSeconds"))
         {
             error = "Routine chatter minimum interval cannot exceed its maximum interval.";
             return false;

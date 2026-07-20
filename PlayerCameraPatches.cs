@@ -13,6 +13,22 @@ internal static class PlayerHoldBreathZoomPatch
     [HarmonyPostfix]
     private static void Postfix(Soldier __instance, ref float __result)
     {
+        if (__instance != null &&
+            PlayerController.fpsCamera &&
+            PlayerViewFeaturesController.BinocularsActive)
+        {
+            var binocularFov = PlayerViewFeaturesController.GetBinocularFov(__result);
+
+            // The game applies its fixed hold-breath multiplier after this method.
+            // Cancel it here so binoculars remain an exact optical 10x (by default)
+            // even if the player is also holding the breath key.
+            if (Soldier.CurrentPlayerIsHoldingBreath())
+                binocularFov /= NativeHoldBreathFovMultiplier;
+
+            __result = Mathf.Clamp(binocularFov, 1f, 179f);
+            return;
+        }
+
         var strength = Settings.HoldBreathZoomMultiplier.Value;
         if (__instance == null ||
             !PlayerController.fpsCamera ||

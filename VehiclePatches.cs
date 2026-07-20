@@ -5,6 +5,18 @@ namespace ER2RealismOverhaul;
 
 internal static class TankTactics
 {
+    private const float MaximumAdvancingSteer = 0.65f;
+    private const float MinimumTurningThrottle = 0.55f;
+    private const float TurningSteerThreshold = 0.45f;
+
+    internal static bool TryGetLocalAiTank(AIVehicle ai, out Vehicle vehicle)
+    {
+        vehicle = ai.veh;
+        return vehicle != null &&
+               vehicle.GetComponent<VehicleTank>() != null &&
+               vehicle.IsLocalAIDriving();
+    }
+
     internal static bool TryGetCloseArmoredThreat(
         AIVehicle ai,
         out Vehicle vehicle,
@@ -60,6 +72,40 @@ internal static class TankTactics
 
         AiState.Trace($"Tank tactics: vehicle {id} retreating straight backward");
     }
+
+    internal static void StopWithoutHullTurn(Vehicle vehicle)
+    {
+        // Brake() does not clear Vehicle.movingDir. Explicitly neutralize the
+        // previous drive command so a stale steering value cannot keep applying
+        // differential track torque while the tank is meant to hold position.
+        vehicle.Move(Vector2.zero);
+        vehicle.Brake();
+    }
+
+    internal static void PreserveForwardMotionWhileTurning(AIVehicle ai, Vehicle vehicle)
+    {
+        if (ai.going_in_retro)
+            return;
+
+        var drive = vehicle.movingDir;
+        var steeringMagnitude = Mathf.Abs(drive.x);
+
+        // Negative throttle is the native close-node backing maneuver. Keep it
+        // intact; this guard is only for forward navigation degenerating into a
+        // stationary track pivot.
+        if (drive.y < 0f || steeringMagnitude < TurningSteerThreshold)
+            return;
+
+        if (steeringMagnitude <= MaximumAdvancingSteer && drive.y >= MinimumTurningThrottle)
+            return;
+
+        var correctedDrive = new Vector2(
+            Mathf.Clamp(drive.x, -MaximumAdvancingSteer, MaximumAdvancingSteer),
+            Mathf.Max(drive.y, MinimumTurningThrottle));
+
+        vehicle.Move(correctedDrive);
+        ai.lastDriveThrottle = correctedDrive.y;
+    }
 }
 
 [HarmonyPatch(typeof(AIVehicle), "RotateVehicleTowardEnemy")]
@@ -73,30 +119,72 @@ internal static class AiTankPivotProtectionPatch
 
         try
         {
-            var vehicle = __instance.veh;
-            if (vehicle == null || vehicle.GetComponent<VehicleTank>() == null ||
-                !vehicle.IsLocalAIDriving())
+            if (!TankTactics.TryGetLocalAiTank(__instance, out var vehicle))
                 return true;
 
             // Never let the native enemy-facing routine steer the hull while a
             // tactical retreat is active. The turret remains free to track.
             if (__instance.going_in_retro)
+            {
+                __instance.retroBehaviour = AIVehicle.RetroBehaviour.backward;
                 return false;
+            }
 
-            if (!TankTactics.TryGetCloseArmoredThreat(
-                    __instance, out vehicle, out _, out var signedHullAngle) ||
-                TankTactics.HullFacesThreat(signedHullAngle))
-                return true;
+            if (TankTactics.TryGetCloseArmoredThreat(
+                    __instance, out vehicle, out _, out var signedHullAngle) &&
+                !TankTactics.HullFacesThreat(signedHullAngle))
+            {
+                // Under direct armored contact, open distance without rotating
+                // the side or rear through the enemy's firing line.
+                TankTactics.BeginStraightReverse(__instance, vehicle);
+                return false;
+            }
 
-            // The native routine pivots the hull in place. Under direct armored
-            // contact that rotates the side/rear through the enemy's firing line.
-            TankTactics.BeginStraightReverse(__instance, vehicle);
+            if (__instance.destinationActive && !__instance.DestinationReached)
+            {
+                // stopToShoot routes tanks here even with a valid path. Continue
+                // that path and leave target tracking to the turret instead of
+                // exchanging the movement order for a stationary hull pivot.
+                __instance.MoveTowardCurrentNodeTank();
+                return false;
+            }
+
+            // No movement order exists. Clear both throttle and steering before
+            // braking; Brake() alone leaves the last steering input latched.
+            TankTactics.StopWithoutHullTurn(vehicle);
             return false;
         }
         catch (Exception ex)
         {
             Plugin.LogSource.LogWarning($"Tank pivot protection failed: {ex.Message}");
             return true;
+        }
+    }
+}
+
+[HarmonyPatch(typeof(AIVehicle), "MoveTowardCurrentNodeTank")]
+internal static class AiTankForwardTurnCommitmentPatch
+{
+    [HarmonyPostfix]
+    private static void Postfix(AIVehicle __instance)
+    {
+        if (!Settings.TankTacticsEnabled.Value || !MultiplayerAuthority.CanMutateGameplay())
+            return;
+
+        try
+        {
+            if (!TankTactics.TryGetLocalAiTank(__instance, out var vehicle))
+                return;
+
+            // Native path following can request almost pure steering at low
+            // throttle. A tracked vehicle then spins indefinitely without making
+            // progress toward the node. Bound steering and commit enough forward
+            // throttle to turn as an arc instead.
+            TankTactics.PreserveForwardMotionWhileTurning(__instance, vehicle);
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogSource.LogWarning($"Tank forward-turn commitment failed: {ex.Message}");
         }
     }
 }
@@ -139,7 +227,7 @@ internal static class AiVehicleUpdatePatch
                 // Halt without ordering a hull turn. The turret may continue tracking
                 // infantry while defending or uncommitted armor exploits its current
                 // firing position.
-                vehicle.Brake();
+                TankTactics.StopWithoutHullTurn(vehicle);
                 return;
             }
 
@@ -187,7 +275,7 @@ internal static class AiVehicleUpdatePatch
             }
             else
             {
-                vehicle.Brake();
+                TankTactics.StopWithoutHullTurn(vehicle);
                 AiState.Trace($"Tank tactics: vehicle {id} holding to engage at {distance:0}m");
             }
         }

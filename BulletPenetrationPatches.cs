@@ -46,6 +46,11 @@ internal readonly struct PenetrationSurfaceProfile
     internal float ApMaximumDepth { get; }
 }
 
+internal readonly record struct BallisticCoverLineEvaluation(
+    float ProtectionFraction,
+    PenetrationSurface DominantSurface,
+    bool HasObstruction);
+
 internal sealed class BulletPenetrationState
 {
     internal bool IsArmorPiercing;
@@ -251,6 +256,15 @@ internal static class BulletPenetration
 
     [ThreadStatic]
     private static BulletPenetrationState? _pendingSpawnState;
+
+    [ThreadStatic]
+    private static HashSet<IntPtr>? _coverRayColliderTokens;
+
+    [ThreadStatic]
+    private static RaycastHit[]? _coverRayHits;
+
+    [ThreadStatic]
+    private static RaycastHit[]? _blockingRayHits;
 
     private static bool _loggedFailure;
     private static float _nextPruneAt;
@@ -582,6 +596,126 @@ internal static class BulletPenetration
         _pendingSpawnState = null;
     }
 
+    internal static BallisticCoverLineEvaluation EvaluateOrdinaryCoverLine(
+        Vector3 bodyPosition,
+        Vector3 threatPosition)
+    {
+        // Cast from the protected body toward the threat, as the existing cover
+        // test did. Stopping short of the threat avoids crediting terrain or the
+        // target's immediate surroundings as cover for the evaluated soldier.
+        var ray = threatPosition - bodyPosition;
+        var distance = ray.magnitude;
+        const float threatEndpointTolerance = 1.25f;
+        var castDistance = distance - threatEndpointTolerance;
+        if (castDistance <= 0.1f)
+            return default;
+
+        var direction = ray / distance;
+        var hits = _coverRayHits ??= new RaycastHit[64];
+        var hitCount = Physics.RaycastNonAlloc(
+            bodyPosition,
+            direction,
+            hits,
+            castDistance,
+            Physics.DefaultRaycastLayers,
+            QueryTriggerInteraction.Ignore);
+        if (hitCount == 0)
+            return default;
+
+        var initialBudget = BallisticCoverDecisionCore.RepresentativeOrdinaryRoundBudget *
+                            Mathf.Max(0f, Settings.OrdinaryRoundPenetrationStrength.Value);
+        var penetrationEnabled = Settings.BulletPenetrationEnabled.Value;
+        var maximumPenetrations = Mathf.Max(1, Settings.MaximumPropPenetrations.Value);
+        var cumulativeResistance = 0f;
+        var penetrableBarriers = 0;
+        var dominantResistance = 0f;
+        var dominantSurface = PenetrationSurface.Generic;
+        var hasObstruction = false;
+        var colliderTokens = _coverRayColliderTokens ??= new HashSet<IntPtr>();
+        colliderTokens.Clear();
+
+        for (var i = 0; i < hitCount; i++)
+        {
+            var collider = hits[i].collider;
+            if (collider == null || collider.isTrigger || IsCharacterStop(collider))
+                continue;
+
+            var token = collider.Pointer;
+            if (token != IntPtr.Zero && !colliderTokens.Add(token))
+                continue;
+
+            if (IsVehicleStop(collider))
+            {
+                return new BallisticCoverLineEvaluation(
+                    1f, PenetrationSurface.ThinMetal, true);
+            }
+
+            if (!TryClassifySurface(collider, out var profile))
+                continue;
+
+            hasObstruction = true;
+            if (!penetrationEnabled || initialBudget <= 0.001f ||
+                IsEnvironmentalPenetrationStop(collider))
+            {
+                return new BallisticCoverLineEvaluation(1f, profile.Surface, true);
+            }
+
+            // Once an ordinary projectile has already crossed the configured
+            // number of props, the next recognized barrier is a complete stop.
+            if (penetrableBarriers >= maximumPenetrations)
+            {
+                return new BallisticCoverLineEvaluation(1f, profile.Surface, true);
+            }
+
+            var remainingBudget = Mathf.Max(0f, initialBudget - cumulativeResistance);
+            var maximumDepth = profile.OrdinaryResistance <= 0.0001f
+                ? profile.OrdinaryMaximumDepth
+                : Mathf.Max(0f, remainingBudget - profile.SurfaceCost) /
+                  profile.OrdinaryResistance;
+            maximumDepth = Mathf.Min(maximumDepth, profile.OrdinaryMaximumDepth);
+            if (maximumDepth <= 0.003f ||
+                !TryFindExit(
+                    collider,
+                    hits[i].point,
+                    direction,
+                    maximumDepth,
+                    false,
+                    out _,
+                    out var thickness))
+            {
+                return new BallisticCoverLineEvaluation(1f, profile.Surface, true);
+            }
+
+            var resistance = BallisticCoverDecisionCore.ResistanceCost(
+                profile.SurfaceCost,
+                profile.OrdinaryResistance,
+                thickness);
+            cumulativeResistance += resistance;
+            penetrableBarriers++;
+            if (resistance > dominantResistance)
+            {
+                dominantResistance = resistance;
+                dominantSurface = profile.Surface;
+            }
+
+            var protection = BallisticCoverDecisionCore.ProtectionFromResistance(
+                initialBudget,
+                cumulativeResistance);
+            if (protection >= 0.999f)
+            {
+                return new BallisticCoverLineEvaluation(
+                    1f, dominantSurface, true);
+            }
+        }
+
+        return new BallisticCoverLineEvaluation(
+            BallisticCoverDecisionCore.ProtectionFromResistance(
+                initialBudget,
+                cumulativeResistance),
+            dominantSurface,
+            hasObstruction);
+    }
+
     private static bool TryGetOrCreateState(
         BulletInstance bullet,
         BulletData bulletData,
@@ -909,13 +1043,15 @@ internal static class BulletPenetration
         if (exitDepth <= 0.04f)
             return false;
 
-        var hits = Physics.RaycastAll(
+        var hits = _blockingRayHits ??= new RaycastHit[32];
+        var hitCount = Physics.RaycastNonAlloc(
             entry + direction * 0.012f,
             direction,
+            hits,
             Mathf.Max(0f, exitDepth - 0.024f),
             ~0,
             QueryTriggerInteraction.Ignore);
-        for (var i = 0; i < hits.Length; i++)
+        for (var i = 0; i < hitCount; i++)
         {
             var other = hits[i].collider;
             if (other == null || other.Pointer == source.Pointer || BelongsToSameProp(source, other))

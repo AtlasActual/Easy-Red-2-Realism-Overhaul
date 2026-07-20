@@ -5,6 +5,28 @@ using UnityEngine;
 
 namespace ER2RealismOverhaul;
 
+[HarmonyPatch(typeof(ResourcesManager), nameof(ResourcesManager.SetUpDisabledReverbFilter))]
+internal static class ExistingReverbFilterSetupPatch
+{
+    [HarmonyPrefix]
+    private static bool Prefix(GameObject filterPos, ref AudioReverbFilter __result)
+    {
+        if (filterPos == null)
+            return true;
+
+        var existing = filterPos.GetComponent<AudioReverbFilter>();
+        if (existing == null)
+            return true;
+
+        // Unity permits only one AudioReverbFilter per GameObject. Distant sound
+        // shaping can create it before Easy Red 2 initializes the gun's native
+        // reverb, so return that component instead of letting the game attempt a
+        // duplicate AddComponent and then dereference its null result.
+        __result = existing;
+        return false;
+    }
+}
+
 [HarmonyPatch(typeof(AudioSource), nameof(AudioSource.Play), new Type[] { })]
 internal static class InvalidFirePositionAudioPlayPatch
 {
@@ -525,9 +547,14 @@ internal static class DistantSoundShaper
             {
                 if (!ReverbFilters.TryGetValue(sourceId, out var reverb) || reverb == null)
                 {
-                    reverb = source.gameObject
-                        .AddComponent(Il2CppType.Of<AudioReverbFilter>())
-                        .Cast<AudioReverbFilter>();
+                    reverb = source.gameObject.GetComponent<AudioReverbFilter>();
+                    if (reverb == null)
+                    {
+                        reverb = source.gameObject
+                            .AddComponent(Il2CppType.Of<AudioReverbFilter>())
+                            .Cast<AudioReverbFilter>();
+                    }
+
                     reverb.reverbPreset = AudioReverbPreset.User;
                     reverb.dryLevel = 0f;
                     reverb.room = -700f;

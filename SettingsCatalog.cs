@@ -7,6 +7,12 @@ namespace ER2RealismOverhaul;
 internal enum SettingsMenuCategory
 {
     QuickSetup,
+    AttackPostureBonuses,
+    Commander,
+    InfantryTactics,
+    VehicleTactics,
+    SupportCoordination,
+    AiDiagnostics,
     BalanceAndAi,
     Infantry,
     Vehicles,
@@ -67,68 +73,73 @@ internal static class SettingsCatalog
 {
     private static readonly Regex SectionPrefix = new(@"^\d+[a-z]?\.\s*", RegexOptions.Compiled);
     private static readonly Regex WordBoundary = new(@"(?<=[a-z0-9])(?=[A-Z])", RegexOptions.Compiled);
-    // Only broadly useful controls remain in their normal category. Everything else is
-    // still editable in-game under Advanced, so detailed tuning remains available without
-    // crowding the everyday pages. New settings default to Advanced until deliberately
-    // promoted into this list.
+    // Broadly useful controls are also exposed in Quick Setup. Unified AI sections keep
+    // all of their detailed controls together on their doctrine page; unrelated detailed
+    // tuning still defaults to Advanced until deliberately promoted into this list.
     private static readonly HashSet<string> PrimarySettingIds = new(StringComparer.Ordinal)
     {
-        "0. Attack and defense balance\u001fAttackingForceBonusEnabled",
-        "0. Attack and defense balance\u001fAttackingForceAccuracySpreadMultiplier",
-        "0. Attack and defense balance\u001fAttackingForceSuppressionReceivedMultiplier",
+        "AI - Attack posture bonuses\u001fAttackPostureBonusesEnabled",
+        "AI - Attack posture bonuses\u001fAttackPostureAccuracySpreadMultiplier",
+        "AI - Attack posture bonuses\u001fAttackPostureSuppressionReceivedMultiplier",
 
-        "1. Perception\u001fEnabled",
-        "1. Perception\u001fHorizontalFovDegrees",
-        "1. Perception\u001fDistantTargetAcquisitionSeconds",
-        "1. Perception\u001fTargetMemorySeconds",
+        "AI - Infantry tactics - Perception\u001fEnabled",
+        "AI - Infantry tactics - Perception\u001fHorizontalFovDegrees",
+        "AI - Infantry tactics - Perception\u001fDistantTargetAcquisitionSeconds",
+        "AI - Infantry tactics - Perception\u001fTargetMemorySeconds",
 
-        "1b. Contact response\u001fEnabled",
-        "1b. Contact response\u001fCoverSearchRadiusMeters",
-        "1b. Contact response\u001fEngagementHaltDistanceMeters",
-        "1b. Contact response\u001fMaximumAttackCombatHaltSeconds",
-        "1b. Contact response\u001fSuppressKnownTargets",
+        "AI - Infantry tactics - Contact response\u001fEnabled",
+        "AI - Infantry tactics - Contact response\u001fCoverSearchRadiusMeters",
+        "AI - Infantry tactics - Contact response\u001fEngagementHaltDistanceMeters",
+        "AI - Infantry tactics - Contact response\u001fMaximumAttackCombatHaltSeconds",
+        "AI - Infantry tactics - Contact response\u001fSuppressKnownTargets",
 
-        "1e. Movement fire\u001fRestrictMovingFire",
-        "1e. Movement fire\u001fSmgMaximumEngagementDistanceMeters",
+        "AI - Infantry tactics - Moving fire\u001fRestrictMovingFire",
+        "AI - Infantry tactics - Moving fire\u001fSmgMaximumEngagementDistanceMeters",
 
-        "1c. Contact reporting\u001fEnabled",
-        "1c. Contact reporting\u001fInterSquadSharingEnabled",
+        "AI - Support coordination - Contact reports\u001fEnabled",
+        "AI - Support coordination - Contact reports\u001fInterSquadSharingEnabled",
 
-        "1d. Suppression awareness\u001fEnabled",
+        "AI - Infantry tactics - Suppression\u001fEnabled",
 
-        "1f. High command\u001fEnabled",
+        "AI - Commander\u001fEnabled",
 
-        "2. Infantry danger\u001fEnabled",
-        "2. Infantry danger\u001fProneSuppressionThreshold",
-        "2. Infantry danger\u001fPinnedMinimumSeconds",
-        "2. Infantry danger\u001fMountedGunnerSuppressionDuck",
+        "AI - Infantry tactics - Danger\u001fEnabled",
+        "AI - Infantry tactics - Danger\u001fProneSuppressionThreshold",
+        "AI - Infantry tactics - Danger\u001fPinnedMinimumSeconds",
+        "AI - Infantry tactics - Danger\u001fMountedGunnerSuppressionDuck",
 
-        "2b. Combat safety\u001fFriendlyFireChecks",
-        "2b. Combat safety\u001fSafeAiGrenadeThrows",
-        "2b. Combat safety\u001fGrenadeMaximumRangeMeters",
+        "AI - Infantry tactics - Casualty suppression\u001fEnabled",
+        "AI - Infantry tactics - Casualty suppression\u001fWoundRadiusMeters",
+        "AI - Infantry tactics - Casualty suppression\u001fWoundSuppression",
+        "AI - Infantry tactics - Casualty suppression\u001fDeathRadiusMeters",
+        "AI - Infantry tactics - Casualty suppression\u001fDeathSuppression",
 
-        "2c. Infantry movement\u001fPreventReloadingAndBandagingWhileCrawling",
+        "AI - Infantry tactics - Combat safety\u001fFriendlyFireChecks",
+        "AI - Infantry tactics - Combat safety\u001fSafeAiGrenadeThrows",
+        "AI - Infantry tactics - Combat safety\u001fGrenadeMaximumRangeMeters",
+
+        "AI - Infantry tactics - Movement\u001fPreventReloadingAndBandagingWhileCrawling",
 
         "2d. Melee combat\u001fImprovedHitRegistration",
         "2d. Melee combat\u001fForwardReachExtensionMeters",
         "2d. Melee combat\u001fMinimumSweepRadiusMeters",
 
-        "3. Infantry vs tanks\u001fEnabled",
-        "3. Infantry vs tanks\u001fRetreatDistanceMeters",
+        "AI - Infantry tactics - Armor response\u001fEnabled",
+        "AI - Infantry tactics - Armor response\u001fRetreatDistanceMeters",
+        "AI - Infantry tactics - Armor response\u001fLauncherMaximumEngagementDistanceMeters",
 
-        "4. Tank tactics\u001fEnabled",
-        "4. Tank tactics\u001fStopAndEngageDistanceMeters",
-        "4. Tank tactics\u001fReverseDistanceMeters",
-        "4. Tank tactics\u001fDamagedLifeFraction",
+        "AI - Vehicle tactics\u001fEnabled",
+        "AI - Vehicle tactics\u001fStopAndEngageDistanceMeters",
+        "AI - Vehicle tactics\u001fReverseDistanceMeters",
+        "AI - Vehicle tactics\u001fDamagedLifeFraction",
 
         "4a. Tank physics\u001fAccelerationMultiplier",
 
-        "4b. Static anti-tank weapons\u001fEnabled",
-        "4b. Static anti-tank weapons\u001fWeaponSearchRadiusMeters",
-        "4b. Static anti-tank weapons\u001fEnemyTankResponseRangeMeters",
+        "AI - Commander - Static weapons\u001fWeaponSearchRadiusMeters",
+        "AI - Commander - Static weapons\u001fEnemyTankResponseRangeMeters",
 
-        "5. Smoke support\u001fExtraSmokeRequestsEnabled",
-        "5. Smoke support\u001fRequestChance",
+        "AI - Support coordination - Smoke\u001fExtraSmokeRequestsEnabled",
+        "AI - Support coordination - Smoke\u001fRequestChance",
 
         "6. Ordnance effects\u001fLongerFireMissions",
         "6. Ordnance effects\u001fLongerSmokeEffects",
@@ -140,8 +151,8 @@ internal static class SettingsCatalog
         "6. Ordnance effects\u001fEnhancedFragmentation",
         "6. Ordnance effects\u001fSmallExplosionAiThrowForceMultiplier",
 
-        "6b. Aircraft safety\u001fSafeAttackRuns",
-        "6b. Aircraft safety\u001fThreatEvasion",
+        "AI - Support coordination - Aircraft\u001fSafeAttackRuns",
+        "AI - Support coordination - Aircraft\u001fThreatEvasion",
 
         "6c. Aircraft flight physics\u001fEnabled",
         "6c. Aircraft flight physics\u001fRealismStrength",
@@ -169,11 +180,14 @@ internal static class SettingsCatalog
 
         "7a. Player suppression effects\u001fVignetteMultiplier",
         "7a. Player suppression effects\u001fWeaponWobbleMultiplier",
+        "7a. Player suppression effects\u001fNearMissRadiusMultiplier",
+        "7a. Player suppression effects\u001fBlurEnabled",
+        "7a. Player suppression effects\u001fBlurStrength",
         "7a. Player suppression effects\u001fShowDirectionMarker",
 
         "7b. AI animation restraint\u001fLeaderOnlyOrderGestures",
 
-        "7c. AI battle chatter\u001fEnabled",
+        "AI - Infantry tactics - Battle chatter\u001fEnabled",
 
         "7d. Audio balance\u001fEnabled",
         "7d. Audio balance\u001fVehicleEngineSound",
@@ -185,12 +199,18 @@ internal static class SettingsCatalog
 
         "7e. First-person view\u001fPlayerShadowEnabled",
         "7e. First-person view\u001fHoldBreathZoomMultiplier",
+        "7e. First-person view\u001fBinocularsEnabled",
+        "7e. First-person view\u001fBinocularZoomMultiplier",
+        "7e. First-person view\u001fFreeLookEnabled",
+        "7e. First-person view\u001fFreeLookHorizontalArcDegrees",
+        "7e. First-person view\u001fCompassAlwaysVisible",
+        "7e. First-person view\u001fCompassUseMils",
 
         "7f. Multiplayer nameplates\u001fKeepPlayerNamesWithHudDisabled",
 
         "7g. AI ragdoll physics\u001fAiRagdollWeightMultiplier",
 
-        "8. Diagnostics\u001fVerboseLogging"
+        "AI - Diagnostics\u001fVerboseLogging"
     };
 
     internal static IReadOnlyList<MenuSetting> All { get; private set; } = Array.Empty<MenuSetting>();
@@ -203,6 +223,8 @@ internal static class SettingsCatalog
         foreach (var entry in Settings.GetConfigEntries())
         {
             if (entry.SettingType != typeof(bool) && entry.SettingType != typeof(int) && entry.SettingType != typeof(float))
+                continue;
+            if (IsMigrationOnlyEntry(entry))
                 continue;
 
             var id = entry.Definition.Section + "\u001f" + entry.Definition.Key;
@@ -224,6 +246,12 @@ internal static class SettingsCatalog
     internal static string CategoryName(SettingsMenuCategory category) => category switch
     {
         SettingsMenuCategory.QuickSetup => "Quick Setup",
+        SettingsMenuCategory.AttackPostureBonuses => "AI / Attack Bonuses",
+        SettingsMenuCategory.Commander => "AI / Commander",
+        SettingsMenuCategory.InfantryTactics => "AI / Infantry Tactics",
+        SettingsMenuCategory.VehicleTactics => "AI / Vehicle Tactics",
+        SettingsMenuCategory.SupportCoordination => "AI / Support",
+        SettingsMenuCategory.AiDiagnostics => "AI / Diagnostics",
         SettingsMenuCategory.BalanceAndAi => "Balance & AI",
         SettingsMenuCategory.Infantry => "Infantry",
         SettingsMenuCategory.Vehicles => "Vehicles",
@@ -237,7 +265,29 @@ internal static class SettingsCatalog
         _ => category.ToString()
     };
 
-    internal static string CleanSectionName(string section) => SectionPrefix.Replace(section, string.Empty);
+    internal static string CleanSectionName(string section)
+    {
+        if (section.Equals("AI - Attack posture bonuses", StringComparison.Ordinal))
+            return "Attack Posture Bonuses";
+        if (section.Equals("AI - Commander", StringComparison.Ordinal))
+            return "Commander";
+        if (section.StartsWith("AI - Commander - ", StringComparison.Ordinal))
+            return Capitalize(section[17..]);
+        if (section.Equals("AI - Infantry tactics", StringComparison.Ordinal))
+            return "Infantry Tactics";
+        if (section.StartsWith("AI - Infantry tactics - ", StringComparison.Ordinal))
+            return Capitalize(section[24..]);
+        if (section.Equals("AI - Vehicle tactics", StringComparison.Ordinal))
+            return "Vehicle Tactics";
+        if (section.Equals("AI - Support coordination", StringComparison.Ordinal))
+            return "Support Coordination";
+        if (section.StartsWith("AI - Support coordination - ", StringComparison.Ordinal))
+            return Capitalize(section[28..]);
+        if (section.Equals("AI - Diagnostics", StringComparison.Ordinal))
+            return "Diagnostics";
+
+        return SectionPrefix.Replace(section, string.Empty);
+    }
 
     internal static string Humanize(string key)
     {
@@ -304,9 +354,9 @@ internal static class SettingsCatalog
 
         return key switch
         {
-        "AttackingForceAccuracySpreadMultiplier" or
-        "AttackingTankAdditionalAccuracySpreadMultiplier" => ("more accurate", "less accurate"),
-        "AttackingForceSuppressionReceivedMultiplier" => ("harder to pin", "easier to pin"),
+        "AttackPostureAccuracySpreadMultiplier" or
+        "AttackPostureTankAccuracySpreadMultiplier" => ("more accurate", "less accurate"),
+        "AttackPostureSuppressionReceivedMultiplier" => ("harder to pin", "easier to pin"),
 
         "HorizontalFovDegrees" => ("narrower vision", "wider vision"),
         "CloseTargetAcquisitionSeconds" or
@@ -317,13 +367,6 @@ internal static class SettingsCatalog
 
         "ImmediateFireDistanceMeters" => ("instant fire closer", "instant fire farther"),
         "CoverSearchRadiusMeters" => ("search nearer cover", "search farther cover"),
-        "CoverCandidateLimit" => ("fewer cover checks", "more cover checks"),
-        "CoverOccupancyRadiusMeters" => ("tighter cover spacing", "wider cover spacing"),
-        "DecisionIntervalSeconds" => ("recheck more often", "recheck less often"),
-        "MoveCommitSeconds" => ("reconsider sooner", "commit longer"),
-        "RelocationCooldownSeconds" => ("relocate sooner", "relocate less often"),
-        "MinimumCoverHoldSeconds" => ("leave cover sooner", "hold cover longer"),
-        "StandingCoverScorePenalty" => ("allow standing cover", "avoid standing cover"),
         "EngagementHaltDistanceMeters" => ("halt only closer", "halt from farther"),
         "MaximumAttackCombatHaltSeconds" => ("push sooner under fire", "hold and fire longer"),
         "MountedGunnerRiseSettleSeconds" => ("fire sooner", "wait longer to fire"),
@@ -366,6 +409,7 @@ internal static class SettingsCatalog
         "AwarenessDistanceMeters" => ("react only closer", "react from farther"),
         "RetreatDistanceMeters" => ("hide only closer", "hide from farther"),
         "EscapeMoveMeters" => ("smaller cover search", "larger cover search"),
+        "LauncherMaximumEngagementDistanceMeters" => ("launchers fire closer", "launchers fire farther"),
         "StopAndEngageDistanceMeters" => ("stop only closer", "stop from farther"),
         "ReverseDistanceMeters" => ("reverse only closer", "reverse from farther"),
         "ReverseDurationSeconds" => ("shorter reverse", "longer reverse"),
@@ -438,6 +482,12 @@ internal static class SettingsCatalog
         "HitDecalDurationSeconds" => ("decals clear sooner", "decals stay longer"),
         "VignetteMultiplier" => ("weaker dark vignette", "stronger dark vignette"),
         "WeaponWobbleMultiplier" => ("less weapon wobble", "more weapon wobble"),
+        "NearMissRadiusMultiplier" => ("smaller near-miss radius", "larger near-miss radius"),
+        "BlurStrength" => ("weaker suppression blur", "stronger suppression blur"),
+        "WoundRadiusMeters" => ("wounds affect closer AI", "wounds affect farther AI"),
+        "WoundSuppression" => ("weaker wound shock", "stronger wound shock"),
+        "DeathRadiusMeters" => ("deaths affect closer AI", "deaths affect farther AI"),
+        "DeathSuppression" => ("weaker death shock", "stronger death shock"),
         "LeaderOrderGestureCooldownSeconds" => ("gesture more often", "gesture less often"),
         "IndividualCooldownSeconds" => ("soldier talks more", "soldier talks less"),
         "NewContactCalloutChance" or
@@ -454,6 +504,8 @@ internal static class SettingsCatalog
         "DistantReverbAmount" => ("drier distant sound", "more distant reverb"),
         "PlayerFootstepVolumeMultiplier" => ("quieter player footsteps", "louder player footsteps"),
         "HoldBreathZoomMultiplier" => ("weaker hold-breath zoom", "stronger hold-breath zoom"),
+        "BinocularZoomMultiplier" => ("wider binocular view", "stronger binocular zoom"),
+        "FreeLookHorizontalArcDegrees" => ("narrower freelook arc", "wider freelook arc"),
         "AiRagdollWeightMultiplier" => ("native body weight", "heavier dead bodies"),
 
             _ => ("smaller effect", "larger effect")
@@ -462,6 +514,19 @@ internal static class SettingsCatalog
 
     private static SettingsMenuCategory CategoryFor(string section)
     {
+        if (section.StartsWith("AI - Attack posture", StringComparison.Ordinal))
+            return SettingsMenuCategory.AttackPostureBonuses;
+        if (section.StartsWith("AI - Commander", StringComparison.Ordinal))
+            return SettingsMenuCategory.Commander;
+        if (section.StartsWith("AI - Infantry tactics", StringComparison.Ordinal))
+            return SettingsMenuCategory.InfantryTactics;
+        if (section.StartsWith("AI - Vehicle tactics", StringComparison.Ordinal))
+            return SettingsMenuCategory.VehicleTactics;
+        if (section.StartsWith("AI - Support coordination", StringComparison.Ordinal))
+            return SettingsMenuCategory.SupportCoordination;
+        if (section.StartsWith("AI - Diagnostics", StringComparison.Ordinal))
+            return SettingsMenuCategory.AiDiagnostics;
+
         if (section.StartsWith("0.", StringComparison.Ordinal) || section.StartsWith("1", StringComparison.Ordinal))
             return SettingsMenuCategory.BalanceAndAi;
         if (section.StartsWith("2", StringComparison.Ordinal) || section.StartsWith("3", StringComparison.Ordinal))
@@ -488,5 +553,19 @@ internal static class SettingsCatalog
     }
 
     private static bool HasDedicatedCategory(string section) =>
-        section.StartsWith("7", StringComparison.Ordinal);
+        IsUnifiedAiSection(section) || section.StartsWith("7", StringComparison.Ordinal);
+
+    private static bool IsUnifiedAiSection(string section) =>
+        section.StartsWith("AI - Attack posture", StringComparison.Ordinal) ||
+        section.StartsWith("AI - Commander", StringComparison.Ordinal) ||
+        section.StartsWith("AI - Infantry tactics", StringComparison.Ordinal) ||
+        section.StartsWith("AI - Vehicle tactics", StringComparison.Ordinal) ||
+        section.StartsWith("AI - Support coordination", StringComparison.Ordinal) ||
+        section.StartsWith("AI - Diagnostics", StringComparison.Ordinal);
+
+    private static bool IsMigrationOnlyEntry(ConfigEntryBase entry) =>
+        (entry.Description.Description ?? string.Empty).StartsWith("Legacy ", StringComparison.OrdinalIgnoreCase);
+
+    private static string Capitalize(string text) =>
+        string.IsNullOrEmpty(text) ? text : char.ToUpperInvariant(text[0]) + text[1..];
 }

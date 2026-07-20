@@ -14,7 +14,7 @@ internal static class ExposedReloadPosture
 
         try
         {
-            if (!soldier.IsAlive || !soldier.IsAI() || soldier.IsFPSPlayer() ||
+            if (!soldier.IsAlive || !AiOwnership.IsAutonomous(soldier) ||
                 !soldier.IsReloading ||
                 soldier.IsOnVehicle() || soldier.IsOnFire ||
                 soldier.m_pose != SoldierPose.Crouch ||
@@ -39,14 +39,7 @@ internal static class ExposedReloadPosture
             var state = AiState.GetContactState(soldierId);
             state.ExposedReloadProneOwned = true;
             state.FireRestorePending = true;
-            ai.allowFireAtEnemy = false;
-            ai.aimingEnemy = false;
-            soldier.StopFire();
-            ContactResponse.StopDangerMovement(
-                ai,
-                soldier,
-                SoldierPose.Prone,
-                UnityEngine.Time.deltaTime);
+            GroundAiDirector.ExecuteRequiredActionHalt(soldier);
         }
         catch
         {
@@ -81,10 +74,7 @@ internal static class ExposedReloadPosture
             // seated. Other tactical systems must not raise the soldier to engage
             // an enemy in the middle of this vulnerable action.
             state.FireRestorePending = true;
-            ai.allowFireAtEnemy = false;
-            ai.aimingEnemy = false;
-            soldier.StopFire();
-            ContactResponse.StopDangerMovement(ai, soldier, SoldierPose.Prone, deltaTime);
+            GroundAiDirector.ExecuteRequiredActionHalt(soldier);
             return true;
         }
         catch
@@ -119,16 +109,12 @@ internal static class ProneMovingActionRestriction
             // A player must deliberately stop crawling before manipulating a
             // weapon or dressing a wound. An AI cannot make that extra input, so
             // stop its crawl here and let the urgent action begin immediately.
-            if (!soldier.IsAI() || soldier.IsFPSPlayer())
+            if (!AiOwnership.IsAutonomous(soldier))
                 return false;
             if (!MultiplayerAuthority.CanMutateGameplay())
                 return true;
 
-            var ai = soldier.aiController;
-            if (ai != null)
-                ai.moveCharacter = false;
-            soldier.isSprinting = false;
-            soldier.StopMove(SoldierPose.Prone, UnityEngine.Time.deltaTime);
+            GroundAiDirector.ExecuteRequiredActionHalt(soldier);
             return true;
         }
         catch

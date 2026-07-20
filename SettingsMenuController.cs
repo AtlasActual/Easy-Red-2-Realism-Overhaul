@@ -26,7 +26,10 @@ internal sealed class SettingsMenuController : MonoBehaviour
     private static readonly Color DangerColor = new(0.80f, 0.25f, 0.20f, 1f);
     private static readonly Color DisabledColor = new(0.052f, 0.065f, 0.076f, 1f);
 
-    private readonly SettingsMenuCategory[] _categories = Enum.GetValues<SettingsMenuCategory>();
+    private readonly SettingsMenuCategory[] _categories = Enum.GetValues<SettingsMenuCategory>()
+        .Where(category => category == SettingsMenuCategory.QuickSetup ||
+                           SettingsCatalog.All.Any(setting => setting.Category == category))
+        .ToArray();
 
     private SettingsDraft? _draft;
     private SettingsMenuCategory _selectedCategory = SettingsMenuCategory.QuickSetup;
@@ -231,9 +234,9 @@ internal sealed class SettingsMenuController : MonoBehaviour
 
         var categoryTop = rect.y + S(42f);
         var categoryBottom = resetCategoryRect.y - S(14f);
-        var categoryGap = S(6f);
+        var categoryGap = S(4f);
         var categoryHeight = (categoryBottom - categoryTop - categoryGap * (_categories.Length - 1)) / _categories.Length;
-        categoryHeight = Mathf.Clamp(categoryHeight, S(31f), S(47f));
+        categoryHeight = Mathf.Clamp(categoryHeight, S(24f), S(43f));
 
         for (var index = 0; index < _categories.Length; index++)
         {

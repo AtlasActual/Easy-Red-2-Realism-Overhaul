@@ -26,8 +26,38 @@ internal static class GenericGunTracerPatch
 
 }
 
+[HarmonyPatch(typeof(SoldierAI), nameof(SoldierAI.UseBestWearedWeaponCheck))]
+internal static class SoldierAiLauncherSelectionPatch
+{
+    [HarmonyPrefix]
+    private static bool Prefix(SoldierAI __instance)
+    {
+        try
+        {
+            if (!MultiplayerAuthority.CanMutateGameplay())
+                return true;
+
+            var soldier = __instance.GetSoldier();
+            if (!AiOwnership.IsAutonomous(soldier))
+                return true;
+
+            var alternateGun = soldier.GetHeldGun(1);
+            return alternateGun == null ||
+                   !HandheldWeaponClassifier.ShouldDeferLauncherSelection(
+                       soldier, __instance, alternateGun);
+        }
+        catch
+        {
+            // Preserve the base game's weapon selection for unknown or modded loadouts.
+            return true;
+        }
+    }
+}
+
 internal static class HandheldWeaponClassifier
 {
+    private const int MaximumLauncherMuzzleVelocity = 300;
+
     private static readonly string[] MachineGunIds =
     {
         "machinegun", "machine_gun", "heavy_mg", "light_mg", "_hmg", "_lmg",
@@ -111,7 +141,7 @@ internal static class HandheldWeaponClassifier
         try
         {
             var gun = soldier.GetHeldGun();
-            if (gun == null || !IsSubmachineGun(gun))
+            if (gun == null || !TryGetMaximumEngagementDistance(gun, out var maximumDistance))
             {
                 ReleaseRangeInhibition(state, soldier, ai);
                 return;
@@ -127,8 +157,7 @@ internal static class HandheldWeaponClassifier
 
             var offset = targetPosition - soldier.transform.position;
             offset.y = 0f;
-            if (offset.sqrMagnitude <= Settings.SmgMaximumEngagementDistance.Value *
-                Settings.SmgMaximumEngagementDistance.Value)
+            if (offset.sqrMagnitude <= maximumDistance * maximumDistance)
             {
                 ReleaseRangeInhibition(state, soldier, ai);
                 return;
@@ -136,16 +165,39 @@ internal static class HandheldWeaponClassifier
 
             state.FireInhibitedByRange = true;
             state.FireRestorePending = true;
-            ai.allowFireAtEnemy = false;
-            ai.aimingEnemy = false;
-            ai.targetInWeaponRange = false;
-            soldier.StopFire();
+            GroundAiDirector.ExecuteSoldierFireInhibition(
+                ai, soldier, clearWeaponRange: true);
         }
         catch
         {
             // Unknown or modded weapons default to the base game's behavior.
             ReleaseRangeInhibition(state, soldier, ai);
         }
+    }
+
+    internal static bool ShouldDeferLauncherSelection(
+        Soldier soldier,
+        SoldierAI ai,
+        GenericGun candidateGun)
+    {
+        var isLauncher = IsAntiTankLauncher(candidateGun);
+        var target = TargetAcquisition.ResolveObservedTarget(ai, soldier);
+        var hasTarget = TargetAcquisition.TryGetTargetSnapshot(
+            target, out _, out var targetPosition);
+        if (!hasTarget)
+        {
+            return LauncherSelectionDecisionCore.ShouldDeferSelection(
+                isLauncher, false, 0f,
+                Settings.LauncherMaximumEngagementDistance.Value);
+        }
+
+        var offset = targetPosition - soldier.transform.position;
+        offset.y = 0f;
+        return LauncherSelectionDecisionCore.ShouldDeferSelection(
+            isLauncher,
+            true,
+            offset.magnitude,
+            Settings.LauncherMaximumEngagementDistance.Value);
     }
 
     private static void ReleaseRangeInhibition(
@@ -156,9 +208,42 @@ internal static class HandheldWeaponClassifier
         if (!state.FireInhibitedByRange)
             return;
 
-        ai.targetInWeaponRange = true;
+        if (!state.FireInhibitedByArmoredTarget)
+            ai.targetInWeaponRange = true;
         state.FireInhibitedByRange = false;
         ContactResponse.RestoreFireAfterOwnedInhibition(ai, soldier);
+    }
+
+    private static bool TryGetMaximumEngagementDistance(
+        GenericGun gun,
+        out float maximumDistance)
+    {
+        if (IsSubmachineGun(gun))
+        {
+            maximumDistance = Settings.SmgMaximumEngagementDistance.Value;
+            return true;
+        }
+
+        if (IsAntiTankLauncher(gun))
+        {
+            maximumDistance = Settings.LauncherMaximumEngagementDistance.Value;
+            return true;
+        }
+
+        maximumDistance = 0f;
+        return false;
+    }
+
+    private static bool IsAntiTankLauncher(GenericGun gun)
+    {
+        // The game exposes AP capability but does not distinguish launchers from
+        // anti-tank rifles. Muzzle velocity supplies that missing distinction:
+        // rockets and spigot/rifle grenades are low velocity, while AT rifles are not.
+        if (!gun.IsAtWeapon())
+            return false;
+
+        var muzzleVelocity = gun.ActualMuzzleVelocity;
+        return muzzleVelocity > 0 && muzzleVelocity <= MaximumLauncherMuzzleVelocity;
     }
 
     private static bool IsSubmachineGun(GenericGun gun)
@@ -202,10 +287,8 @@ internal static class InfantryAntiArmorFireDiscipline
         var newlyInhibited = !state.FireInhibitedByArmoredTarget;
         state.FireInhibitedByArmoredTarget = true;
         state.FireRestorePending = true;
-        ai.allowFireAtEnemy = false;
-        ai.aimingEnemy = false;
-        ai.targetInWeaponRange = false;
-        soldier.StopFire();
+        GroundAiDirector.ExecuteSoldierFireInhibition(
+            ai, soldier, clearWeaponRange: true);
         if (newlyInhibited)
             AiState.Trace($"Anti-armor discipline: soldier {soldier.GetInstanceID()} withholding ineffective small-arms fire");
     }

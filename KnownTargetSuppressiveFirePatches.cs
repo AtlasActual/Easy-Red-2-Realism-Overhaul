@@ -127,7 +127,7 @@ internal static class KnownTargetSuppressiveFire
             soldier.RotateToward(fireDirection, Time.fixedDeltaTime);
             if (!soldier.IsAiming)
             {
-                soldier.SetAiming(true);
+                GroundAiDirector.ExecuteSoldierAim(soldier, true);
                 state.AimingOwned = true;
             }
 
@@ -258,8 +258,8 @@ internal static class KnownTargetSuppressiveFire
             !Settings.ContactResponseEnabled.Value ||
             !Settings.PerceptionEnabled.Value ||
             !MultiplayerAuthority.CanMutateGameplay() ||
-            soldier == null || !soldier.IsAlive || !soldier.IsAI() ||
-            soldier.IsFPSPlayer() || soldier.IsOnVehicle() || soldier.IsOnFire ||
+            soldier == null || !soldier.IsAlive || !AiOwnership.IsAutonomous(soldier) ||
+            soldier.IsOnVehicle() || soldier.IsOnFire ||
             soldier.IsMoving(0.2f) || ContactResponse.IsActualCharge(soldier) ||
             ContactResponse.IsRelocating(soldierId) || ContactResponse.IsPinned(soldierId) ||
             IncomingFireAwareness.HasActiveCue(soldierId, now) ||
@@ -363,7 +363,7 @@ internal static class KnownTargetSuppressiveFire
         ReleaseOwnedTrigger(soldier, state);
 
         if (state.AimingOwned && !preserveNativeAim && soldier.IsAiming)
-            soldier.SetAiming(false);
+            GroundAiDirector.ExecuteSoldierAim(soldier, false);
 
         state.Active = false;
         state.AimingOwned = false;

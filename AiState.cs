@@ -66,6 +66,7 @@ internal static class AiState
         BattleChatter.RemoveSoldier(soldier);
         MountedGunnerSuppression.RemoveSoldier(id);
         ContactKnowledge.RemoveSoldier(soldier);
+        GroundAiDirector.ReleaseSoldier(id);
     }
 
     internal static bool CooldownReady(Dictionary<int, float> map, int id, float now)
@@ -77,24 +78,58 @@ internal static class AiState
     internal static bool IsFlameEvading(int soldierId, float now)
         => FlameEvasionUntil.TryGetValue(soldierId, out var until) && now < until;
 
-    internal static bool CoverReservedByOther(IntPtr coverId, int soldierId, float now)
+    internal static bool CoverReservedByOther(
+        IntPtr coverId,
+        Vector3 coverPosition,
+        int soldierId,
+        float now,
+        float minimumSpacing)
     {
-        if (!CoverReservations.TryGetValue(coverId, out var reservation))
-            return false;
-
-        if (reservation.ExpiresAt <= now)
+        List<IntPtr>? expired = null;
+        var reservedByOther = false;
+        foreach (var pair in CoverReservations)
         {
-            CoverReservations.Remove(coverId);
-            return false;
+            var reservation = pair.Value;
+            if (reservation.ExpiresAt <= now)
+            {
+                (expired ??= new List<IntPtr>()).Add(pair.Key);
+                continue;
+            }
+
+            if (reservation.SoldierId == soldierId)
+                continue;
+
+            if (pair.Key == coverId ||
+                InfantryCoverDecisionCore.CoverPositionsConflict(
+                    new MapPoint(coverPosition.x, coverPosition.z),
+                    new MapPoint(reservation.Position.x, reservation.Position.z),
+                    minimumSpacing))
+            {
+                reservedByOther = true;
+            }
         }
 
-        return reservation.SoldierId != soldierId;
+        if (expired != null)
+        {
+            foreach (var expiredCoverId in expired)
+                CoverReservations.Remove(expiredCoverId);
+        }
+
+        return reservedByOther;
     }
 
-    internal static void ReserveCover(IntPtr coverId, int soldierId, float expiresAt)
+    internal static void ReserveCover(
+        IntPtr coverId,
+        Vector3 coverPosition,
+        int soldierId,
+        float expiresAt)
     {
+        if (coverId == IntPtr.Zero)
+            return;
+
         ReleaseCoverReservation(soldierId);
-        CoverReservations[coverId] = new CoverReservation(soldierId, expiresAt);
+        CoverReservations[coverId] = new CoverReservation(
+            soldierId, expiresAt, coverPosition);
     }
 
     internal static void ReleaseCoverReservation(int soldierId)
@@ -127,7 +162,10 @@ internal static class AiState
     }
 }
 
-internal readonly record struct CoverReservation(int SoldierId, float ExpiresAt);
+internal readonly record struct CoverReservation(
+    int SoldierId,
+    float ExpiresAt,
+    Vector3 Position);
 
 internal readonly record struct GunfireCue(
     IntPtr ShooterToken,

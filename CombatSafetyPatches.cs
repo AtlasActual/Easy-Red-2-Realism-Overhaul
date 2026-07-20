@@ -5,6 +5,18 @@ namespace ER2RealismOverhaul;
 
 internal static class CombatSafety
 {
+    private const float FiringLaneCacheSeconds = 0.06f;
+    private static readonly Dictionary<int, FiringLaneSample> FiringLaneSamples = new();
+    private static float _nextFiringLaneCacheClearAt;
+
+    private readonly record struct FiringLaneSample(
+        Vector3 Origin,
+        Vector3 Direction,
+        float LaneRadius,
+        float FallbackDistance,
+        float ExpiresAt,
+        bool FriendlyPresent);
+
     internal static bool FriendlyInFiringLane(
         Soldier shooter,
         Vector3 origin,
@@ -17,8 +29,35 @@ internal static class CombatSafety
 
         try
         {
-            return FriendlyInFiringLaneCore(
+            var now = Time.time;
+            if (now >= _nextFiringLaneCacheClearAt)
+            {
+                FiringLaneSamples.Clear();
+                _nextFiringLaneCacheClearAt = now + 10f;
+            }
+
+            var normalizedDirection = direction.normalized;
+            var shooterId = shooter.GetInstanceID();
+            if (FiringLaneSamples.TryGetValue(shooterId, out var cached) &&
+                now < cached.ExpiresAt &&
+                (cached.Origin - origin).sqrMagnitude <= 0.0625f &&
+                Vector3.Dot(cached.Direction, normalizedDirection) >= 0.9995f &&
+                Mathf.Approximately(cached.LaneRadius, laneRadius) &&
+                Mathf.Approximately(cached.FallbackDistance, fallbackDistance))
+            {
+                return cached.FriendlyPresent;
+            }
+
+            var friendlyPresent = FriendlyInFiringLaneCore(
                 shooter, origin, direction, laneRadius, fallbackDistance);
+            FiringLaneSamples[shooterId] = new FiringLaneSample(
+                origin,
+                normalizedDirection,
+                laneRadius,
+                fallbackDistance,
+                now + FiringLaneCacheSeconds,
+                friendlyPresent);
+            return friendlyPresent;
         }
         catch (Il2CppInterop.Runtime.Il2CppException)
         {
@@ -170,7 +209,7 @@ internal static class HandheldFriendlyFirePatch
         }
 
         var shooter = user as Soldier;
-        if (shooter == null || !shooter.IsAI() || shooter.IsFPSPlayer())
+        if (!AiOwnership.IsAutonomous(shooter))
             return true;
 
         if (InfantryAntiArmorFireDiscipline.ShouldWithhold(shooter, __instance))
@@ -215,7 +254,7 @@ internal static class MountedFriendlyFirePatch
         }
 
         var shooter = user as Soldier;
-        if (shooter == null || !shooter.IsAI() || shooter.IsFPSPlayer())
+        if (!AiOwnership.IsAutonomous(shooter))
             return true;
 
         var isAircraft = shooter.GetCurrentVehicle() is VehiclePlane;
@@ -227,7 +266,7 @@ internal static class MountedFriendlyFirePatch
             return true;
         }
 
-        __instance.StopFire();
+        MountedGunnerSuppression.StopTurretGun(__instance);
         return false;
     }
 }
@@ -251,7 +290,7 @@ internal static class InvalidTurretFireStatePatch
 
         try
         {
-            __instance?.StopFire();
+            MountedGunnerSuppression.StopTurretGun(__instance);
         }
         catch
         {
@@ -278,7 +317,7 @@ internal static class SafeAiGrenadeThrowPatch
     {
         if (!Settings.SafeAiGrenadeThrowsEnabled.Value ||
             !MultiplayerAuthority.CanMutateGameplay() ||
-            __instance == null || !__instance.IsAI() || __instance.IsFPSPlayer())
+            !AiOwnership.IsAutonomous(__instance))
         {
             return true;
         }
@@ -326,13 +365,7 @@ internal static class SafeAiGrenadeThrowPatch
         // A stationary soldier already has a plausible throwing platform, whether
         // it is native cover, a trench, or open ground. Only an active assault gets
         // permission to halt movement for the throw.
-        if (moving)
-        {
-            __instance.StopMove(SoldierPose.Crouch, Time.deltaTime);
-            __instance.SetPose(SoldierPose.Crouch);
-        }
-
-        __instance.StopFire();
+        GroundAiDirector.ExecuteGrenadeSafetyHalt(__instance, moving);
         AiState.NextGrenadeThrow[id] = now + Settings.GrenadeCooldownSeconds.Value;
         var throwContext = moving
             ? "assault halt"

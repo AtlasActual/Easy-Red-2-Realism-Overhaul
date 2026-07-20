@@ -14,6 +14,7 @@ namespace ER2RealismOverhaul;
 internal static class CommanderMvp
 {
     private const float PlanningCadenceSeconds = 8f;
+    private const float OwnedAssetRefreshCadenceSeconds = 0.5f;
     private const float SmokeScreenDelaySeconds = 10f;
     private const float SmokeBypassSeconds = 16f;
     private const float SideSmokeSpacingSeconds = 60f;
@@ -36,6 +37,8 @@ internal static class CommanderMvp
     private const float MaximumCommanderCoverSearchRadius = 25f;
     private const int CommanderCoverCandidateLimit = 16;
     private const float CommanderStandingCoverPenalty = 225f;
+    private const float DefensiveHoldMarginMeters = 12f;
+    private const float DefensiveArrivalMarginMeters = 35f;
 
     private static readonly List<Squad> KnownSquads = new();
     private static readonly List<ContactReport> ContactReports = new();
@@ -48,6 +51,7 @@ internal static class CommanderMvp
     private static readonly SideState Defenders = new(false);
 
     private static float _nextPlanAt;
+    private static float _nextOwnedAssetRefreshAt;
     private static bool _updating;
     private static string _supportSelectionFaction = string.Empty;
 
@@ -68,7 +72,11 @@ internal static class CommanderMvp
             return;
         }
 
-        RefreshOwnedAssets(now);
+        if (now >= _nextOwnedAssetRefreshAt || now >= _nextPlanAt)
+        {
+            _nextOwnedAssetRefreshAt = now + OwnedAssetRefreshCadenceSeconds;
+            RefreshOwnedAssets(now);
+        }
         if (now < _nextPlanAt)
             return;
 
@@ -83,6 +91,8 @@ internal static class CommanderMvp
                 ReleaseOwnership();
                 return;
             }
+
+            GroundAiDirector.BeginCommanderPlanning();
 
             CollectCommandSquads(KnownSquads);
             var invaderSquads = new List<SquadInfo>();
@@ -139,9 +149,11 @@ internal static class CommanderMvp
 
             foreach (var stale in LastOrders.Keys.Where(id => !OwnedSquads.Contains(id)).ToArray())
                 LastOrders.Remove(stale);
+            GroundAiDirector.CompleteCommanderPlanning();
         }
         catch (Exception ex)
         {
+            GroundAiDirector.AbortCommanderPlanning();
             ReleaseOwnership();
             Plugin.LogSource.LogWarning($"Commander update failed closed: {ex.Message}");
         }
@@ -160,7 +172,7 @@ internal static class CommanderMvp
         }
 
         var id = ContactKnowledge.GetSquadId(squad);
-        if (!OwnedSquads.Contains(id))
+        if (!GroundAiDirector.OwnsSquad(squad))
             return false;
 
         if (ScriptLockedSquads.Contains(id) || HasPlayerMember(squad) || HasScriptAssignedMember(squad))
@@ -192,8 +204,15 @@ internal static class CommanderMvp
         // legacy random-support patch cannot race the first planning tick.
         return squad.fullySpawned && !squad.IsVehicleCrew && squad.HasAliveAIMembers() &&
                !ScriptLockedSquads.Contains(id) && !HasPlayerMember(squad) &&
-               !HasScriptAssignedMember(squad);
+               !HasScriptAssignedMember(squad) &&
+               GroundAiDirector.ClaimSupportChannel(squad, Time.time);
     }
+
+    internal static bool IsMissionScriptLocked(int squadId)
+        => ScriptLockedSquads.Contains(squadId);
+
+    internal static bool HasPlayerOwnership(Squad squad)
+        => HasPlayerMember(squad) || HasScriptAssignedMember(squad);
 
     internal static void MarkMissionScripted(Squad? squad)
     {
@@ -202,6 +221,7 @@ internal static class CommanderMvp
 
         var id = ContactKnowledge.GetSquadId(squad);
         ScriptLockedSquads.Add(id);
+        GroundAiDirector.MarkMissionScripted(squad);
         CancelSupportForSquad(Invaders, id);
         CancelSupportForSquad(Defenders, id);
         CancelAircraftForCrew(Invaders, id);
@@ -222,6 +242,8 @@ internal static class CommanderMvp
         Invaders.ResetOperation();
         Defenders.ResetOperation();
         _nextPlanAt = 0f;
+        _nextOwnedAssetRefreshAt = 0f;
+        GroundAiDirector.ClearRuntimeState();
     }
 
     internal static void ResetBattle()
@@ -241,11 +263,13 @@ internal static class CommanderMvp
         CancelSideAssets(Invaders);
         CancelSideAssets(Defenders);
         OwnedSquads.Clear();
+        GroundAiDirector.ReleaseAllCommanderLeases();
         OwnedArmorVehicles.Clear();
         LastOrders.Clear();
         Invaders.ResetOperation();
         Defenders.ResetOperation();
         _nextPlanAt = 0f;
+        _nextOwnedAssetRefreshAt = 0f;
 
         if (released == null || released.Count == 0 || !BattleManager.IsBattleActive())
             return;
@@ -279,6 +303,7 @@ internal static class CommanderMvp
     private static void ReleaseSquad(int id)
     {
         OwnedSquads.Remove(id);
+        GroundAiDirector.ReleaseCommanderSquad(id);
         OwnedArmorVehicles.Remove(id);
         LastOrders.Remove(id);
     }
@@ -456,13 +481,17 @@ internal static class CommanderMvp
         side.AircraftTasks.Remove(aircraftId);
         try
         {
-            if (stamp.Ai != null)
-                stamp.Ai.CancelAttackingTarget();
+            if (stamp.Ai != null && stamp.Plane != null)
+            {
+                GroundAiDirector.ExecuteCommanderAircraftOrder(
+                    stamp.Ai, stamp.Plane, stamp.Ai.CancelAttackingTarget);
+            }
         }
         catch (Il2CppInterop.Runtime.ObjectCollectedException)
         {
             // The aircraft already despawned.
         }
+        GroundAiDirector.ReleaseCommanderAircraft(aircraftId);
     }
 
     private static void CancelSideAssets(SideState side)
@@ -513,7 +542,7 @@ internal static class CommanderMvp
             }
 
             var leader = squad.Leader;
-            if (leader == null || !leader.CanFight() || !leader.IsAI() || leader.IsFPSPlayer())
+            if (leader == null || !leader.CanFight() || !AiOwnership.IsAutonomous(leader))
                 return false;
 
             var id = ContactKnowledge.GetSquadId(squad);
@@ -604,7 +633,7 @@ internal static class CommanderMvp
             }
 
             var driver = vehicle.GetDriver();
-            if (driver == null || !driver.IsAI() || driver.IsFPSPlayer() || !driver.CanFight())
+            if (driver == null || !AiOwnership.IsAutonomous(driver) || !driver.CanFight())
                 return false;
 
             var suppressionTotal = 0f;
@@ -669,7 +698,7 @@ internal static class CommanderMvp
                 }
 
                 var pilot = plane.GetDriver();
-                if (pilot == null || !pilot.IsAI() || pilot.IsFPSPlayer() || !pilot.CanFight())
+                if (pilot == null || !AiOwnership.IsAutonomous(pilot) || !pilot.CanFight())
                     continue;
 
                 var faction = pilot.faction ?? plane.GetVehicleFaction() ?? string.Empty;
@@ -777,7 +806,7 @@ internal static class CommanderMvp
             squad.Leader == null || squad.Leader.GetCurrentVehicle() != vehicle ||
             mainSeat == null || gunner == null || mainGun == null ||
             gunner.GetCurrentVehicle() != vehicle || gunner.joinedSquad != squad ||
-            !gunner.IsAI() || gunner.IsFPSPlayer() || !gunner.CanFight() ||
+            !AiOwnership.IsAutonomous(gunner) || !gunner.CanFight() ||
             !mainGun.HasAnyAmmo())
         {
             return false;
@@ -937,6 +966,25 @@ internal static class CommanderMvp
                                 ? battle.IsInvaderFaction(securedFaction)
                                 : battle.IsDefenderFaction(securedFaction));
         var offensiveOperation = !securedBySide;
+        var faction = squads.FirstOrDefault()?.Faction ??
+                      tanks.FirstOrDefault()?.Faction ?? string.Empty;
+        var objectiveRevision = GroundAiDirector.RecordPosture(
+            faction,
+            objectiveId,
+            offensiveOperation ? StrategicPosture.Attack : StrategicPosture.Defend,
+            now);
+
+        // Fresh defensive reinforcements keep their native objective route until
+        // they reach the defended ground. Claiming them at fullySpawned used to
+        // replace that route at the first planning tick and strand them behind the
+        // objective. Existing ownership is retained only while defending the same
+        // objective, so an objective transition cannot bypass the arrival gate.
+        var continuingDefense = side.ObjectiveId == objectiveId && !side.Offensive;
+        var commandedSquads = offensiveOperation
+            ? squads.ToArray()
+            : squads.Where(squad => ShouldAssumeDefensiveCommand(
+                    squad, objectivePosition, objectiveRadius, continuingDefense))
+                .ToArray();
 
         if (side.ObjectiveId != objectiveId || side.Offensive != offensiveOperation)
         {
@@ -947,14 +995,20 @@ internal static class CommanderMvp
         var relevantReports = BuildPlannerReports(ContactReports, objectivePosition, objectiveRadius, now);
         var antiTankReports = BuildAntiTankReports(
             battle, side, ContactReports, objectivePosition, objectiveRadius, now);
-        var antiTankTask = CommanderPlannerCore.SelectAntiTankTask(
-            squads.Select(entry => entry.Snapshot).ToArray(),
-            squads.Where(entry => entry.HasAntiTank).Select(entry => entry.Id).ToArray(),
-            antiTankReports);
+        // Defensive anti-tank troops keep their fortifications; nearby static guns
+        // are staffed by StaticAntiTankStaffing instead of pulling a whole squad out
+        // of the objective area to hunt a report.
+        var antiTankTask = offensiveOperation
+            ? CommanderPlannerCore.SelectAntiTankTask(
+                commandedSquads.Select(entry => entry.Snapshot).ToArray(),
+                commandedSquads.Where(entry => entry.HasAntiTank)
+                    .Select(entry => entry.Id).ToArray(),
+                antiTankReports)
+            : null;
         var maneuverSquads = antiTankTask is { } task
-            ? squads.Where(entry => entry.Id != task.SquadId).ToArray()
-            : squads.ToArray();
-        var axes = BuildAxes(squads, tanks, relevantReports, objectivePosition, objectiveRadius);
+            ? commandedSquads.Where(entry => entry.Id != task.SquadId).ToArray()
+            : commandedSquads;
+        var axes = BuildAxes(commandedSquads, tanks, relevantReports, objectivePosition, objectiveRadius);
         var smokeRequired = ShouldRequireSmoke(relevantReports, objectivePosition, objectiveRadius) &&
                             offensiveOperation && !side.AttackLaunched;
         var smokeReady = !smokeRequired || side.SmokeBypassed ||
@@ -968,7 +1022,9 @@ internal static class CommanderMvp
             maneuverSquads.Select(entry => entry.Snapshot).ToArray(),
             relevantReports,
             axes.Select(axis => axis.Candidate).ToArray());
-        var provisional = CommanderPlannerCore.Plan(plannerInput);
+        var provisional = offensiveOperation
+            ? AttackerPlannerCore.Plan(plannerInput)
+            : DefenderPlannerCore.Plan(plannerInput);
         var operationalIds = provisional.Directives
             .Select(directive => directive.SquadId)
             .OrderBy(id => id)
@@ -1072,20 +1128,45 @@ internal static class CommanderMvp
         var armorAttackAuthorized = gate.AttackAuthorized ||
                                     offensiveOperation && side.AttackLaunched;
 
-        foreach (var squad in squads)
+        foreach (var squad in commandedSquads)
+        {
             nextOwned.Add(squad.Id);
+            var role = side.Roles.TryGetValue(squad.Id, out var assignedRole)
+                ? assignedRole
+                : CommanderRole.Reserve;
+            GroundAiDirector.LeaseCommanderSquad(
+                squad.Squad, objectiveRevision, role, objectivePosition, now);
+        }
         foreach (var tank in tanks)
         {
             nextOwned.Add(tank.SquadId);
             OwnedArmorVehicles[tank.SquadId] = tank.Vehicle;
+            GroundAiDirector.LeaseCommanderSquad(
+                tank.Squad,
+                objectiveRevision,
+                CommanderRole.SupportByFire,
+                objectivePosition,
+                now);
+            var armorRole = side.ArmorRoles.TryGetValue(tank.Id, out var assignedArmorRole)
+                ? assignedArmorRole.ToString()
+                : ArmorRole.Reserve.ToString();
+            GroundAiDirector.LeaseCommanderVehicle(
+                tank.Vehicle, objectiveRevision, armorRole, objectivePosition, now);
         }
 
-        IssueOrders(side, squads, objectiveId, objectivePosition, objectiveRadius,
+        IssueOrders(side, commandedSquads, objectiveId, objectivePosition, objectiveRadius,
             offensiveOperation, mainAxis, flankAxis, antiTankTask,
             gate.AttackAuthorized, gate.SmokeBlocked);
         IssueArmorOrders(side, tanks, objectiveId, objectivePosition, objectiveRadius,
             offensiveOperation, mainAxis, flankAxis, armorAttackAuthorized);
-        TaskAircraft(battle, side, aircraft, ContactReports, now);
+        TaskAircraft(
+            battle,
+            side,
+            aircraft,
+            ContactReports,
+            objectivePosition,
+            objectiveRadius,
+            now);
 
         var roleCounts = side.Roles.Values.GroupBy(role => role)
             .ToDictionary(group => group.Key, group => group.Count());
@@ -1100,6 +1181,7 @@ internal static class CommanderMvp
             $"R{RoleCount(roleCounts, CommanderRole.Reserve)}, " +
             $"ratio={gate.StrengthRatio:0.00}, suppression={gate.AverageSuppression:0.00}, " +
             $"reports={relevantReports.Count}, AT={antiTankSummary}, " +
+            $"arriving={squads.Count - commandedSquads.Length}, " +
             $"armor={tanks.Count}, aircraft={aircraft.Count}, " +
             $"attack={gate.AttackAuthorized}, armorAttack={armorAttackAuthorized}, " +
             $"smokeWait={gate.SmokeBlocked}, artilleryWait={artilleryBlocked}");
@@ -1807,8 +1889,8 @@ internal static class CommanderMvp
 
     private static bool SafeArtilleryCrewman(Soldier crewman, string faction)
     {
-        if (crewman == null || !crewman.IsAlive || !crewman.IsAI() ||
-            crewman.IsFPSPlayer() || !crewman.CanFight() ||
+        if (crewman == null || !crewman.IsAlive || !AiOwnership.IsAutonomous(crewman) ||
+            !crewman.CanFight() ||
             !ResourcesManager.IsSameFaction(crewman.faction, faction))
         {
             return false;
@@ -1968,6 +2050,8 @@ internal static class CommanderMvp
         SideState side,
         IReadOnlyList<AircraftInfo> aircraft,
         IReadOnlyList<ContactReport> reports,
+        Vector3 objectivePosition,
+        float objectiveRadius,
         float now)
     {
         var liveAircraftIds = new HashSet<int>(aircraft.Select(entry => entry.Id));
@@ -1986,6 +2070,13 @@ internal static class CommanderMvp
                 if (!AircraftStillCommanderSafe(plane.Ai, plane.Plane))
                 {
                     CancelAircraftTask(side, plane.Id, existing);
+                    continue;
+                }
+
+                if (!GroundAiDirector.LeaseCommanderAircraft(
+                        plane.Plane, existing.Position, now))
+                {
+                    side.AircraftTasks.Remove(plane.Id);
                     continue;
                 }
 
@@ -2010,6 +2101,8 @@ internal static class CommanderMvp
             {
                 if (usedTargets.Contains(report.TargetId) ||
                     !AircraftReportEligible(report, now) ||
+                    !AircraftReportRelevantToObjective(
+                        report, objectivePosition, objectiveRadius) ||
                     !TryResolveReportTarget(
                         report, battle, side.InvaderSide, out var target, out var targetPosition))
                 {
@@ -2040,11 +2133,21 @@ internal static class CommanderMvp
             if (selectedReport == null || selectedTarget == null)
                 continue;
 
+            if (!GroundAiDirector.LeaseCommanderAircraft(plane.Plane, selectedPosition, now))
+                continue;
+
             try
             {
-                plane.Ai.DoAttackTarget(selectedTarget);
-                if (plane.Ai.targetToAttack == null)
+                if (!GroundAiDirector.ExecuteCommanderAircraftOrder(
+                        plane.Ai, plane.Plane, () => plane.Ai.DoAttackTarget(selectedTarget)))
+                {
                     continue;
+                }
+                if (plane.Ai.targetToAttack == null)
+                {
+                    GroundAiDirector.ReleaseCommanderAircraft(plane.Id);
+                    continue;
+                }
 
                 var crew = plane.Ai.squadInside ?? plane.Plane.GetSquadInside();
                 var crewSquadId = crew != null ? ContactKnowledge.GetSquadId(crew) : 0;
@@ -2058,8 +2161,22 @@ internal static class CommanderMvp
             catch (Il2CppInterop.Runtime.ObjectCollectedException)
             {
                 // The report target despawned between resolution and tasking.
+                GroundAiDirector.ReleaseCommanderAircraft(plane.Id);
             }
         }
+    }
+
+    private static bool AircraftReportRelevantToObjective(
+        ContactReport report,
+        Vector3 objectivePosition,
+        float objectiveRadius)
+    {
+        // Interceptors may meet aircraft away from the ground operation. Bombing
+        // and strafing targets must remain part of the current objective fight.
+        return report.Kind == ContactKind.Aircraft ||
+               IsFinite(report.LastKnownPosition) &&
+               HorizontalDistance(report.LastKnownPosition, objectivePosition) <=
+               Mathf.Max(10f, objectiveRadius) + 160f;
     }
 
     private static bool SafeIdleAircraft(AIPlane ai, VehiclePlane plane)
@@ -2094,7 +2211,7 @@ internal static class CommanderMvp
             }
 
             var pilot = plane.GetDriver();
-            if (pilot == null || !pilot.IsAI() || pilot.IsFPSPlayer() || !pilot.CanFight())
+            if (pilot == null || !AiOwnership.IsAutonomous(pilot) || !pilot.CanFight())
                 return false;
             var sync = pilot.GetComponent<SyncSoldier>();
             if (sync != null && sync.IsControlledByAPlayer())
@@ -2237,6 +2354,84 @@ internal static class CommanderMvp
         return HorizontalDistance(currentPosition, report.LastKnownPosition) <= maximumDrift;
     }
 
+    private static bool ShouldAssumeDefensiveCommand(
+        SquadInfo squad,
+        Vector3 objective,
+        float objectiveRadius,
+        bool allowExistingOwnership)
+    {
+        FindReachedDefensiveFortification(
+            squad, objective, objectiveRadius + DefensiveHoldMarginMeters,
+            out var onCover, out var onStaticWeapon);
+        return DefensivePositioningCore.ShouldAssumeCommand(
+            offensive: false,
+            alreadyOwned: allowExistingOwnership && GroundAiDirector.OwnsSquad(squad.Squad),
+            occupiesFortification: onCover || onStaticWeapon,
+            squadPosition: ToMapPoint(squad.Position),
+            objective: ToMapPoint(objective),
+            objectiveRadius: objectiveRadius,
+            arrivalMargin: DefensiveArrivalMarginMeters);
+    }
+
+    private static bool ShouldPreserveDefensiveFortification(
+        SquadInfo squad,
+        Vector3 objective,
+        float holdRadius)
+    {
+        FindReachedDefensiveFortification(
+            squad, objective, holdRadius, out var onCover, out var onStaticWeapon);
+        return DefensivePositioningCore.ShouldPreserveFortification(
+            squad.Squad.order == Order.defend,
+            onCover,
+            onStaticWeapon);
+    }
+
+    private static void FindReachedDefensiveFortification(
+        SquadInfo squad,
+        Vector3 objective,
+        float radius,
+        out bool onCover,
+        out bool onStaticWeapon)
+    {
+        onCover = false;
+        onStaticWeapon = false;
+        try
+        {
+            for (var index = 0; index < squad.Squad.CountMembers; index++)
+            {
+                var member = squad.Squad.GetMember(index);
+                if (member == null || !member.CanFight())
+                    continue;
+
+                var memberPosition = member.transform.position;
+                if (!DefensivePositioningCore.IsInsideArea(
+                        ToMapPoint(memberPosition), ToMapPoint(objective), radius))
+                {
+                    continue;
+                }
+
+                onCover |= ContactResponse.IsOnUsableCover(member);
+                if (member.IsOnVehicle())
+                {
+                    var vehicle = member.GetCurrentVehicle();
+                    onStaticWeapon |= vehicle != null && vehicle.IsStatic();
+                }
+
+                if (onCover && onStaticWeapon)
+                    return;
+            }
+        }
+        catch (NullReferenceException)
+        {
+        }
+        catch (Il2CppInterop.Runtime.Il2CppException)
+        {
+        }
+        catch (Il2CppInterop.Runtime.ObjectCollectedException)
+        {
+        }
+    }
+
     private static void IssueOrders(
         SideState side,
         IReadOnlyList<SquadInfo> squads,
@@ -2250,6 +2445,12 @@ internal static class CommanderMvp
         bool attackAuthorized,
         bool smokeBlocked)
     {
+        if (!offensive)
+        {
+            IssueDefensiveOrders(side, squads, objectiveId, objective, objectiveRadius);
+            return;
+        }
+
         var fallbackDirection = mainAxis?.Direction ?? Flatten(AveragePosition(squads) - objective).normalized;
         if (fallbackDirection.sqrMagnitude < 0.01f)
             fallbackDirection = Vector3.back;
@@ -2302,18 +2503,7 @@ internal static class CommanderMvp
                         break;
                     }
 
-                    if (!offensive)
-                    {
-                        var defensiveDistance = Mathf.Max(25f, objectiveRadius * 0.75f);
-                        var defensivePosition = GroundPoint(
-                            objective + axis.Direction * defensiveDistance,
-                            objective.y,
-                            out _,
-                            out _);
-                        IssueHold(squad, objectiveId, role, CommanderAction.Hold,
-                            defensivePosition, 18f, objective);
-                    }
-                    else if (attackAuthorized)
+                    if (attackAuthorized)
                     {
                         var attackDirection = Flatten(objective - axis.StagingPosition);
                         IssueAttack(squad, objectiveId, role, attackDirection,
@@ -2329,6 +2519,64 @@ internal static class CommanderMvp
                     break;
                 }
             }
+        }
+    }
+
+    private static void IssueDefensiveOrders(
+        SideState side,
+        IReadOnlyList<SquadInfo> squads,
+        int objectiveId,
+        Vector3 objective,
+        float objectiveRadius)
+    {
+        // This area order is only the incoming route into the defended position.
+        // Once a soldier arrives, GroundAiDirector assigns one useful cover slot (or
+        // holds the current position when none exists) and owns locomotion there.
+        // Keeping one stable order stamp prevents native area-order refreshes from
+        // turning the objective into a continuous patrol zone.
+        var holdRadius = Mathf.Max(20f, objectiveRadius + DefensiveHoldMarginMeters);
+        foreach (var squad in squads.OrderBy(entry => entry.Id))
+        {
+            var role = side.Roles.TryGetValue(squad.Id, out var assignedRole)
+                ? assignedRole
+                : CommanderRole.Reserve;
+
+            IssueDefensiveAreaHold(squad, objectiveId, role, objective, holdRadius);
+        }
+    }
+
+    private static void IssueDefensiveAreaHold(
+        SquadInfo squad,
+        int objectiveId,
+        CommanderRole role,
+        Vector3 objective,
+        float radius)
+    {
+        var center = GroundPoint(objective, squad.Position.y, out _, out _);
+        // This authoritative area is refreshed as lease metadata even when the
+        // native HoldArea write is intentionally suppressed as an identical order.
+        GroundAiDirector.RegisterCommanderDefensiveArea(squad.Squad, center, radius);
+        var stamp = new OrderStamp(
+            objectiveId, role, CommanderAction.Hold, center, Vector3.zero, radius);
+        StableDefensiveOrder? existingOrder = null;
+        if (LastOrders.TryGetValue(squad.Id, out var existing) &&
+            existing.Action == CommanderAction.Hold)
+        {
+            existingOrder = new StableDefensiveOrder(
+                existing.ObjectiveId,
+                ToMapPoint(existing.Destination),
+                existing.Radius);
+        }
+
+        var proposedOrder = new StableDefensiveOrder(
+            objectiveId, ToMapPoint(center), radius);
+        if (!DefensiveOrderStabilityCore.ShouldReplace(existingOrder, proposedOrder))
+            return;
+
+        if (GroundAiDirector.ExecuteCommanderSquadOrder(
+                squad.Squad, () => squad.Squad.HoldArea(center, radius, false)))
+        {
+            LastOrders[squad.Id] = stamp;
         }
     }
 
@@ -2500,8 +2748,11 @@ internal static class CommanderMvp
         if (OrderMatches(tank.Squad, tank.SquadId, stamp))
             return;
 
-        tank.Squad.HoldArea(position, radius, false);
-        LastOrders[tank.SquadId] = stamp;
+        if (GroundAiDirector.ExecuteCommanderVehicleOrder(
+                tank.Vehicle, tank.Squad, () => tank.Squad.HoldArea(position, radius, false)))
+        {
+            LastOrders[tank.SquadId] = stamp;
+        }
     }
 
     private static void IssueArmorAttack(
@@ -2521,8 +2772,12 @@ internal static class CommanderMvp
         if (OrderMatches(tank.Squad, tank.SquadId, stamp))
             return;
 
-        tank.Squad.AttackFromSide(direction, objective, radius);
-        LastOrders[tank.SquadId] = stamp;
+        if (GroundAiDirector.ExecuteCommanderVehicleOrder(
+                tank.Vehicle, tank.Squad,
+                () => tank.Squad.AttackFromSide(direction, objective, radius)))
+        {
+            LastOrders[tank.SquadId] = stamp;
+        }
     }
 
     private static CommanderRole ToCommanderRole(ArmorRole role) => role switch
@@ -2564,8 +2819,11 @@ internal static class CommanderMvp
         if (OrderMatches(squad.Squad, squad.Id, stamp))
             return;
 
-        squad.Squad.HoldArea(position, radius, false);
-        LastOrders[squad.Id] = stamp;
+        if (GroundAiDirector.ExecuteCommanderSquadOrder(
+                squad.Squad, () => squad.Squad.HoldArea(position, radius, false)))
+        {
+            LastOrders[squad.Id] = stamp;
+        }
     }
 
     private static Vector3 FindCommanderCoverPosition(
@@ -2694,8 +2952,11 @@ internal static class CommanderMvp
 
         // The game's public method synchronizes the order and constructs the flank waypoint
         // from the squad's travel direction toward the objective.
-        squad.Squad.AttackFromSide(direction, objective, radius);
-        LastOrders[squad.Id] = stamp;
+        if (GroundAiDirector.ExecuteCommanderSquadOrder(
+                squad.Squad, () => squad.Squad.AttackFromSide(direction, objective, radius)))
+        {
+            LastOrders[squad.Id] = stamp;
+        }
     }
 
     private static bool OrderMatches(Squad squad, int squadId, OrderStamp proposed)
@@ -3183,7 +3444,7 @@ internal static class CommanderBattleUpdatePatch
     [HarmonyPostfix]
     private static void Postfix(BattleManager __instance)
     {
-        CommanderMvp.Update(__instance, Time.time);
+        GroundAiDirector.UpdateBattle(__instance, Time.time);
     }
 }
 

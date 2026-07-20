@@ -27,7 +27,7 @@ internal static class MountedGunnerSuppression
         }
 
         var soldier = ai.GetSoldier();
-        if (soldier == null || !soldier.IsAlive || !soldier.IsAI() || soldier.IsFPSPlayer())
+        if (soldier == null || !soldier.IsAlive || !AiOwnership.IsAutonomous(soldier))
             return;
 
         var id = soldier.GetInstanceID();
@@ -93,10 +93,8 @@ internal static class MountedGunnerSuppression
             state.FireInhibitedBySuppression = true;
             state.DuckUntil = now + Settings.MountedGunnerMinimumDuckSeconds.Value;
             state.FireAllowedAt = float.PositiveInfinity;
-            soldier.StopFire();
+            GroundAiDirector.ExecuteSoldierFireInhibition(ai, soldier);
             StopMountedGun(seat, soldier);
-            ai.allowFireAtEnemy = false;
-            ai.aimingEnemy = false;
             soldier.SetPoseVehicle(false);
             state.DuckPoseApplied = true;
             AiState.Trace($"Mounted gunner suppression: soldier {id} ducked at {suppression}");
@@ -106,10 +104,8 @@ internal static class MountedGunnerSuppression
         // Keep the native trigger quiet while the gunner is below the shield. The
         // Shoot prefix below is a second guard against turret AI restarting a burst.
         state.FireInhibitedBySuppression = true;
-        soldier.StopFire();
+        GroundAiDirector.ExecuteSoldierFireInhibition(ai, soldier);
         StopMountedGun(seat, soldier);
-        ai.allowFireAtEnemy = false;
-        ai.aimingEnemy = false;
         if (!state.DuckPoseApplied)
         {
             soldier.SetPoseVehicle(false);
@@ -199,16 +195,22 @@ internal static class MountedGunnerSuppression
             // also expose TurretGun directly, where the cycle latch can be cleared.
             turret.SetGunTriggerPressed(false, soldier);
             var gun = turret.TryCast<TurretGun>();
-            if (gun != null)
-            {
-                gun.StopFire();
-                gun.IsFiringCycled = false;
-            }
+            StopTurretGun(gun);
         }
         catch
         {
             // The Shoot prefix remains a second guard if the seat is tearing down.
         }
+    }
+
+    // The sole low-level mounted-weapon fire-stop executor. Suppression and
+    // friendly-fire hooks can request it, but do not mutate the turret directly.
+    internal static void StopTurretGun(TurretGun? gun)
+    {
+        if (gun == null)
+            return;
+        gun.StopFire();
+        gun.IsFiringCycled = false;
     }
 
     private static bool TryGetInitialCrouchableTurretSeat(
@@ -299,7 +301,7 @@ internal static class SuppressedMountedGunnerFirePatch
         }
 
         var soldier = user?.TryCast<Soldier>();
-        if (soldier == null || !soldier.IsAI() || soldier.IsFPSPlayer() ||
+        if (!AiOwnership.IsAutonomous(soldier) ||
             MountedGunnerSuppression.CanFire(soldier, Time.time))
         {
             return true;
@@ -307,8 +309,7 @@ internal static class SuppressedMountedGunnerFirePatch
 
         // Cycled turrets recursively call Shoot. If a recursive call is rejected
         // without clearing the cycle latch, the gun may remain stuck after rising.
-        __instance.StopFire();
-        __instance.IsFiringCycled = false;
+        MountedGunnerSuppression.StopTurretGun(__instance);
         return false;
     }
 }

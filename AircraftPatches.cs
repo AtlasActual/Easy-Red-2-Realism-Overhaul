@@ -6,28 +6,103 @@ namespace ER2RealismOverhaul;
 
 internal static class AircraftBombSafety
 {
-    internal static bool UnsafeImpact(VehiclePlane plane, out Vector3 impact)
+    private const float MaximumTargetMissMeters = 65f;
+
+    internal static bool UnsafeImpact(
+        VehiclePlane plane,
+        out Vector3 impact,
+        out string reason)
     {
         impact = Vector3.zero;
+        reason = string.Empty;
         if (!MultiplayerAuthority.CanMutateGameplay() || plane == null)
         {
             return false;
         }
 
         var pilot = plane.GetDriver();
-        if (pilot == null || !pilot.IsAI() || pilot.IsFPSPlayer())
+        if (!AiOwnership.IsAutonomous(pilot))
             return false;
 
         impact = plane.PredictBombImpactPosition();
         if (impact == Vector3.zero)
-            return false;
+        {
+            if (!Settings.AircraftSafetyEnabled.Value)
+                return false;
+
+            reason = "no valid predicted impact";
+            return true;
+        }
+
+        if (Settings.AircraftSafetyEnabled.Value &&
+            !HasLiveHostileGroundTargetNearImpact(plane, impact))
+        {
+            reason = "no live hostile ground target near the predicted impact";
+            return true;
+        }
 
         var radius = Settings.AircraftBombFriendlyRadius.Value;
         if (CommanderMvp.CommanderAircraftUnsafeImpact(plane, impact, radius))
+        {
+            reason = "friendlies near the predicted impact";
             return true;
+        }
 
-        return Settings.AircraftSafetyEnabled.Value &&
-               CombatSafety.FriendlyNear(impact, plane.GetVehicleFaction(), radius);
+        if (Settings.AircraftSafetyEnabled.Value &&
+            CombatSafety.FriendlyNear(impact, plane.GetVehicleFaction(), radius))
+        {
+            reason = "friendlies near the predicted impact";
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool HasLiveHostileGroundTargetNearImpact(
+        VehiclePlane plane,
+        Vector3 impact)
+    {
+        try
+        {
+            var ai = plane.GetComponent<AIPlane>();
+            var target = ai?.targetToAttack;
+            var usableGroundTarget = TargetAcquisition.IsUsableTarget(target) &&
+                                     !target!.IsAirVehicle();
+            if (!usableGroundTarget)
+                return false;
+
+            var soldier = target!.TryCast<Soldier>();
+            var vehicle = soldier == null ? target.TryCast<Vehicle>() : null;
+            var alive = soldier != null
+                ? soldier.IsAlive && soldier.CanFight()
+                : vehicle != null && vehicle.life > 0 && vehicle.IsActive() &&
+                  vehicle.IsOperative() && vehicle.CanFight();
+            var targetFaction = soldier?.faction ??
+                                vehicle?.GetVehicleFaction() ??
+                                string.Empty;
+            var ownFaction = plane.GetVehicleFaction();
+            var hostile = !string.IsNullOrWhiteSpace(ownFaction) &&
+                          !string.IsNullOrWhiteSpace(targetFaction) &&
+                          ResourcesManager.IsEnemyFaction(ownFaction, targetFaction);
+            var targetPosition = target.GetCenterOfUnit();
+            var deltaX = targetPosition.x - impact.x;
+            var deltaZ = targetPosition.z - impact.z;
+            var horizontalMiss = Mathf.Sqrt(deltaX * deltaX + deltaZ * deltaZ);
+
+            return AircraftBombDecisionCore.TargetSupportsRelease(
+                new AircraftBombReleaseInput(
+                    HasValidPredictedImpact: true,
+                    usableGroundTarget,
+                    alive,
+                    hostile,
+                    horizontalMiss,
+                    MaximumTargetMissMeters));
+        }
+        catch (Exception)
+        {
+            // If the target disappears during the release check, fail closed.
+            return false;
+        }
     }
 }
 
@@ -46,7 +121,7 @@ internal static class AircraftAttackSafetyPatch
         }
 
         var pilot = __instance.veh.GetDriver();
-        if (pilot == null || !pilot.IsAI() || pilot.IsFPSPlayer())
+        if (!AiOwnership.IsAutonomous(pilot))
             return true;
 
         var targetPosition = target.GetCenterOfUnit();
@@ -57,7 +132,7 @@ internal static class AircraftAttackSafetyPatch
             return true;
         }
 
-        __instance.CancelAttackingTarget();
+        GroundAiDirector.ExecuteAircraftSafetyCancellation(__instance, __instance.veh);
         AiState.Trace($"Aircraft safety: plane {__instance.veh.GetInstanceID()} rejected an unsafe attack target");
         return false;
     }
@@ -69,11 +144,11 @@ internal static class AircraftBombReleaseSafetyPatch
     [HarmonyPrefix]
     private static bool Prefix(VehiclePlane __instance, ref BombBay __result)
     {
-        if (!AircraftBombSafety.UnsafeImpact(__instance, out _))
+        if (!AircraftBombSafety.UnsafeImpact(__instance, out _, out var reason))
             return true;
 
         __result = null!;
-        AiState.Trace($"Aircraft safety: plane {__instance.GetInstanceID()} withheld bomb over friendlies");
+        AiState.Trace($"Aircraft safety: plane {__instance.GetInstanceID()} withheld bomb: {reason}");
         return false;
     }
 }
@@ -84,11 +159,11 @@ internal static class BombBayReleaseSafetyPatch
     [HarmonyPrefix]
     private static bool Prefix(VehiclePlane v, ref bool __result)
     {
-        if (!AircraftBombSafety.UnsafeImpact(v, out _))
+        if (!AircraftBombSafety.UnsafeImpact(v, out _, out var reason))
             return true;
 
         __result = false;
-        AiState.Trace($"Aircraft safety: plane {v.GetInstanceID()} blocked an unsafe bomb-bay release");
+        AiState.Trace($"Aircraft safety: plane {v.GetInstanceID()} blocked bomb-bay release: {reason}");
         return false;
     }
 }
@@ -338,6 +413,79 @@ internal static class AircraftEvasionControlPatch
     }
 }
 
+<<<<<<< Updated upstream
+=======
+[HarmonyPatch(typeof(AIPlane), "Update")]
+internal static class AircraftAutonomousEngagementPatch
+{
+    private const float OpportunityScanIntervalSeconds = 0.8f;
+    private static readonly Dictionary<int, float> NextOpportunityScans = new();
+
+    [HarmonyPostfix]
+    private static void Postfix(AIPlane __instance)
+    {
+        if (__instance == null || __instance.veh == null ||
+            !CommanderMvp.AllowsAutonomousAircraftTargeting(__instance, __instance.veh))
+        {
+            return;
+        }
+
+        var id = __instance.veh.GetInstanceID();
+        var now = Time.time;
+        if (AiState.AircraftEvasionUntil.TryGetValue(id, out var evadingUntil) &&
+            now < evadingUntil)
+        {
+            return;
+        }
+
+        try
+        {
+            // Only supplement the native idle patrol state. Commander attacks,
+            // scripted flights, refuelling, takeoff, and existing native attacks
+            // retain full authority over the aircraft.
+            if (__instance.planeState != AIPlane.PlaneAIState.flyingAroundArea ||
+                __instance.targetToAttack != null || __instance.hasEnemy ||
+                __instance.hasEnemyTank ||
+                !AiState.CooldownReady(NextOpportunityScans, id, now))
+            {
+                return;
+            }
+
+            NextOpportunityScans[id] = now + OpportunityScanIntervalSeconds;
+            var target = __instance.GetBestAircraftVisibleEnemy();
+            if (target == null)
+                return;
+
+            var targetKind = target.IsAirVehicle() ? "aircraft" : "ground";
+            if (!GroundAiDirector.ExecuteAutonomousAircraftOrder(
+                    __instance,
+                    __instance.veh,
+                    target.GetCenterOfUnit(),
+                    () => __instance.DoAttackTarget(target),
+                    now))
+            {
+                return;
+            }
+            if (__instance.targetToAttack == null)
+                return;
+
+            AiState.Trace($"Aircraft autonomy: plane {id} engaging {targetKind} target of opportunity");
+        }
+        catch (Il2CppInterop.Runtime.ObjectCollectedException)
+        {
+            // A target despawned during the native visibility query.
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogSource.LogWarning($"Aircraft opportunity scan failed: {ex.Message}");
+        }
+    }
+
+    internal static void Remove(int id)
+        => NextOpportunityScans.Remove(id);
+}
+
+>>>>>>> Stashed changes
 [HarmonyPatch(typeof(Vehicle), "OnDestroy")]
 internal static class AircraftStateCleanupPatch
 {
@@ -350,6 +498,11 @@ internal static class AircraftStateCleanupPatch
         var id = __instance.GetInstanceID();
         AircraftFlightPhysics.Remove((VehiclePlane)__instance);
         AircraftEvasionControlPatch.Remove(id);
+<<<<<<< Updated upstream
+=======
+        AircraftAutonomousEngagementPatch.Remove(id);
+        GroundAiDirector.ReleaseAircraft(id);
+>>>>>>> Stashed changes
         AiState.AircraftEvasionUntil.Remove(id);
         AiState.AircraftEvasionDirection.Remove(id);
     }

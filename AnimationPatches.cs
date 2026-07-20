@@ -22,7 +22,7 @@ internal static class SoldierOrderAnimationPatch
     {
         if (!Settings.LeaderOnlyOrderGestures.Value ||
             !MultiplayerAuthority.CanMutateGameplay() ||
-            __instance == null || !__instance.IsAI() || __instance.IsFPSPlayer())
+            !AiOwnership.IsAutonomous(__instance))
         {
             return true;
         }

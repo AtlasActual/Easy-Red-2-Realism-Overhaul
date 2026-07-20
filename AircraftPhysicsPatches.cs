@@ -1471,8 +1471,17 @@ internal static class AircraftFlightPhysics
         try
         {
             var driver = plane.GetDriver();
-            if (driver == null || (driver.IsAI() && !driver.IsFPSPlayer()))
+            if (driver == null || AiOwnership.IsAutonomous(driver))
                 return Settings.AircraftPhysicsApplyToAi.Value;
+
+            // Simplified flight uses VehiclePlane.targetRotation as an absolute
+            // steering target. The force/velocity corrections below are designed for
+            // the two realistic controllers and can fight that target between Update
+            // and FixedUpdate until the aircraft appears unresponsive. Keep the native
+            // simplified controller intact; switching control mode while seated will
+            // automatically restore or reinitialize this state on the next physics tick.
+            if (!plane.PlayerIsDrivingWithRealisticControls())
+                return false;
 
             return Lua_API.isOnline()
                 ? Settings.AircraftPhysicsApplyToMultiplayerPlayers.Value
@@ -1489,7 +1498,7 @@ internal static class AircraftFlightPhysics
         try
         {
             var driver = plane.GetDriver();
-            return driver == null || (driver.IsAI() && !driver.IsFPSPlayer());
+            return driver == null || AiOwnership.IsAutonomous(driver);
         }
         catch
         {

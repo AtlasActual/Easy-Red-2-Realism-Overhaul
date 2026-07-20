@@ -3,31 +3,6 @@ using UnityEngine;
 
 namespace ER2RealismOverhaul;
 
-[HarmonyPatch(typeof(SoldierAI), "OnSuppressed")]
-internal static class SoldierSuppressedPatch
-{
-    [HarmonyPostfix]
-    private static void Postfix(SoldierAI __instance)
-    {
-        if (!MultiplayerAuthority.CanMutateGameplay())
-            return;
-
-        try
-        {
-            var soldier = __instance.GetSoldier();
-            if (soldier == null || !soldier.IsAI() || soldier.IsFPSPlayer() || soldier.IsOnVehicle())
-                return;
-
-            var now = Time.time;
-            ContactResponse.UpdateSuppressionReaction(__instance, soldier, now, Time.deltaTime);
-        }
-        catch (Exception ex)
-        {
-            Plugin.LogSource.LogWarning($"Suppression reaction failed: {ex.Message}");
-        }
-    }
-}
-
 [HarmonyPatch(typeof(Flame), "OnEnable")]
 internal static class FlameEnablePatch
 {
@@ -39,39 +14,40 @@ internal static class FlameEnablePatch
     }
 }
 
-[HarmonyPatch(typeof(SoldierAI), "FixedUpdate")]
-internal static class SoldierFireDangerPatch
+internal static class SoldierFireDanger
 {
     private static readonly Dictionary<int, float> NextCheck = new();
+    private static readonly Dictionary<int, HazardStamp> ActiveHazards = new();
 
-    [HarmonyPostfix]
-    private static void Postfix(SoldierAI __instance)
+    internal static bool TrySense(Soldier soldier, float now, out Vector3 escape)
     {
+        escape = default;
         if (!Settings.DangerReactionsEnabled.Value || !MultiplayerAuthority.CanMutateGameplay())
-            return;
+            return false;
 
         try
         {
-            var soldier = __instance.GetSoldier();
-            if (soldier == null || !soldier.IsAI() || soldier.IsFPSPlayer() || soldier.IsOnVehicle())
-                return;
+            if (!AiOwnership.IsAutonomous(soldier) || soldier.IsOnVehicle())
+                return false;
 
             var id = soldier.GetInstanceID();
-            var now = Time.time;
-            if (!AiState.CooldownReady(NextCheck, id, now))
-                return;
-            NextCheck[id] = now + 0.2f;
-
             if (soldier.IsOnFire)
             {
-                soldier.StopFire();
-                ContactResponse.StopDangerMovement(
-                    __instance,
-                    soldier,
-                    SoldierPose.Prone,
-                    Time.fixedDeltaTime);
-                return;
+                escape = soldier.transform.position;
+                ActiveHazards[id] = new HazardStamp(escape, now + 0.35f);
+                return true;
             }
+
+            if (!AiState.CooldownReady(NextCheck, id, now))
+            {
+                if (ActiveHazards.TryGetValue(id, out var active) && active.ValidUntil > now)
+                {
+                    escape = active.Escape;
+                    return true;
+                }
+                return false;
+            }
+            NextCheck[id] = now + 0.2f;
 
             Flame? danger = null;
             var closestSqr = float.MaxValue;
@@ -99,19 +75,42 @@ internal static class SoldierFireDangerPatch
                     AiState.Flames.Remove(key);
 
             if (danger == null)
-                return;
+            {
+                ActiveHazards.Remove(id);
+                return false;
+            }
 
             var position = soldier.transform.position;
-            var escape = position + AiState.HorizontalAway(position, danger.transform.position) * Settings.FlameEscapeDistance.Value;
-            // Publish the emergency owner before issuing movement so suppression
-            // and contact hooks in the same frame yield to the lethal flame hazard.
+            escape = position + AiState.HorizontalAway(position, danger.transform.position) *
+                Settings.FlameEscapeDistance.Value;
+            ActiveHazards[id] = new HazardStamp(escape, now + 0.35f);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogSource.LogWarning($"Fire danger sensing failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    internal static void Execute(SoldierAI ai, Soldier soldier, Vector3 escape, float now)
+    {
+        try
+        {
+            if (soldier.IsOnFire)
+            {
+                GroundAiDirector.ExecuteSoldierFireInhibition(ai, soldier);
+                ContactResponse.StopDangerMovement(
+                    ai, soldier, SoldierPose.Prone, Time.deltaTime);
+                return;
+            }
+
+            var id = soldier.GetInstanceID();
             AiState.FlameEvasionUntil[id] = now + 1.5f;
             var contact = AiState.GetContactState(id);
             contact.SuppressionMovementOwned = false;
             contact.MovementInhibitedByContactResponse = false;
-            __instance.moveCharacter = true;
-            ContactResponse.SetTacticalPose(__instance, soldier, SoldierPose.Crouch);
-            __instance.MoveDirectlyToward(escape, 1.5f);
+            GroundAiDirector.ExecuteHazardEscape(ai, soldier, escape);
             AiState.Trace($"Fire danger: soldier {id} diverting around active flame");
         }
         catch (Exception ex)
@@ -119,4 +118,18 @@ internal static class SoldierFireDangerPatch
             Plugin.LogSource.LogWarning($"Fire reaction failed: {ex.Message}");
         }
     }
+
+    internal static void Remove(int soldierId)
+    {
+        NextCheck.Remove(soldierId);
+        ActiveHazards.Remove(soldierId);
+    }
+
+    internal static void Reset()
+    {
+        NextCheck.Clear();
+        ActiveHazards.Clear();
+    }
+
+    private readonly record struct HazardStamp(Vector3 Escape, float ValidUntil);
 }

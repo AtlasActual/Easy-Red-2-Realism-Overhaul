@@ -14,7 +14,7 @@ internal static class AiRagdollWeight
             return;
 
         var soldier = manager.GetComponentInParent<Soldier>();
-        if (soldier == null || !soldier.IsAI() || !soldier.IsDead)
+        if (!AiOwnership.IsAutonomous(soldier) || !soldier.IsDead)
             return;
 
         var managerId = manager.GetInstanceID();

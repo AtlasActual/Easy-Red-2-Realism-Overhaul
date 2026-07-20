@@ -7,15 +7,23 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>ER2RealismOverhaul</AssemblyName>
     <RootNamespace>ER2RealismOverhaul</RootNamespace>
+<<<<<<< Updated upstream
     <Version>1.0.0</Version>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <FileVersion>1.0.0.0</FileVersion>
+=======
+    <Version>1.0.2</Version>
+    <AssemblyVersion>1.0.2.0</AssemblyVersion>
+    <FileVersion>1.0.2.0</FileVersion>
+>>>>>>> Stashed changes
     <ER2GameDir Condition="'$(ER2GameDir)' == '' and '$(ER2_GAME_DIR)' != ''">$(ER2_GAME_DIR)</ER2GameDir>
     <BepInExCore>$(ER2GameDir)\BepInEx\core</BepInExCore>
     <ER2Interop>$(ER2GameDir)\BepInEx\interop</ER2Interop>
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Local reverse-engineering scratch projects are not part of the plugin. -->
+    <Compile Remove="_inspect\**\*.cs" />
     <!-- The package-free deterministic scenario runner links the planner separately. -->
     <Compile Remove="tests\**\*.cs" />
     <Reference Include="0Harmony"><HintPath>$(BepInExCore)\0Harmony.dll</HintPath><Private>false</Private></Reference>
@@ -29,6 +37,8 @@
     <Reference Include="Photon3Unity3D"><HintPath>$(ER2Interop)\Photon3Unity3D.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="PhotonRealtime"><HintPath>$(ER2Interop)\PhotonRealtime.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="PhotonUnityNetworking"><HintPath>$(ER2Interop)\PhotonUnityNetworking.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Unity.RenderPipelines.Core.Runtime"><HintPath>$(ER2Interop)\Unity.RenderPipelines.Core.Runtime.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Unity.RenderPipelines.Universal.Runtime"><HintPath>$(ER2Interop)\Unity.RenderPipelines.Universal.Runtime.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine"><HintPath>$(ER2Interop)\UnityEngine.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.AnimationModule"><HintPath>$(ER2Interop)\UnityEngine.AnimationModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.AudioModule"><HintPath>$(ER2Interop)\UnityEngine.AudioModule.dll</HintPath><Private>false</Private></Reference>
@@ -41,6 +51,7 @@
     <Reference Include="UnityEngine.TerrainModule"><HintPath>$(ER2Interop)\UnityEngine.TerrainModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.TerrainPhysicsModule"><HintPath>$(ER2Interop)\UnityEngine.TerrainPhysicsModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.UI"><HintPath>$(ER2Interop)\UnityEngine.UI.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UIModule"><HintPath>$(ER2Interop)\UnityEngine.UIModule.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
 
   <Target Name="ValidateER2GameDir" BeforeTargets="ResolveReferences"

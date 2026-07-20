@@ -6,9 +6,17 @@ ER2RealismOverhaul is built around the rough edges that become hard to ignore af
 
 The goal is to fix those moments without replacing the game underneath them. This is not a health or damage multiplier mod; Easy Red 2's missions, armour system, and basic damage model remain intact.
 
+<<<<<<< Updated upstream
 > **Current release:** 1.0
+=======
+> **Current release:** 1.0.3
+>>>>>>> Stashed changes
 >
-> **Compatibility:** Tested with the Easy Red 2 build available on July 19, 2026
+> **Compatibility:** Tested with Easy Red 2 Steam public-branch build `24246380` (July 20, 2026)
+
+## 1.0.3 hotfix
+
+- Fixed intermittent melee and bayonet ghost swings by applying the configured hit-area enlargement on the actual damage frame.
 
 ## What it fixes and improves
 
@@ -16,16 +24,17 @@ The goal is to fix those moments without replacing the game underneath them. Thi
 
 - **Melee attacks connect at believable distances.** The base hit check is longer and slightly wider for both players and AI, greatly reducing point-blank ghost swings. At the default setting, an ordinary strike reaches roughly 1.32 m and a bayonet roughly 1.68 m. Damage is unchanged.
 - **AI no longer snaps onto every target or tracks enemies forever.** Soldiers need time to visually acquire a target, have a limited forward field of view, and lose firing permission when a remembered target is no longer reasonably known.
-- **Cover is treated as a position, not a suggestion.** Exposed infantry look for threat-facing cover, favour trenches and lower stances, avoid piling multiple soldiers into the same spot, and hold good cover instead of constantly shuffling away from it.
-- **Suppression changes behaviour.** Pinned soldiers get low, exposed troops may crawl toward safety, mounted gunners duck and stop firing, and heavily suppressed squads see, remember, and report less accurately.
+- **Cover is treated as a position, not a suggestion.** Exposed infantry look for threat-facing cover, favour trenches and lower stances, avoid piling multiple soldiers into the same spot, and hold good cover instead of constantly shuffling away from it. Cover rays use the penetration model's material and measured thickness, so foliage, glass, canvas, and thin props no longer receive the same survival value as earthworks, sandbags, masonry, or substantial buildings.
+- **Suppression changes behaviour.** Pinned soldiers get low, exposed troops may crawl toward safety, mounted gunners duck and stop firing, and heavily suppressed squads see, remember, and report less accurately. Nearby allied wounds and deaths now add a separate morale shock to AI only, with deaths having the larger radius and effect.
 - **Movement and weapon handling are less awkward.** Riflemen stop before firing, SMGs retain limited close-range moving fire, exposed AI reload from a safer posture, and crawling soldiers must stop before reloading or bandaging.
 - **Squads can suppress a position without seeing through walls.** A stationary machine gunner may fire one short burst at a fresh, personally confirmed last-known position, using real ammunition and without tracking an invisible target.
 
 ### Offensive and defensive AI
 
-- **Attacks are less likely to die after first contact.** Assaulting squads establish firing halts, use forward cover, and resume their advance instead of remaining stuck in an open-ended firefight. A modest configurable attacker bonus helps offensive AI maintain pressure without changing health or damage.
-- **Defenders make better use of the ground they already hold.** Soldiers remain in useful protected positions, support elements cover likely approaches, and reserves are not thrown forward without a reason.
-- **High Command gives battles a larger plan.** When enabled, it assigns assault, flank, support-by-fire, reserve, armour, aircraft, artillery, smoke, and anti-tank tasks around the main objective. It considers strength, suppression, terrain, congestion, and reported contacts before committing an attack.
+- **Attacks are less likely to die after first contact.** Assaulting squads use buildings, trenches, and other strong cover as intermediate bounds or support-by-fire positions, then resume their advance when covering fire and the attack gate permit it. A modest configurable attack-posture bonus helps offensive AI maintain pressure without changing health or damage.
+- **Defenders build their plan around fortified ground.** The AI groups nearby cover into positions, values protection and firing lanes above raw distance, and reserves distinct slots. After arriving, each defender takes one useful trench or building position—or holds the arrival point when none is free—and stays put unless that position is destroyed or unsafe.
+- **Static weapons are a core part of every defence.** With High Command enabled, defenders immediately attempt to crew every viable gun in the objective area while preserving leaders, key specialists, donor-squad strength, and a complete mobile reserve. Reported armour makes AP-capable guns the first staffing priority.
+- **High Command gives battles one coherent plan.** A host-authoritative ground AI director determines attack or defence from objective ownership, then assigns assault, flank, support-by-fire, reserve, armour, aircraft, artillery, smoke, anti-tank, emplacement, and fortified-position tasks. Command leases ensure player and scripted orders take priority and prevent overlapping systems from fighting over the same squad or soldier.
 - **AI-led transports dismount before disaster.** Infantry leave APCs when credible nearby contact or incoming fire makes remaining inside the greater risk, rather than waiting for the vehicle to be destroyed.
 - **Battlefield information is imperfect.** Squads pass last-known positions by voice or radio with delays, confidence loss, and positional error instead of sharing a live, perfectly tracked enemy.
 
@@ -33,7 +42,7 @@ The goal is to fix those moments without replacing the game underneath them. Thi
 
 - **AI has better fire discipline.** Handheld, mounted, and aircraft weapons check for friendlies in the firing lane. Grenades require sensible range, a clear target area, and a per-soldier cooldown.
 - **Tanks behave more like armoured vehicles.** They hold useful fighting distances, reverse without exposing their rear, avoid pointless hull pivots, accelerate with more weight, and keep attacking when their orders call for pressure.
-- **Infantry respond more sensibly to armour.** Exposed riflemen can seek tank-masked cover, anti-tank troops hold their ground, and threatened squads can crew a nearby empty anti-tank gun.
+- **Infantry respond more sensibly to armour.** Exposed riflemen can seek tank-masked cover, anti-tank troops hold their ground and wait for a practical launcher shot, and crews on valid defensive gun assignments do not abandon their weapons because a separate suppression reaction tried to dismount them.
 - **Thin cover is no longer automatically bulletproof.** Material-aware penetration measures cover thickness and resistance, carries reduced projectile energy through suitable props, and preserves entry, exit, tracer, decal, and ricochet feedback. Terrain, bunkers, vehicle armour, and native armour penetration remain meaningful.
 - **Aircraft are safer and less weightless.** AI avoids friendly bomb impacts, reacts to nearby hostile fire, and can use configurable flight physics with momentum, stalls, energy loss, damage effects, and compact flight instruments.
 - **Explosions have more presence without simply inflating every damage value.** Artillery missions, bomb effects, fragmentation, suppression, smoke, dust, craters, and small-explosion ragdoll force are reworked separately so each can be tuned on its own.
@@ -41,15 +50,23 @@ The goal is to fix those moments without replacing the game underneath them. Thi
 ### Smaller fixes and presentation options
 
 - More restrained AI command gestures and better animation quality for visible distant soldiers.
+- Allied multiplayer infantry can deliberately form one squad: open the player list, select a player, and choose **Join [player]'s squad**. Joining is per life and never happens automatically on spawn or respawn.
 - Configurable impact-decal lifetime, tracer frequency, battle chatter, distant sound shaping, weapon audio, tank engines, tracks, and player footsteps.
-- Adjustable player suppression effects, hold-breath zoom, first-person shadows, aircraft instruments, and allied multiplayer names when the rest of the HUD is hidden.
+- Adjustable player suppression effects—including a larger near-miss radius and optional depth-of-field blur—plus true 10x Caps Lock binocular zoom with the weapon model hidden, 200-degree hold-Alt freelook, first-person shadows, aircraft instruments, and allied multiplayer names when the rest of the HUD is hidden.
+- A map-north-aligned scrolling bottom-screen compass tape shown for five seconds with **K**, using NATO mils by default with optional degree bearings, tapered fading edges, and an option to keep it permanently visible.
 - A built-in settings menu with Apply, Cancel, reset controls, and individual switches for nearly every system.
 
-Press **F10**, or choose **Realism Overhaul Settings** from the main or pause menu. The defaults are intended to work as a complete overhaul, but individual features can be reduced or disabled if you prefer a lighter touch.
+Press **F10**, or choose **Realism Overhaul Settings** from the main or pause menu. AI options are organized into Commander, Infantry tactics, Vehicle tactics, Support coordination, Attack posture bonuses, and Diagnostics. Defender static-weapon staffing is part of the Commander system rather than a separate switch. Non-AI settings are unchanged.
+
+On foot in first person, press **Caps Lock** to toggle the clean 10x binocular view and hold either **Alt** key for a 200-degree freelook arc. Press **K** during gameplay to show the scrolling compass band for five seconds. The F10 menu includes magnification, freelook arc, compass units, and always-visible compass settings.
 
 ## Coming soon
 
+<<<<<<< Updated upstream
 Tank combat is the next major area being rebuilt. Tank ballistics, armour values, and internal vehicle subsystems are all being reworked for a future release. These changes are still work in progress and are not part of v1.0; for now, the mod leaves Easy Red 2's existing tank ballistics and armour model alone.
+=======
+Tank combat is the next major area being rebuilt. Tank ballistics, armour values, and internal vehicle subsystems are all being reworked for a future release. These changes are still work in progress and are not part of v1.0.3; for now, the mod leaves Easy Red 2's existing tank ballistics and armour model alone.
+>>>>>>> Stashed changes
 
 ## Installation
 
@@ -83,7 +100,7 @@ Do not place the DLL in `Easy Red 2_Data`.
 
 ### Updating
 
-Close the game and replace the existing `ER2RealismOverhaul.dll` with the new one. Your settings remain in `BepInEx\config\`.
+Close the game and replace the existing `ER2RealismOverhaul.dll` with the new one. Your settings remain in `BepInEx\config\ca.antoi.er2.tacticalai.cfg`.
 
 ### Uninstalling
 
@@ -94,6 +111,8 @@ Close the game and delete `ER2RealismOverhaul.dll`. Delete the configuration fil
 Only the host needs the mod for its host-authoritative gameplay systems. Players without BepInEx or ER2RealismOverhaul can join normally and experience the battlefield state that Easy Red 2 synchronizes from the host, including the results of the host-controlled AI behaviour.
 
 Unmodded players do not receive the F10 menu, the host's settings, or local presentation features such as HUD, audio, and first-person options. Players using the same mod version receive the host's settings for the session; their menu remains read-only and their own configuration returns after disconnecting.
+
+To join another player's infantry squad, the joining player must have the mod installed. Open the multiplayer player list, select an allied player, and click **Join [player]'s squad** on that player's profile. This moves only your current soldier; your former AI squadmates remain in their original squad. Vehicle crews are excluded, and respawning does not automatically put you back into the shared squad.
 
 If the original host leaves and an unmodded player becomes host, the overhaul can no longer run its host-authoritative systems. For the best results, a player with the same mod version should remain host.
 

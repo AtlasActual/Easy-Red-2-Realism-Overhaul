@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>10.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="..\..\CommanderPlannerCore.cs" Link="CommanderPlannerCore.cs" />
+    <Compile Include="..\..\AircraftBombDecisionCore.cs" Link="AircraftBombDecisionCore.cs" />
+    <Compile Include="..\..\BallisticCoverDecisionCore.cs" Link="BallisticCoverDecisionCore.cs" />
+    <Compile Include="..\..\InfantryCoverDecisionCore.cs" Link="InfantryCoverDecisionCore.cs" />
+    <Compile Include="..\..\GroundAiDecisionCore.cs" Link="GroundAiDecisionCore.cs" />
+    <Compile Include="..\..\TransportDismountDecisionCore.cs" Link="TransportDismountDecisionCore.cs" />
+    <Compile Include="..\..\CoverCandidateSamplingCore.cs" Link="CoverCandidateSamplingCore.cs" />
+    <Compile Include="..\..\LauncherSelectionDecisionCore.cs" Link="LauncherSelectionDecisionCore.cs" />
+  </ItemGroup>
+</Project>

@@ -71,8 +71,8 @@ internal static class TransportDismount
         }
 
         var driver = vehicle.GetDriver();
-        if (driver == null || !driver.IsAlive || !driver.IsAI() ||
-            driver.IsFPSPlayer() || driver.GetCurrentVehicle() != vehicle ||
+        if (driver == null || !driver.IsAlive || !AiOwnership.IsAutonomous(driver) ||
+            driver.GetCurrentVehicle() != vehicle ||
             driver.LuaSoldier?.HasScriptAssigned() == true)
         {
             return false;
@@ -99,7 +99,7 @@ internal static class TransportDismount
                 continue;
 
             var sync = seated.GetComponent<SyncSoldier>();
-            if (seated.IsFPSPlayer() ||
+            if (!AiOwnership.IsAutonomous(seated) ||
                 sync != null && sync.IsControlledByAPlayer())
             {
                 return false;
@@ -111,7 +111,7 @@ internal static class TransportDismount
             // is not reliable after scenario boarding and caused valid infantry
             // cargo to be rejected before threat detection ever ran.
             var seat = seated.currentVehicleSeat;
-            if (!seated.IsAI() || seated.GetInstanceID() == driverId ||
+            if (!AiOwnership.IsAutonomous(seated) || seated.GetInstanceID() == driverId ||
                 seat == null || seat.hasTurret)
             {
                 continue;
