@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using HarmonyLib;
 using Il2CppInterop.Runtime;
 using UnityEngine;
@@ -112,8 +113,13 @@ internal static class GunfireAwareness
     private const float HearingRadius = 225f;
     private const float ListenerPollIntervalSeconds = 0.25f;
     private const int MaximumActiveShooters = 128;
+    private const int MaximumListenerCueScansPerFrame = 16;
+    private const float CuePruneCadenceSeconds = 0.25f;
 
     private static bool _disabled;
+    private static float _nextCuePruneAt;
+    private static int _listenerPollFrame = -1;
+    private static int _listenerPollsThisFrame;
 
     internal static void RecordShot(Creature user, float now)
     {
@@ -136,7 +142,7 @@ internal static class GunfireAwareness
             return;
 
         var shooterId = shooter.GetInstanceID();
-        PruneExpired(now);
+        PruneExpiredIfDue(now);
         if (!AiState.GunfireCues.ContainsKey(shooterId) &&
             AiState.GunfireCues.Count >= MaximumActiveShooters)
         {
@@ -170,14 +176,25 @@ internal static class GunfireAwareness
         var memory = AiState.GetTargetMemory(listenerId);
         if (now < memory.NextGunfirePollAt)
             return;
-        memory.NextGunfirePollAt = now + ListenerPollIntervalSeconds;
 
         // A shooter whose rounds are directly suppressing this soldier is more
-        // actionable than a merely audible weapon elsewhere.
+        // actionable than a merely audible weapon elsewhere. This path does not
+        // need to scan the shared cue table.
         if (memory.IncomingFireIsDirect && now < memory.IncomingFireUntil)
             return;
 
-        PruneExpired(now);
+        // Reinforcements commonly enter combat on the same frame. Without a shared
+        // budget they all scan the full shooter table together every quarter second,
+        // causing a recurring hitch that grows with the number of active soldiers.
+        if (!TryReserveListenerCueScan())
+            return;
+
+        // Keep each listener on a stable, slightly different cadence after its first
+        // scan instead of relocking the whole formation to one update instant.
+        memory.NextGunfirePollAt = now + ListenerPollIntervalSeconds +
+                                   (listenerId & 7) * 0.0075f;
+
+        PruneExpiredIfDue(now);
         var origin = listener.LookPosition();
         var nearestDistanceSqr = HearingRadius * HearingRadius;
         var found = false;
@@ -247,6 +264,9 @@ internal static class GunfireAwareness
         ClearAll();
         _disabled = !Settings.PerceptionEnabled.Value ||
                     !MultiplayerAuthority.CanMutateGameplay();
+        _nextCuePruneAt = 0f;
+        _listenerPollFrame = -1;
+        _listenerPollsThisFrame = 0;
     }
 
     private static bool EnsureEnabled()
@@ -267,6 +287,31 @@ internal static class GunfireAwareness
         AiState.GunfireCues.Clear();
         foreach (var memory in AiState.TargetMemory.Values)
             IncomingFireAwareness.Clear(memory);
+    }
+
+    private static bool TryReserveListenerCueScan()
+    {
+        var frame = Time.frameCount;
+        if (frame != _listenerPollFrame)
+        {
+            _listenerPollFrame = frame;
+            _listenerPollsThisFrame = 0;
+        }
+
+        if (_listenerPollsThisFrame >= MaximumListenerCueScansPerFrame)
+            return false;
+
+        _listenerPollsThisFrame++;
+        return true;
+    }
+
+    private static void PruneExpiredIfDue(float now)
+    {
+        if (now < _nextCuePruneAt)
+            return;
+
+        _nextCuePruneAt = now + CuePruneCadenceSeconds;
+        PruneExpired(now);
     }
 
     private static void PruneExpired(float now)
@@ -558,24 +603,32 @@ internal static class IncomingFireOrientationPatch
     [HarmonyPostfix]
     private static void Postfix(SoldierAI __instance)
     {
-        if (!MultiplayerAuthority.CanMutateGameplay() ||
-            __instance == null)
-        {
-            return;
-        }
-
+        var __t = ModTimeProbe.Begin();
         try
         {
-            var soldier = __instance.GetSoldier();
-            if (AiOwnership.IsAutonomous(soldier) &&
-                !KnownTargetSuppressiveFire.OwnsAim(soldier.GetInstanceID(), Time.time))
+            if (!MultiplayerAuthority.CanMutateGameplay() ||
+                __instance == null)
             {
-                IncomingFireAwareness.Update(__instance, soldier, Time.time);
+                return;
+            }
+
+            try
+            {
+                var soldier = __instance.GetSoldier();
+                if (AiOwnership.IsAutonomous(soldier) &&
+                    !KnownTargetSuppressiveFire.OwnsAim(soldier.GetInstanceID(), Time.time))
+                {
+                    IncomingFireAwareness.Update(__instance, soldier, Time.time);
+                }
+            }
+            catch (Exception ex)
+            {
+                Plugin.LogSource.LogWarning($"Incoming-fire orientation failed: {ex.Message}");
             }
         }
-        catch (Exception ex)
+        finally
         {
-            Plugin.LogSource.LogWarning($"Incoming-fire orientation failed: {ex.Message}");
+            ModTimeProbe.End(ModTimeSite.IncomingFire, __t);
         }
     }
 }
@@ -751,6 +804,7 @@ internal static class SoldierSequentialUpdatePatch
     [HarmonyPrefix]
     private static void Prefix(SoldierAI __instance)
     {
+        var __t = ModTimeProbe.Begin();
         try
         {
             if (!MultiplayerAuthority.CanMutateGameplay())
@@ -780,11 +834,16 @@ internal static class SoldierSequentialUpdatePatch
             Plugin.LogSource.LogWarning(
                 $"Defensive position pre-update failed: {ex.Message}");
         }
+        finally
+        {
+            ModTimeProbe.End(ModTimeSite.SequentialUpdate, __t);
+        }
     }
 
     [HarmonyPostfix]
     private static void Postfix(SoldierAI __instance)
     {
+        var __t = ModTimeProbe.Begin();
         try
         {
             if (!MultiplayerAuthority.CanMutateGameplay())
@@ -823,6 +882,10 @@ internal static class SoldierSequentialUpdatePatch
         catch (Exception ex)
         {
             Plugin.LogSource.LogWarning($"Soldier tactical update failed: {ex.Message}");
+        }
+        finally
+        {
+            ModTimeProbe.End(ModTimeSite.SequentialUpdate, __t);
         }
     }
 
@@ -910,31 +973,8 @@ internal static class SoldierSequentialUpdatePatch
             return;
         AiState.NextTankThreatCheck[id] = now + 0.75f;
 
-        var vehicles = Vehicle.allVehicles;
-        if (vehicles == null)
-            return;
-
-        Vehicle? nearestTank = null;
-        var nearestSqr = Settings.TankAwarenessDistance.Value * Settings.TankAwarenessDistance.Value;
-        var position = soldier.transform.position;
-
-        for (var i = 0; i < vehicles.Count; i++)
-        {
-            var vehicle = vehicles[i];
-            if (vehicle == null || vehicle.life <= 0 || vehicle.GetComponent<VehicleTank>() == null)
-                continue;
-            if (string.Equals(vehicle.GetVehicleFaction(), soldier.faction, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            var sqr = (vehicle.GetCenterOfUnit() - position).sqrMagnitude;
-            if (sqr < nearestSqr)
-            {
-                nearestSqr = sqr;
-                nearestTank = vehicle;
-            }
-        }
-
-        if (nearestTank == null)
+        var maxDistanceSqr = Settings.TankAwarenessDistance.Value * Settings.TankAwarenessDistance.Value;
+        if (!TryFindNearestEnemyTank(soldier, maxDistanceSqr, out var nearestTank, out var nearestSqr))
         {
             AiState.TankCoverHideUntil.Remove(id);
             return;
@@ -956,7 +996,7 @@ internal static class SoldierSequentialUpdatePatch
             AiState.TankCoverHideUntil.Remove(id);
             if (advancingTowardTank || distance <= Settings.TankRetreatDistance.Value)
             {
-                ContactResponse.SetTacticalPose(ai, soldier, SoldierPose.Crouch);
+                ContactResponse.SetTacticalPose(ai, soldier, SoldierPose.Crouch, "perception-crouch");
                 if (ContactResponse.IsRelocating(id))
                     return;
 
@@ -1040,32 +1080,69 @@ internal static class SoldierSequentialUpdatePatch
 
     internal static bool HasNearbyTankThreat(Soldier soldier)
     {
-        if (soldier == null || soldier.IsATUnit())
+        if (soldier == null || soldier.IsATUnit() || soldier.IsOnVehicle())
             return false;
+
+        var id = soldier.GetInstanceID();
+        var now = Time.time;
+        if (!AiState.CooldownReady(AiState.NextTankThreatSnapshotCheck, id, now))
+            return AiState.CachedTankThreat.TryGetValue(id, out var cached) && cached;
+
+        AiState.NextTankThreatSnapshotCheck[id] = now + 0.75f;
+        var maximumSqr = Settings.TankAwarenessDistance.Value *
+                         Settings.TankAwarenessDistance.Value;
+        var hasThreat = TryFindNearestEnemyTank(soldier, maximumSqr, out _, out _);
+        AiState.CachedTankThreat[id] = hasThreat;
+        return hasThreat;
+    }
+
+    // Tank-ness never changes for a live vehicle, so a stale cache entry is
+    // harmless; the alternative is a GetComponent call per vehicle per soldier
+    // update, which is the actual cost this cache removes.
+    private static readonly Dictionary<int, bool> TankVehicleCache = new();
+
+    private static bool IsTankCached(Vehicle vehicle)
+    {
+        var id = vehicle.GetInstanceID();
+        if (TankVehicleCache.TryGetValue(id, out var isTank))
+            return isTank;
+
+        isTank = vehicle.GetComponent<VehicleTank>() != null;
+        TankVehicleCache[id] = isTank;
+        return isTank;
+    }
+
+    private static bool TryFindNearestEnemyTank(
+        Soldier soldier,
+        float maxDistanceSqr,
+        [NotNullWhen(true)] out Vehicle? tank,
+        out float sqrDistance)
+    {
+        tank = null;
+        sqrDistance = maxDistanceSqr;
 
         var vehicles = Vehicle.allVehicles;
         if (vehicles == null)
             return false;
 
-        var maximumSqr = Settings.TankAwarenessDistance.Value *
-                         Settings.TankAwarenessDistance.Value;
         var position = soldier.transform.position;
         for (var i = 0; i < vehicles.Count; i++)
         {
             var vehicle = vehicles[i];
-            if (vehicle == null || vehicle.life <= 0 ||
-                vehicle.GetComponent<VehicleTank>() == null ||
-                string.Equals(vehicle.GetVehicleFaction(), soldier.faction,
-                    StringComparison.OrdinalIgnoreCase))
-            {
+            if (vehicle == null || vehicle.life <= 0 || !IsTankCached(vehicle))
                 continue;
-            }
+            if (string.Equals(vehicle.GetVehicleFaction(), soldier.faction, StringComparison.OrdinalIgnoreCase))
+                continue;
 
-            if ((vehicle.GetCenterOfUnit() - position).sqrMagnitude < maximumSqr)
-                return true;
+            var sqr = (vehicle.GetCenterOfUnit() - position).sqrMagnitude;
+            if (sqr < sqrDistance)
+            {
+                sqrDistance = sqr;
+                tank = vehicle;
+            }
         }
 
-        return false;
+        return tank != null;
     }
 
     private static bool IsAdvancingToward(SoldierAI ai, Soldier soldier, Vector3 threatPosition)
@@ -1307,15 +1384,8 @@ internal static class TargetAcquisition
         }
         else
         {
-            var sampleGap = Mathf.Max(0f, now - candidate.LastSeenAt);
-            if (sampleGap > CandidateStaleSeconds)
-            {
-                candidate.ObservedSeconds = 0f;
-            }
-            else
-            {
-                candidate.ObservedSeconds += sampleGap;
-            }
+            candidate.ObservedSeconds = TargetConfirmationCore.AccrueObservation(
+                candidate.ObservedSeconds, candidate.LastSeenAt, now);
         }
 
         candidate.LastSeenAt = now;

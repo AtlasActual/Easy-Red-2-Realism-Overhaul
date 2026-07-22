@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 using BepInEx.Configuration;
+using UnityEngine;
 
 namespace ER2RealismOverhaul;
 
@@ -71,6 +72,19 @@ internal sealed class MenuSetting
 
 internal static class SettingsCatalog
 {
+    private static readonly HashSet<string> NonSystemSwitchIds = new(StringComparer.Ordinal)
+    {
+        // These govern menu availability, diagnostic output, or presentation format;
+        // they are not overhaul systems and must remain usable after Disable All.
+        "6c. Aircraft flight physics\u001fTelemetryLogging",
+        "6d. Aircraft instruments\u001fUseKnotsAndFeet",
+        "6d. Aircraft instruments\u001fShowAltitudeAboveGround",
+        "7e. First-person view\u001fCompassUseMils",
+        "7i. Settings menu\u001fShowLauncherButton",
+        "AI - Diagnostics\u001fVisualDebugStartEnabled",
+        "AI - Diagnostics\u001fVerboseLogging"
+    };
+
     private static readonly Regex SectionPrefix = new(@"^\d+[a-z]?\.\s*", RegexOptions.Compiled);
     private static readonly Regex WordBoundary = new(@"(?<=[a-z0-9])(?=[A-Z])", RegexOptions.Compiled);
     // Broadly useful controls are also exposed in Quick Setup. Unified AI sections keep
@@ -102,6 +116,7 @@ internal static class SettingsCatalog
         "AI - Infantry tactics - Suppression\u001fEnabled",
 
         "AI - Commander\u001fEnabled",
+        "AI - Commander\u001fAttackerAggressiveness",
 
         "AI - Infantry tactics - Danger\u001fEnabled",
         "AI - Infantry tactics - Danger\u001fProneSuppressionThreshold",
@@ -200,16 +215,22 @@ internal static class SettingsCatalog
         "7e. First-person view\u001fPlayerShadowEnabled",
         "7e. First-person view\u001fHoldBreathZoomMultiplier",
         "7e. First-person view\u001fBinocularsEnabled",
+        "7e. First-person view\u001fBinocularsKey",
         "7e. First-person view\u001fBinocularZoomMultiplier",
         "7e. First-person view\u001fFreeLookEnabled",
+        "7e. First-person view\u001fFreeLookKey",
         "7e. First-person view\u001fFreeLookHorizontalArcDegrees",
         "7e. First-person view\u001fCompassAlwaysVisible",
+        "7e. First-person view\u001fCompassKey",
         "7e. First-person view\u001fCompassUseMils",
 
         "7f. Multiplayer nameplates\u001fKeepPlayerNamesWithHudDisabled",
 
-        "7g. AI ragdoll physics\u001fAiRagdollWeightMultiplier",
-
+        "AI - Diagnostics\u001fVisualDebugStartEnabled",
+        "AI - Diagnostics\u001fVisualDebugToggleKey",
+        "AI - Diagnostics\u001fVisualDebugMaximumDistanceMeters",
+        "AI - Diagnostics\u001fVisualDebugMaximumActors",
+        "AI - Diagnostics\u001fVisualDebugEventHistorySeconds",
         "AI - Diagnostics\u001fVerboseLogging"
     };
 
@@ -222,7 +243,8 @@ internal static class SettingsCatalog
 
         foreach (var entry in Settings.GetConfigEntries())
         {
-            if (entry.SettingType != typeof(bool) && entry.SettingType != typeof(int) && entry.SettingType != typeof(float))
+            if (entry.SettingType != typeof(bool) && entry.SettingType != typeof(int) &&
+                entry.SettingType != typeof(float) && entry.SettingType != typeof(KeyCode))
                 continue;
             if (IsMigrationOnlyEntry(entry))
                 continue;
@@ -242,6 +264,9 @@ internal static class SettingsCatalog
 
         All = settings;
     }
+
+    internal static bool IsSystemSwitch(MenuSetting setting) =>
+        setting.Entry.SettingType == typeof(bool) && !NonSystemSwitchIds.Contains(setting.Id);
 
     internal static string CategoryName(SettingsMenuCategory category) => category switch
     {
@@ -301,6 +326,14 @@ internal static class SettingsCatalog
             .Replace("Hz", "Hz", StringComparison.Ordinal);
     }
 
+    internal static string HumanizeKeyCode(string keyCode)
+    {
+        var text = WordBoundary.Replace(keyCode, " ");
+        return text
+            .Replace("Alpha ", string.Empty, StringComparison.Ordinal)
+            .Replace("Keypad", "Keypad ", StringComparison.Ordinal);
+    }
+
     internal static string FormatValue(object value)
     {
         return value switch
@@ -308,6 +341,7 @@ internal static class SettingsCatalog
             bool boolean => boolean ? "true" : "false",
             float single => single.ToString("0.###", CultureInfo.InvariantCulture),
             int integer => integer.ToString(CultureInfo.InvariantCulture),
+            KeyCode keyCode => keyCode.ToString(),
             _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty
         };
     }
@@ -369,6 +403,7 @@ internal static class SettingsCatalog
         "CoverSearchRadiusMeters" => ("search nearer cover", "search farther cover"),
         "EngagementHaltDistanceMeters" => ("halt only closer", "halt from farther"),
         "MaximumAttackCombatHaltSeconds" => ("push sooner under fire", "hold and fire longer"),
+        "AttackerAggressiveness" => ("more cautious", "more aggressive"),
         "MountedGunnerRiseSettleSeconds" => ("fire sooner", "wait longer to fire"),
         "SmgMovingFireMaxDistanceMeters" => ("moving fire closer", "moving fire farther"),
         "SmgMaximumEngagementDistanceMeters" => ("SMG fires closer", "SMG fires farther"),
@@ -506,8 +541,6 @@ internal static class SettingsCatalog
         "HoldBreathZoomMultiplier" => ("weaker hold-breath zoom", "stronger hold-breath zoom"),
         "BinocularZoomMultiplier" => ("wider binocular view", "stronger binocular zoom"),
         "FreeLookHorizontalArcDegrees" => ("narrower freelook arc", "wider freelook arc"),
-        "AiRagdollWeightMultiplier" => ("native body weight", "heavier dead bodies"),
-
             _ => ("smaller effect", "larger effect")
         };
     }

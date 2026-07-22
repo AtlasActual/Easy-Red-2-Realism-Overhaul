@@ -12,11 +12,16 @@
     <Compile Include="Program.cs" />
     <Compile Include="..\..\CommanderPlannerCore.cs" Link="CommanderPlannerCore.cs" />
     <Compile Include="..\..\AircraftBombDecisionCore.cs" Link="AircraftBombDecisionCore.cs" />
+    <Compile Include="..\..\ArtilleryCrewSelectionCore.cs" Link="ArtilleryCrewSelectionCore.cs" />
     <Compile Include="..\..\BallisticCoverDecisionCore.cs" Link="BallisticCoverDecisionCore.cs" />
     <Compile Include="..\..\InfantryCoverDecisionCore.cs" Link="InfantryCoverDecisionCore.cs" />
+    <Compile Include="..\..\CoverClusterCore.cs" Link="CoverClusterCore.cs" />
     <Compile Include="..\..\GroundAiDecisionCore.cs" Link="GroundAiDecisionCore.cs" />
     <Compile Include="..\..\TransportDismountDecisionCore.cs" Link="TransportDismountDecisionCore.cs" />
     <Compile Include="..\..\CoverCandidateSamplingCore.cs" Link="CoverCandidateSamplingCore.cs" />
     <Compile Include="..\..\LauncherSelectionDecisionCore.cs" Link="LauncherSelectionDecisionCore.cs" />
+    <Compile Include="..\..\TargetConfirmationCore.cs" Link="TargetConfirmationCore.cs" />
+    <Compile Include="..\..\ContactReportStoreCore.cs" Link="ContactReportStoreCore.cs" />
+    <Compile Include="..\..\TankEngagementDecisionCore.cs" Link="TankEngagementDecisionCore.cs" />
   </ItemGroup>
 </Project>

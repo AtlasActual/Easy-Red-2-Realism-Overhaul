@@ -1582,18 +1582,46 @@ internal static class AircraftFlightFixedUpdatePatch
 {
     [HarmonyPrefix]
     private static void Prefix(VehiclePlane __instance, out float __state)
-        => __state = AircraftFlightPhysics.BeginNativeFixedUpdate(__instance);
+    {
+        var __t = ModTimeProbe.Begin();
+        try
+        {
+            __state = AircraftFlightPhysics.BeginNativeFixedUpdate(__instance);
+        }
+        finally
+        {
+            ModTimeProbe.End(ModTimeSite.Other, __t);
+        }
+    }
 
     [HarmonyPostfix]
     private static void Postfix(VehiclePlane __instance, float __state)
     {
-        AircraftFlightPhysics.EndNativeFixedUpdate(__state);
-        AircraftFlightPhysics.FixedUpdate(__instance);
+        var __t = ModTimeProbe.Begin();
+        try
+        {
+            AircraftFlightPhysics.EndNativeFixedUpdate(__state);
+            AircraftFlightPhysics.FixedUpdate(__instance);
+        }
+        finally
+        {
+            ModTimeProbe.End(ModTimeSite.Other, __t);
+        }
     }
 
     [HarmonyFinalizer]
     private static void Finalizer(float __state)
-        => AircraftFlightPhysics.EndNativeFixedUpdate(__state);
+    {
+        var __t = ModTimeProbe.Begin();
+        try
+        {
+            AircraftFlightPhysics.EndNativeFixedUpdate(__state);
+        }
+        finally
+        {
+            ModTimeProbe.End(ModTimeSite.Other, __t);
+        }
+    }
 }
 
 [HarmonyPatch(typeof(VehiclePlane), "Update")]
@@ -1602,6 +1630,7 @@ internal static class AircraftAiGuidanceTurnPatch
     [HarmonyPrefix]
     private static void Prefix(VehiclePlane __instance, out Quaternion __state)
     {
+        var __t = ModTimeProbe.Begin();
         try
         {
             __state = __instance != null ? __instance.transform.rotation : Quaternion.identity;
@@ -1610,11 +1639,25 @@ internal static class AircraftAiGuidanceTurnPatch
         {
             __state = Quaternion.identity;
         }
+        finally
+        {
+            ModTimeProbe.End(ModTimeSite.Other, __t);
+        }
     }
 
     [HarmonyPostfix]
     private static void Postfix(VehiclePlane __instance, Quaternion __state)
-        => AircraftFlightPhysics.EnsureAiGuidanceTurn(__instance, __state);
+    {
+        var __t = ModTimeProbe.Begin();
+        try
+        {
+            AircraftFlightPhysics.EnsureAiGuidanceTurn(__instance, __state);
+        }
+        finally
+        {
+            ModTimeProbe.End(ModTimeSite.Other, __t);
+        }
+    }
 }
 
 [HarmonyPatch(typeof(VehiclePlane), nameof(VehiclePlane.OpenGear))]
@@ -1687,58 +1730,66 @@ internal static class AircraftAiEnergyManagementPatch
     [HarmonyPriority(Priority.Last)]
     private static void Postfix(AIPlane __instance)
     {
-        if (!Settings.AircraftAiEnergyManagementEnabled.Value ||
-            __instance == null || __instance.veh == null || !__instance.HasAIDriver ||
-            !AircraftFlightPhysics.TryGetState(__instance.veh, out var state))
-        {
-            return;
-        }
-
+        var __t = ModTimeProbe.Begin();
         try
         {
-            var plane = __instance.veh;
-            if (plane.isGrounded || !plane.IsInAerodynamicMode())
-                return;
-
-            var flatForward = Vector3.ProjectOnPlane(plane.transform.forward, Vector3.up);
-            if (flatForward.sqrMagnitude < 0.01f)
-                flatForward = Vector3.forward;
-            else
-                flatForward.Normalize();
-
-            var clearance = AircraftFlightPhysics.TerrainClearanceAhead(plane, state);
-            var recoveryClearance = Mathf.Clamp(state.AirspeedMs * 1.15f, 75f, 190f);
-            var fastLowDive = state.VerticalSpeedMs < -18f &&
-                              clearance >= 0f && clearance < recoveryClearance &&
-                              state.AirspeedMs > state.StallSpeedMs * 1.25f;
-
-            if (fastLowDive)
+            if (!Settings.AircraftAiEnergyManagementEnabled.Value ||
+                __instance == null || __instance.veh == null || !__instance.HasAIDriver ||
+                !AircraftFlightPhysics.TryGetState(__instance.veh, out var state))
             {
-                plane.targetRotation = Quaternion.LookRotation(
-                    (flatForward + Vector3.up * 0.24f).normalized, Vector3.up);
-                plane.throttle = Mathf.Max(plane.throttle, 55f);
                 return;
             }
 
-            var hasRecoveryAltitude = clearance < 0f || clearance > 60f;
-            var stallRecovery = state.IsStalled &&
-                                state.StallSeverity > 0.48f && hasRecoveryAltitude;
-            if (stallRecovery)
+            try
             {
-                var recoveryDescent = state.IsSpinning ? 0.42f : 0.28f;
-                plane.targetRotation = Quaternion.LookRotation(
-                    (flatForward + Vector3.down * recoveryDescent).normalized, Vector3.up);
-                plane.throttle = 100f;
-                return;
-            }
+                var plane = __instance.veh;
+                if (plane.isGrounded || !plane.IsInAerodynamicMode())
+                    return;
 
-            // Outside a developed stall or imminent terrain impact, preserve the native
-            // AI's target rotation. Replacing ordinary low-speed climb commands here can
-            // erase a one-shot waypoint turn and leave the aircraft flying straight away.
+                var flatForward = Vector3.ProjectOnPlane(plane.transform.forward, Vector3.up);
+                if (flatForward.sqrMagnitude < 0.01f)
+                    flatForward = Vector3.forward;
+                else
+                    flatForward.Normalize();
+
+                var clearance = AircraftFlightPhysics.TerrainClearanceAhead(plane, state);
+                var recoveryClearance = Mathf.Clamp(state.AirspeedMs * 1.15f, 75f, 190f);
+                var fastLowDive = state.VerticalSpeedMs < -18f &&
+                                  clearance >= 0f && clearance < recoveryClearance &&
+                                  state.AirspeedMs > state.StallSpeedMs * 1.25f;
+
+                if (fastLowDive)
+                {
+                    plane.targetRotation = Quaternion.LookRotation(
+                        (flatForward + Vector3.up * 0.24f).normalized, Vector3.up);
+                    plane.throttle = Mathf.Max(plane.throttle, 55f);
+                    return;
+                }
+
+                var hasRecoveryAltitude = clearance < 0f || clearance > 60f;
+                var stallRecovery = state.IsStalled &&
+                                    state.StallSeverity > 0.48f && hasRecoveryAltitude;
+                if (stallRecovery)
+                {
+                    var recoveryDescent = state.IsSpinning ? 0.42f : 0.28f;
+                    plane.targetRotation = Quaternion.LookRotation(
+                        (flatForward + Vector3.down * recoveryDescent).normalized, Vector3.up);
+                    plane.throttle = 100f;
+                    return;
+                }
+
+                // Outside a developed stall or imminent terrain impact, preserve the native
+                // AI's target rotation. Replacing ordinary low-speed climb commands here can
+                // erase a one-shot waypoint turn and leave the aircraft flying straight away.
+            }
+            catch
+            {
+                // Unknown or modded aircraft retain their native AI behavior.
+            }
         }
-        catch
+        finally
         {
-            // Unknown or modded aircraft retain their native AI behavior.
+            ModTimeProbe.End(ModTimeSite.Other, __t);
         }
     }
 }

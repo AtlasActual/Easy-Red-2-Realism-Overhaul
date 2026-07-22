@@ -6,11 +6,7 @@ ER2RealismOverhaul is built around the rough edges that become hard to ignore af
 
 The goal is to fix those moments without replacing the game underneath them. This is not a health or damage multiplier mod; Easy Red 2's missions, armour system, and basic damage model remain intact.
 
-<<<<<<< Updated upstream
-> **Current release:** 1.0
-=======
 > **Current release:** 1.0.3
->>>>>>> Stashed changes
 >
 > **Compatibility:** Tested with Easy Red 2 Steam public-branch build `24246380` (July 20, 2026)
 
@@ -51,22 +47,34 @@ The goal is to fix those moments without replacing the game underneath them. Thi
 
 - More restrained AI command gestures and better animation quality for visible distant soldiers.
 - Allied multiplayer infantry can deliberately form one squad: open the player list, select a player, and choose **Join [player]'s squad**. Joining is per life and never happens automatically on spawn or respawn.
-- Configurable impact-decal lifetime, tracer frequency, battle chatter, distant sound shaping, weapon audio, tank engines, tracks, and player footsteps.
+- Configurable impact-decal lifetime, tracer frequency, battle chatter, distant sound shaping, weapon audio, tank engines, tracks, player footsteps, and rain/snow particle size, amount, and fall speed.
 - Adjustable player suppression effects—including a larger near-miss radius and optional depth-of-field blur—plus true 10x Caps Lock binocular zoom with the weapon model hidden, 200-degree hold-Alt freelook, first-person shadows, aircraft instruments, and allied multiplayer names when the rest of the HUD is hidden.
 - A map-north-aligned scrolling bottom-screen compass tape shown for five seconds with **K**, using NATO mils by default with optional degree bearings, tapered fading edges, and an option to keep it permanently visible.
-- A built-in settings menu with Apply, Cancel, reset controls, and individual switches for nearly every system.
+- A built-in settings menu with Apply, Cancel, reset controls, individual switches for nearly every system, and one-click Enable All / Disable All system kill switches.
 
 Press **F10**, or choose **Realism Overhaul Settings** from the main or pause menu. AI options are organized into Commander, Infantry tactics, Vehicle tactics, Support coordination, Attack posture bonuses, and Diagnostics. Defender static-weapon staffing is part of the Commander system rather than a separate switch. Non-AI settings are unchanged.
 
+The F10 menu also lets you rebind the **Binoculars Key**, **Free Look Key**, and **Compass Key**: select a binding, press the desired key, then Apply to save it. Defaults remain **Caps Lock**, either **Alt** key, and **K**.
+
 On foot in first person, press **Caps Lock** to toggle the clean 10x binocular view and hold either **Alt** key for a 200-degree freelook arc. Press **K** during gameplay to show the scrolling compass band for five seconds. The F10 menu includes magnification, freelook arc, compass units, and always-visible compass settings.
+
+### Visual AI diagnostics
+
+Press **F8** during gameplay to show the local visual AI debug layer. It is disabled by default, does not issue orders or alter synchronized AI state, and only collects its event feed and timing counters while visible. The Diagnostics page in the F10 menu can change the toggle key, startup state, sampling distance, maximum infantry count, and event-history duration.
+
+- **F7** freezes or resumes the current snapshot.
+- **F6** cycles all, allied, and enemy AI immediately, including while the snapshot is frozen. The header shows the player-faction reference and visible/total actor counts so the active filter is auditable.
+- **\\** focuses the soldier nearest the center of the screen; **[** and **]** cycle sampled soldiers; **Backspace** clears focus.
+- **1-9** selects one clearly labelled layer: actors, perception, movement, fire safety, danger, command/contact, vehicles, aircraft/support, or events/performance. Hold **Shift** while pressing **1-9** to combine or remove layers. **0** returns to the minimal Actors view; **Shift+0** shows everything.
+- **-** and **=** reduce or increase the temporary viewing distance by 50 m. **Delete** clears captured events and timing history.
+
+The header always names the selected layer, its color, and the meaning of its marks. Unfocused views are deliberately sparse; focusing a soldier opens the detailed FOV, candidates, movement ownership, cover geometry, safety state, or matching command traffic. The cyan movement route is only Easy Red 2's live executor destination. Tactical winners and planned cover are labelled separately, so proposal context can never masquerade as the route the soldier is actually following.
+
+The complete layer and marker reference is in [`docs/AI_VISUAL_DEBUG.md`](docs/AI_VISUAL_DEBUG.md).
 
 ## Coming soon
 
-<<<<<<< Updated upstream
-Tank combat is the next major area being rebuilt. Tank ballistics, armour values, and internal vehicle subsystems are all being reworked for a future release. These changes are still work in progress and are not part of v1.0; for now, the mod leaves Easy Red 2's existing tank ballistics and armour model alone.
-=======
 Tank combat is the next major area being rebuilt. Tank ballistics, armour values, and internal vehicle subsystems are all being reworked for a future release. These changes are still work in progress and are not part of v1.0.3; for now, the mod leaves Easy Red 2's existing tank ballistics and armour model alone.
->>>>>>> Stashed changes
 
 ## Installation
 

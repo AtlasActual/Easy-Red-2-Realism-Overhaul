@@ -142,6 +142,12 @@ internal static class SmallExplosionAiThrowForcePatch
 
 internal static class EnhancedFragmentation
 {
+    // Extra fragment rays are supplemental to Easy Red 2's own fragmentation.
+    // Capping only the expensive supplemental rays avoids hitches when a shell
+    // lands beside a large cluster while leaving native blast and fragment damage
+    // completely intact.
+    private const int MaximumSupplementalRaycastsPerExplosion = 24;
+
     private static bool _initialized;
     private static float _nativeFragmentRadiusMultiplier = 1f;
     private static int _explosionSequence;
@@ -208,6 +214,7 @@ internal static class EnhancedFragmentation
         var sequence = unchecked(++_explosionSequence);
         var fragmentDamage = explosionMaxDamage * damageMultiplier;
         var hits = 0;
+        var raycasts = 0;
         foreach (var soldier in candidates)
         {
             if (soldier == null || !soldier.IsAlive)
@@ -224,10 +231,14 @@ internal static class EnhancedFragmentation
                 if (Random01(seed, check * 3) > chancePerCheck)
                     continue;
 
+                if (raycasts >= MaximumSupplementalRaycastsPerExplosion)
+                    break;
+
                 var target = FragmentAimPoint(position, center, seed, check);
                 var start = position + Vector3.up * 0.15f;
                 var ray = target - start;
                 var rayDistance = ray.magnitude;
+                raycasts++;
                 if (rayDistance <= 0.01f ||
                     !Physics.Raycast(start, ray / rayDistance, out var hit, rayDistance + 0.75f,
                         Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
@@ -309,9 +320,31 @@ internal static class EnhancedFragmentation
     }
 }
 
+// Stutter-probe markers: how many explosions the mod's ordnance pipeline processed
+// on the most recent frame that had any. Diagnostic-only.
+internal static class ExplosionProbeMarker
+{
+    internal static int LastExplosionFrame = int.MinValue;
+    internal static int LastExplosionCount;
+
+    internal static void Record()
+    {
+        var frame = UnityEngine.Time.frameCount;
+        if (LastExplosionFrame != frame)
+            LastExplosionCount = 0;
+        LastExplosionFrame = frame;
+        LastExplosionCount++;
+    }
+}
+
 [HarmonyPatch(typeof(Corvostudio.Weapons.Explosion), nameof(Corvostudio.Weapons.Explosion.CreateExplosion))]
 internal static class LayeredBlastEffectsPatch
 {
+    // The layered ring is a gameplay addition, so every nearby soldier is still
+    // considered. Limit its obstruction probes, which are the expensive part, and
+    // use the configured covered-blast fraction for the remaining distant units.
+    private const int MaximumExposureLinecastsPerExplosion = 32;
+
     private readonly record struct LayerSettings(
         float InjuryRadiusMultiplier,
         float SuppressionRadiusMultiplier,
@@ -338,6 +371,7 @@ internal static class LayeredBlastEffectsPatch
         BlastClass __state)
     {
         BlastClassifier.EndExplosion();
+        ExplosionProbeMarker.Record();
 
         if (explosionRadius <= 0f || !MultiplayerAuthority.CanMutateGameplay())
         {
@@ -382,6 +416,7 @@ internal static class LayeredBlastEffectsPatch
             }
         }
 
+        var exposureLinecasts = 0;
         foreach (var soldier in candidates)
         {
             if (soldier == null || !soldier.IsAlive)
@@ -389,7 +424,9 @@ internal static class LayeredBlastEffectsPatch
 
             var center = soldier.GetCenterOfUnit();
             var distance = Vector3.Distance(position, center);
-            var exposure = GetExposure(position, center, soldier);
+            var exposure = exposureLinecasts++ < MaximumExposureLinecastsPerExplosion
+                ? GetExposure(position, center, soldier)
+                : Settings.BlastCoverEffectMultiplier.Value;
 
             // The native explosion owns the inner lethal zone. This ring begins
             // outside it and tapers to zero at the configured injury radius.

@@ -11,6 +11,11 @@ internal static class AiState
     internal static readonly Dictionary<IntPtr, CoverReservation> CoverReservations = new();
     internal static readonly Dictionary<int, float> NextTankThreatCheck = new();
     internal static readonly Dictionary<int, float> TankCoverHideUntil = new();
+    // HasNearbyTankThreat is queried every frame from CaptureSnapshot; these cache
+    // its result on the same 0.75s cadence ApplyTankFear already uses for its own
+    // identical scan, so the snapshot no longer forces an unthrottled per-frame scan.
+    internal static readonly Dictionary<int, float> NextTankThreatSnapshotCheck = new();
+    internal static readonly Dictionary<int, bool> CachedTankThreat = new();
     internal static readonly Dictionary<int, float> FlameEvasionUntil = new();
     internal static readonly Dictionary<int, float> NextTankTactic = new();
     internal static readonly Dictionary<int, float> NextSmokeAttempt = new();
@@ -20,6 +25,17 @@ internal static class AiState
     internal static readonly Dictionary<int, float> AircraftEvasionUntil = new();
     internal static readonly Dictionary<int, Vector3> AircraftEvasionDirection = new();
     internal static readonly Dictionary<int, Flame> Flames = new();
+    internal static readonly Dictionary<int, TankEngagementRuntimeState> TankEngagementStates = new();
+
+    internal static TankEngagementRuntimeState GetTankEngagementState(int id)
+    {
+        if (TankEngagementStates.TryGetValue(id, out var state))
+            return state;
+
+        state = new TankEngagementRuntimeState();
+        TankEngagementStates[id] = state;
+        return state;
+    }
 
     internal static ContactResponseState GetContactState(int id)
     {
@@ -60,6 +76,8 @@ internal static class AiState
         KnownTargetSuppressiveFire.RemoveSoldier(id);
         NextTankThreatCheck.Remove(id);
         TankCoverHideUntil.Remove(id);
+        NextTankThreatSnapshotCheck.Remove(id);
+        CachedTankThreat.Remove(id);
         FlameEvasionUntil.Remove(id);
         NextOrderGesture.Remove(id);
         NextGrenadeThrow.Remove(id);
@@ -150,6 +168,7 @@ internal static class AiState
 
     internal static void Trace(string message)
     {
+        AiDebugTelemetry.RecordTrace(message);
         if (Settings.VerboseLogging.Value)
             Plugin.LogSource.LogInfo(message);
     }
@@ -195,4 +214,34 @@ internal sealed class TargetCandidateState
     internal float LastSeenAt;
     internal float ObservedSeconds;
     internal Vector3 LastKnownPosition;
+}
+
+/// <summary>
+/// Per-vehicle runtime for the tank engagement state machine (TankEngagementDecisionCore)
+/// and its stall watchdog. A stale entry for a destroyed vehicle is harmless (the
+/// instance id is never reused while alive), the same tradeoff already accepted by
+/// the tank-tactics cooldown maps above.
+/// </summary>
+internal sealed class TankEngagementRuntimeState
+{
+    internal TankEngagementState State = TankEngagementState.Follow;
+    internal float LastArmoredTargetSeenAt;
+    internal float LastKnownDistance;
+    internal bool LastKnownHullFacesThreat;
+
+    internal float WatchdogNextSampleAt;
+    internal bool WatchdogWindowActive;
+    internal float WatchdogWindowStartAt;
+    internal Vector3 WatchdogWindowStartPosition;
+    internal bool WatchdogProgressAnchorSet;
+    internal Vector3 WatchdogProgressAnchorPosition;
+    internal int WatchdogFailedRecoveries;
+
+    internal void ResetWatchdog()
+    {
+        WatchdogNextSampleAt = 0f;
+        WatchdogWindowActive = false;
+        WatchdogProgressAnchorSet = false;
+        WatchdogFailedRecoveries = 0;
+    }
 }

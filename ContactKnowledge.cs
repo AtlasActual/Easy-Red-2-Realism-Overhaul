@@ -9,13 +9,6 @@ internal enum ContactKind
     Aircraft
 }
 
-internal enum ContactDeliveryKind
-{
-    Direct,
-    Voice,
-    Radio
-}
-
 internal sealed class ContactReport
 {
     internal Vector3 LastKnownPosition;
@@ -52,6 +45,31 @@ internal sealed class ContactReport
         };
     }
 }
+
+internal readonly record struct ContactDebugReport(
+    int RecipientSquadId,
+    Vector3 Position,
+    ContactKind Kind,
+    ContactDeliveryKind DeliveryKind,
+    float ObservedAt,
+    float ReceivedAt,
+    float Confidence,
+    int SourceSoldierId,
+    int SourceSquadId,
+    int TargetId,
+    int TargetSquadId,
+    string TargetFaction);
+
+internal readonly record struct ContactDebugDelivery(
+    int RecipientSquadId,
+    Vector3 Position,
+    Vector3 SourcePosition,
+    Vector3 RecipientPosition,
+    ContactKind Kind,
+    ContactDeliveryKind DeliveryKind,
+    float DeliverAt,
+    int SourceSquadId,
+    int TargetId);
 
 internal static class ContactKnowledge
 {
@@ -228,6 +246,78 @@ internal static class ContactKnowledge
                 continue;
 
             destination.Add(endpoint.Squad);
+        }
+    }
+
+    internal static void CollectDebugState(
+        float now,
+        List<ContactDebugReport> reports,
+        List<ContactDebugDelivery> deliveries)
+    {
+        reports.Clear();
+        deliveries.Clear();
+
+        foreach (var squadPair in ReportsBySquad)
+        {
+            foreach (var report in squadPair.Value.Values)
+            {
+                var age = now - report.ObservedAt;
+                var lifetime = Settings.ContactReportLifetimeSeconds.Value;
+                if (age < 0f || age > lifetime)
+                    continue;
+                var confidence = ContactReportStoreCore.DecayedConfidence(
+                    report.InitialConfidence, age, lifetime);
+                if (confidence <= 0f)
+                    continue;
+                reports.Add(new ContactDebugReport(
+                    squadPair.Key,
+                    report.LastKnownPosition,
+                    report.Kind,
+                    report.DeliveryKind,
+                    report.ObservedAt,
+                    report.ReceivedAt,
+                    confidence,
+                    report.SourceSoldierId,
+                    report.SourceSquadId,
+                    report.TargetId,
+                    report.TargetSquadId,
+                    report.TargetFaction));
+            }
+        }
+
+        foreach (var pending in PendingDeliveries.Values)
+        {
+            var sourcePosition = Vector3.zero;
+            var recipientPosition = Vector3.zero;
+            try
+            {
+                if (KnownSquads.TryGetValue(pending.Report.SourceSquadId, out var source) &&
+                    source.Squad?.Leader != null)
+                {
+                    sourcePosition = source.Squad.Leader.GetCenterOfUnit();
+                }
+                if (KnownSquads.TryGetValue(pending.RecipientSquadId, out var recipient) &&
+                    recipient.Squad?.Leader != null)
+                {
+                    recipientPosition = recipient.Squad.Leader.GetCenterOfUnit();
+                }
+            }
+            catch
+            {
+                // A squad leader can despawn while the queued report remains valid.
+            }
+            deliveries.Add(new ContactDebugDelivery(
+                pending.RecipientSquadId,
+                pending.Report.LastKnownPosition,
+                sourcePosition,
+                recipientPosition,
+                pending.Report.Kind,
+                pending.Report.DeliveryKind,
+                pending.DeliverAt,
+                pending.Report.SourceSquadId,
+                pending.Report.TargetSquadId != 0
+                    ? pending.Report.TargetSquadId
+                    : pending.Report.TargetId));
         }
     }
 
@@ -427,8 +517,9 @@ internal static class ContactKnowledge
 
         var key = report.TargetSquadId != 0 ? report.TargetSquadId : report.TargetId;
         if (!reports.TryGetValue(key, out var existing) ||
-            report.ObservedAt >= existing.ObservedAt ||
-            report.DeliveryKind < existing.DeliveryKind)
+            ContactReportStoreCore.ShouldReplace(
+                existing.ObservedAt, existing.DeliveryKind,
+                report.ObservedAt, report.DeliveryKind))
         {
             reports[key] = report;
         }
@@ -583,8 +674,8 @@ internal static class ContactKnowledge
         if (age < 0f || age > lifetime)
             return false;
 
-        report.Confidence = report.InitialConfidence *
-                            Mathf.Clamp01(1f - age / Mathf.Max(0.1f, lifetime));
+        report.Confidence = ContactReportStoreCore.DecayedConfidence(
+            report.InitialConfidence, age, lifetime);
         return report.Confidence > 0f;
     }
 

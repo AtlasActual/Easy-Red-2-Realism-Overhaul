@@ -308,19 +308,27 @@ internal static class AnticipatoryTransportDismountPatch
     [HarmonyPostfix]
     private static void Postfix(AIVehicle __instance)
     {
-        if (!Settings.DangerReactionsEnabled.Value ||
-            !MultiplayerAuthority.CanMutateGameplay())
-        {
-            return;
-        }
-
+        var __t = ModTimeProbe.Begin();
         try
         {
-            TransportDismount.Update(__instance, Time.time);
+            if (!Settings.DangerReactionsEnabled.Value ||
+                !MultiplayerAuthority.CanMutateGameplay())
+            {
+                return;
+            }
+
+            try
+            {
+                TransportDismount.Update(__instance, Time.time);
+            }
+            catch (Exception ex)
+            {
+                Plugin.LogSource.LogWarning($"Transport dismount update failed: {ex.Message}");
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            Plugin.LogSource.LogWarning($"Transport dismount update failed: {ex.Message}");
+            ModTimeProbe.End(ModTimeSite.VehicleAi, __t);
         }
     }
 }

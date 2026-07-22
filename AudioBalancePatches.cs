@@ -48,13 +48,29 @@ internal static class TankTrackVolumePatch
     [HarmonyPrefix]
     private static void Prefix(TankTrucksSound __instance)
     {
-        VehicleAudioBalance.RestoreTrackVolume(__instance);
+        var __t = ModTimeProbe.Begin();
+        try
+        {
+            VehicleAudioBalance.RestoreTrackVolume(__instance);
+        }
+        finally
+        {
+            ModTimeProbe.End(ModTimeSite.Other, __t);
+        }
     }
 
     [HarmonyPostfix]
     private static void Postfix(TankTrucksSound __instance)
     {
-        VehicleAudioBalance.ApplyTrackVolume(__instance);
+        var __t = ModTimeProbe.Begin();
+        try
+        {
+            VehicleAudioBalance.ApplyTrackVolume(__instance);
+        }
+        finally
+        {
+            ModTimeProbe.End(ModTimeSite.Other, __t);
+        }
     }
 }
 
@@ -396,7 +412,12 @@ internal static class DistantSoundShaper
 {
     private const float NeutralCutoffHz = 22000f;
     private const float ContinuousUpdateInterval = 0.25f;
-    private const float ExplosionScanInterval = 0.1f;
+    // Explosion audio sources are static for the life of the pooled effect.  A
+    // full child-component walk ten times per second per explosion becomes very
+    // costly during artillery barrages, so refresh them at a human-inaudible
+    // cadence and spread concurrent effects across frames.
+    private const float ExplosionScanInterval = 0.35f;
+    private const int MaxExplosionAudioScansPerFrame = 2;
     private static readonly Dictionary<int, AudioLowPassFilter> Filters = new();
     private static readonly Dictionary<int, AudioReverbFilter> ReverbFilters = new();
     private static bool _reverbFilterAvailable = true;
@@ -432,6 +453,7 @@ internal static class DistantSoundShaper
             return;
 
         var now = Time.unscaledTime;
+        var scansThisFrame = 0;
         CompletedExplosions.Clear();
         foreach (var pair in TrackedExplosions)
         {
@@ -443,9 +465,10 @@ internal static class DistantSoundShaper
                 continue;
             }
 
-            if (now < tracked.NextScanAt)
+            if (now < tracked.NextScanAt || scansThisFrame >= MaxExplosionAudioScansPerFrame)
                 continue;
             tracked.NextScanAt = now + ExplosionScanInterval;
+            scansThisFrame++;
 
             try
             {

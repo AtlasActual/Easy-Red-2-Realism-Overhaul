@@ -7,15 +7,9 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>ER2RealismOverhaul</AssemblyName>
     <RootNamespace>ER2RealismOverhaul</RootNamespace>
-<<<<<<< Updated upstream
-    <Version>1.0.0</Version>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.0</FileVersion>
-=======
-    <Version>1.0.2</Version>
-    <AssemblyVersion>1.0.2.0</AssemblyVersion>
-    <FileVersion>1.0.2.0</FileVersion>
->>>>>>> Stashed changes
+    <Version>1.0.3</Version>
+    <AssemblyVersion>1.0.3.0</AssemblyVersion>
+    <FileVersion>1.0.3.0</FileVersion>
     <ER2GameDir Condition="'$(ER2GameDir)' == '' and '$(ER2_GAME_DIR)' != ''">$(ER2_GAME_DIR)</ER2GameDir>
     <BepInExCore>$(ER2GameDir)\BepInEx\core</BepInExCore>
     <ER2Interop>$(ER2GameDir)\BepInEx\interop</ER2Interop>

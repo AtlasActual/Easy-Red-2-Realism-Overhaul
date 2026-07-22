@@ -81,7 +81,8 @@ internal sealed record CommanderPlanInput(
     bool SmokeReady,
     IReadOnlyList<CommanderSquadSnapshot>? Squads,
     IReadOnlyList<CommanderReportSnapshot>? Reports,
-    IReadOnlyList<CommanderAxisCandidate>? Axes);
+    IReadOnlyList<CommanderAxisCandidate>? Axes,
+    float AttackerAggressiveness = 1f);
 
 internal readonly record struct CommanderDirective(
     int SquadId,
@@ -144,7 +145,7 @@ internal static class CommanderPlannerCore
         var axes = UsableAxes(input.Axes);
         var mainAxis = axes.Count > 0 ? axes[0] : (CommanderAxisCandidate?)null;
         var flankAxis = SelectFlankAxis(axes, mainAxis);
-        var roles = AllocateRoles(squads, flankAxis);
+        var roles = AllocateRoles(squads, flankAxis, input.AttackerAggressiveness);
         var reports = FreshReports(input.Reports);
 
         var totalStrength = SafeSum(squads.Select(squad => squad.EffectiveStrength));
@@ -159,8 +160,8 @@ internal static class CommanderPlannerCore
             roles[squad.Id] == CommanderRole.Flank && flankAxis != null);
         var attackGateOpen = input.OffensiveOperation &&
                              hasUsableAttackAxis &&
-                             strengthRatio >= MinimumAttackRatio &&
-                             suppression <= MaximumAverageSuppression;
+                             strengthRatio >= MinimumAttackRatioFor(input.AttackerAggressiveness) &&
+                             suppression <= MaximumAverageSuppressionFor(input.AttackerAggressiveness);
         var smokeBlocked = attackGateOpen && input.SmokeRequired && !input.SmokeReady;
         var attackAuthorized = attackGateOpen && !smokeBlocked;
 
@@ -431,14 +432,33 @@ internal static class CommanderPlannerCore
         return null;
     }
 
+    internal static float MinimumAttackRatioFor(float aggressiveness)
+    {
+        var normalized = Math.Clamp(float.IsFinite(aggressiveness) ? aggressiveness : 1f, 0.5f, 1.5f);
+        return 1.3f - (normalized - 1f) * 0.4f;
+    }
+
+    internal static float MaximumAverageSuppressionFor(float aggressiveness)
+    {
+        var normalized = Math.Clamp(float.IsFinite(aggressiveness) ? aggressiveness : 1f, 0.5f, 1.5f);
+        return 0.35f + (normalized - 1f) * 0.20f;
+    }
+
+    private static float ReserveFractionFor(float aggressiveness)
+    {
+        var normalized = Math.Clamp(float.IsFinite(aggressiveness) ? aggressiveness : 1f, 0.5f, 1.5f);
+        return Math.Clamp(ReserveFraction - (normalized - 1f) * 0.20f, 0.10f, 0.30f);
+    }
+
     private static Dictionary<int, CommanderRole> AllocateRoles(
         IReadOnlyList<CommanderSquadSnapshot> squads,
-        CommanderAxisCandidate? flankAxis)
+        CommanderAxisCandidate? flankAxis,
+        float aggressiveness)
     {
         var roles = new Dictionary<int, CommanderRole>(squads.Count);
         var remaining = new HashSet<int>(squads.Select(squad => squad.Id));
         var reserveCount = squads.Count >= 4
-            ? (int)Math.Ceiling(squads.Count * ReserveFraction)
+            ? (int)Math.Ceiling(squads.Count * ReserveFractionFor(aggressiveness))
             : 0;
 
         foreach (var squad in squads

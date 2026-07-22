@@ -16,11 +16,7 @@ public sealed class Plugin : BasePlugin
 {
     public const string PluginGuid = "ca.antoi.er2.tacticalai";
     public const string PluginName = "Easy Red 2 Realism Overhaul";
-<<<<<<< Updated upstream
-    public const string PluginVersion = "1.0";
-=======
-    public const string PluginVersion = "1.0.2";
->>>>>>> Stashed changes
+    public const string PluginVersion = "1.0.3";
 
     internal static ManualLogSource LogSource { get; private set; } = null!;
     private Harmony? _harmony;
@@ -34,6 +30,7 @@ public sealed class Plugin : BasePlugin
     private MultiplayerPlayerNameController? _multiplayerPlayerNameController;
     private MultiplayerSharedSquadController? _multiplayerSharedSquadController;
     private BulletPenetrationController? _bulletPenetrationController;
+    private AiDebugOverlayController? _aiDebugOverlayController;
 
     public override void Load()
     {
@@ -51,6 +48,7 @@ public sealed class Plugin : BasePlugin
         _multiplayerPlayerNameController = AddComponent<MultiplayerPlayerNameController>();
         _multiplayerSharedSquadController = AddComponent<MultiplayerSharedSquadController>();
         _bulletPenetrationController = AddComponent<BulletPenetrationController>();
+        _aiDebugOverlayController = AddComponent<AiDebugOverlayController>();
 
         _harmony = new Harmony(PluginGuid);
         PatchModules(_harmony, typeof(Plugin).Assembly);
@@ -101,8 +99,15 @@ public sealed class Plugin : BasePlugin
         foreach (var patchType in patchTypes)
         {
             LogSource.LogInfo($"Applying patch module {patchType.FullName}");
-            harmony.CreateClassProcessor(patchType).Patch();
-            LogSource.LogInfo($"Applied patch module {patchType.FullName}");
+            try
+            {
+                harmony.CreateClassProcessor(patchType).Patch();
+                LogSource.LogInfo($"Applied patch module {patchType.FullName}");
+            }
+            catch (Exception ex)
+            {
+                LogSource.LogError($"Patch module {patchType.FullName} failed and was skipped: {ex}");
+            }
         }
     }
 }

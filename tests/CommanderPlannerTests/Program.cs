@@ -14,6 +14,7 @@ internal static class Program
             (nameof(AxisScoringAndSeparationAreDeterministic), AxisScoringAndSeparationAreDeterministic),
             (nameof(FlankHoldsWhenNoSeparatedAxisExists), FlankHoldsWhenNoSeparatedAxisExists),
             (nameof(AttackGateHonorsRatioAndSuppressionBoundaries), AttackGateHonorsRatioAndSuppressionBoundaries),
+            (nameof(AttackerAggressivenessAdjustsAttackGate), AttackerAggressivenessAdjustsAttackGate),
             (nameof(SmokeBlocksManeuverUntilReady), SmokeBlocksManeuverUntilReady),
             (nameof(FireMissionRetargetsAroundFriendlyConcentrations), FireMissionRetargetsAroundFriendlyConcentrations),
             (nameof(ReportsAreFreshFilteredAndDeduplicated), ReportsAreFreshFilteredAndDeduplicated),
@@ -25,6 +26,7 @@ internal static class Program
             (nameof(AntiTankTaskRejectsUnsafeInputs), AntiTankTaskRejectsUnsafeInputs),
             (nameof(AntiTankTaskIsDeterministicAndAvoidsMultiTankHunts), AntiTankTaskIsDeterministicAndAvoidsMultiTankHunts),
             (nameof(AircraftBombReleaseRequiresLiveHostileNearImpact), AircraftBombReleaseRequiresLiveHostileNearImpact),
+            (nameof(ArtilleryCrewSelectionRotatesAcrossEligibleGuns), ArtilleryCrewSelectionRotatesAcrossEligibleGuns),
             (nameof(CoverFsmHoldsUsefulCover), CoverFsmHoldsUsefulCover),
             (nameof(CoverFsmSuppressionOverridesUrgency), CoverFsmSuppressionOverridesUrgency),
             (nameof(CoverFsmUrgencyBypassesDeliberateWait), CoverFsmUrgencyBypassesDeliberateWait),
@@ -40,6 +42,7 @@ internal static class Program
             (nameof(AttackProgressHasMaximumCombatHalt), AttackProgressHasMaximumCombatHalt),
             (nameof(IdleSoldiersRemainUnderCommanderOrNativeControl), IdleSoldiersRemainUnderCommanderOrNativeControl),
             (nameof(ArrivedDefendersStayUnderPositionControl), ArrivedDefendersStayUnderPositionControl),
+            (nameof(AutonomousDefendersSeekCoverEvenWithVisibleContact), AutonomousDefendersSeekCoverEvenWithVisibleContact),
             (nameof(DefensivePositionOwnershipStaysLatchedOutsideTheArrivalArea), DefensivePositionOwnershipStaysLatchedOutsideTheArrivalArea),
             (nameof(ReachedCoverCreatesAStableFightingHalt), ReachedCoverCreatesAStableFightingHalt),
             (nameof(AttackBoundsRequireSafetyAndTacticalAuthorization), AttackBoundsRequireSafetyAndTacticalAuthorization),
@@ -50,15 +53,40 @@ internal static class Program
             (nameof(DefensiveCoverAnchorSurvivesNativeStatusFlicker), DefensiveCoverAnchorSurvivesNativeStatusFlicker),
             (nameof(ReachedBuildingSlotLatchesWithoutNativeCoverFlag), ReachedBuildingSlotLatchesWithoutNativeCoverFlag),
             (nameof(NativeCoverClearRespectsProtectedOwnership), NativeCoverClearRespectsProtectedOwnership),
+            (nameof(PlayerHoldArrivalClaimsStableProtectedPositions), PlayerHoldArrivalClaimsStableProtectedPositions),
+            (nameof(StableAnchorsKeepTheirSpatialReservations), StableAnchorsKeepTheirSpatialReservations),
+            (nameof(PlayerHoldCoverDoesNotTakeOverOtherExternalOrders), PlayerHoldCoverDoesNotTakeOverOtherExternalOrders),
             (nameof(WalkingInPlaceTriggersAQuietRecoveryHold), WalkingInPlaceTriggersAQuietRecoveryHold),
             (nameof(RealMovementAndPathChangesResetTheStallWatch), RealMovementAndPathChangesResetTheStallWatch),
             (nameof(TransportDismountsBeforeTakingFire), TransportDismountsBeforeTakingFire),
             (nameof(PostureFollowsObjectiveOwnership), PostureFollowsObjectiveOwnership),
+            (nameof(ContestedOwnershipRetainsOneDefendingSide), ContestedOwnershipRetainsOneDefendingSide),
             (nameof(AttackerAndDefenderPlannerCoresSelectTheirPostures), AttackerAndDefenderPlannerCoresSelectTheirPostures),
+            (nameof(CommanderOrdersChangePhaseInsteadOfChurningDestinations), CommanderOrdersChangePhaseInsteadOfChurningDestinations),
+            (nameof(ObjectiveFormationDistributesSquadsAwayFromTheCenter), ObjectiveFormationDistributesSquadsAwayFromTheCenter),
+            (nameof(CommanderCoverChoicesPreserveSquadCohesion), CommanderCoverChoicesPreserveSquadCohesion),
+            (nameof(AttackCoverCorridorAllowsFlankingWithinBoundedBacktrack), AttackCoverCorridorAllowsFlankingWithinBoundedBacktrack),
+            (nameof(CoverClusterSnapsAnchorToDenseProtectiveCover), CoverClusterSnapsAnchorToDenseProtectiveCover),
+            (nameof(CoverDensityLeashGrowsOnlyForDenseClusters), CoverDensityLeashGrowsOnlyForDenseClusters),
+            (nameof(FailedCoverSearchBacksOffProgressively), FailedCoverSearchBacksOffProgressively),
+            (nameof(TacticalPoseLatchRejectsProneCrouchChurn), TacticalPoseLatchRejectsProneCrouchChurn),
             (nameof(CommandLeasesAreStableAndRejectStaleWork), CommandLeasesAreStableAndRejectStaleWork),
+            (nameof(CommandLeaseDebugSnapshotIsOrderedAndPrunesExpiredWork), CommandLeaseDebugSnapshotIsOrderedAndPrunesExpiredWork),
             (nameof(DefensiveOrdersIgnorePlannerHeartbeatAndRoleChurn), DefensiveOrdersIgnorePlannerHeartbeatAndRoleChurn),
             (nameof(ExternalOwnershipPreemptsAndLatches), ExternalOwnershipPreemptsAndLatches),
             (nameof(TacticalArbitrationUsesOneDeterministicWinnerPerChannel), TacticalArbitrationUsesOneDeterministicWinnerPerChannel),
+            (nameof(ProtectedAssignmentOutranksCoverHoldAtEqualAuthority), ProtectedAssignmentOutranksCoverHoldAtEqualAuthority),
+            (nameof(ExternalSquadWithoutPlayerHoldCoverEmitsOnlyNativeAndExternal), ExternalSquadWithoutPlayerHoldCoverEmitsOnlyNativeAndExternal),
+            (nameof(PlayerHoldCoverFollowsCommittedCoverMove), PlayerHoldCoverFollowsCommittedCoverMove),
+            (nameof(MovementSafetyLadderPicksHazardThenSafetyThenSuppression), MovementSafetyLadderPicksHazardThenSafetyThenSuppression),
+            (nameof(ProtectedAssignmentSkipsDefensivePositionBranch), ProtectedAssignmentSkipsDefensivePositionBranch),
+            (nameof(ContactRequiresPolicyEnabledAndNoTankThreatOtherwiseTankFearWins), ContactRequiresPolicyEnabledAndNoTankThreatOtherwiseTankFearWins),
+            (nameof(MountedCrewNeverReceivesATankFearProposal), MountedCrewNeverReceivesATankFearProposal),
+            (nameof(ArmorRoleAllocationIsStickyAndOnlyRebuildsOnDiscreteTriggers), ArmorRoleAllocationIsStickyAndOnlyRebuildsOnDiscreteTriggers),
+            (nameof(CommanderIntentProposesMoveToTheAcceptedDestination), CommanderIntentProposesMoveToTheAcceptedDestination),
+            (nameof(ReloadSafetyAddsProneAndFireInhibitionAlongsideTheHold), ReloadSafetyAddsProneAndFireInhibitionAlongsideTheHold),
+            (nameof(MovementDebugProjectionUsesOnlyExecutorDestination), MovementDebugProjectionUsesOnlyExecutorDestination),
+            (nameof(AiDebugAllegianceScopeIsExplicitAndFailClosed), AiDebugAllegianceScopeIsExplicitAndFailClosed),
             (nameof(SupportRequestsAreDeduplicatedByObjectiveRevision), SupportRequestsAreDeduplicatedByObjectiveRevision),
             (nameof(GameplayMutationIsHostAuthoritative), GameplayMutationIsHostAuthoritative),
             (nameof(DefenderAllocatorStaffsAllViableWeaponsInPriorityOrder), DefenderAllocatorStaffsAllViableWeaponsInPriorityOrder),
@@ -70,7 +98,33 @@ internal static class Program
             (nameof(FortifiedCoverBeatsCloserWeakCover), FortifiedCoverBeatsCloserWeakCover),
             (nameof(FortifiedSlotsGroupWithoutDuplicateReservations), FortifiedSlotsGroupWithoutDuplicateReservations),
             (nameof(DefensiveAnchorsOnlyMoveAfterMaterialDegradation), DefensiveAnchorsOnlyMoveAfterMaterialDegradation),
-            (nameof(CoverSamplingKeepsWorkBoundedAndIncludesDepth), CoverSamplingKeepsWorkBoundedAndIncludesDepth)
+            (nameof(CoverSamplingKeepsWorkBoundedAndIncludesDepth), CoverSamplingKeepsWorkBoundedAndIncludesDepth),
+            (nameof(AuthoredCoverRemainsAFallbackWhenBallisticsCannotClassifyIt), AuthoredCoverRemainsAFallbackWhenBallisticsCannotClassifyIt),
+            (nameof(ProtectedFiringLaneBeatsEquallyProtectedBlindSlot), ProtectedFiringLaneBeatsEquallyProtectedBlindSlot),
+            (nameof(PostureThreatAxisStabilizesAcrossAlternatingBearings), PostureThreatAxisStabilizesAcrossAlternatingBearings),
+            (nameof(CoverDowngradeToProneRequiresPersistence), CoverDowngradeToProneRequiresPersistence),
+            (nameof(AuthoredPoseIsKeptOnlyWhenBallisticsCannotClassify), AuthoredPoseIsKeptOnlyWhenBallisticsCannotClassify),
+            (nameof(CoverPostureOwnershipSurvivesBriefContactLoss), CoverPostureOwnershipSurvivesBriefContactLoss),
+            (nameof(EngagedCoverPoseConvergesInsteadOfLooping), EngagedCoverPoseConvergesInsteadOfLooping),
+            (nameof(SuppressionRecoveryKeepsAnAlreadyProneSoldierDownInTheOpen), SuppressionRecoveryKeepsAnAlreadyProneSoldierDownInTheOpen),
+            (nameof(SuppressionRecoveryPreventsProneCrouchLoopOnRelease), SuppressionRecoveryPreventsProneCrouchLoopOnRelease),
+            (nameof(SuppressionRecoveryDefersToAnOwnedProneCoverEvaluation), SuppressionRecoveryDefersToAnOwnedProneCoverEvaluation),
+            (nameof(WrongSideAnchorReleasesForALiveEngagedThreat), WrongSideAnchorReleasesForALiveEngagedThreat),
+            (nameof(TargetObservationAccruesOnlyDuringContinuousWatching), TargetObservationAccruesOnlyDuringContinuousWatching),
+            (nameof(ContactReportReplacementPrefersFresherInformation), ContactReportReplacementPrefersFresherInformation),
+            (nameof(ContactConfidenceDecaysLinearlyToZero), ContactConfidenceDecaysLinearlyToZero),
+            (nameof(AttackersLeaveACapturedObjectiveForAFarUnsecuredOne), AttackersLeaveACapturedObjectiveForAFarUnsecuredOne),
+            (nameof(AttackersWithEveryObjectiveSecuredDefendTheBestOne), AttackersWithEveryObjectiveSecuredDefendTheBestOne),
+            (nameof(AttackerStickinessKeepsTheCurrentUnsecuredObjective), AttackerStickinessKeepsTheCurrentUnsecuredObjective),
+            (nameof(AttackerStickinessReleasesOnceItsObjectiveIsSecured), AttackerStickinessReleasesOnceItsObjectiveIsSecured),
+            (nameof(DefenderObjectiveSelectionIsUnchangedByThePenalty), DefenderObjectiveSelectionIsUnchangedByThePenalty),
+            (nameof(ObjectiveSelectionTiesAreBrokenByLowerId), ObjectiveSelectionTiesAreBrokenByLowerId),
+            (nameof(TankEngagementEntersAndReleasesHoldWithHysteresis), TankEngagementEntersAndReleasesHoldWithHysteresis),
+            (nameof(TankEngagementLosFlickerGrantsGraceBeforeReleasingHold), TankEngagementLosFlickerGrantsGraceBeforeReleasingHold),
+            (nameof(TankEngagementHoldAndReverseNeverDitherAroundTheirBoundaries), TankEngagementHoldAndReverseNeverDitherAroundTheirBoundaries),
+            (nameof(TankEngagementDamagedReverseDoesNotLoopWhenRearIsBlocked), TankEngagementDamagedReverseDoesNotLoopWhenRearIsBlocked),
+            (nameof(TankEngagementHullRotationOnlyAllowedInHoldOutsideReverseBand), TankEngagementHullRotationOnlyAllowedInHoldOutsideReverseBand),
+            (nameof(TankStallWatchdogRecoversResetsAndGivesUp), TankStallWatchdogRecoversResetsAndGivesUp)
         };
 
         var failures = 0;
@@ -126,6 +180,21 @@ internal static class Program
             "An invalid impact solution authorized a bomb release.");
     }
 
+    private static void ArtilleryCrewSelectionRotatesAcrossEligibleGuns()
+    {
+        var crews = new[] { 11, 25, 48 };
+        Equal(0, ArtilleryCrewSelectionCore.SelectNextCandidateIndex(crews, 0),
+            "The first artillery request did not select the first eligible crew.");
+        Equal(1, ArtilleryCrewSelectionCore.SelectNextCandidateIndex(crews, 11),
+            "The next artillery request did not rotate away from the previous crew.");
+        Equal(2, ArtilleryCrewSelectionCore.SelectNextCandidateIndex(crews, 25),
+            "Artillery rotation skipped an eligible crew.");
+        Equal(0, ArtilleryCrewSelectionCore.SelectNextCandidateIndex(crews, 48),
+            "Artillery rotation did not wrap to the first crew.");
+        Equal(-1, ArtilleryCrewSelectionCore.SelectNextCandidateIndex(Array.Empty<int>(), 0),
+            "An empty artillery roster selected a crew.");
+    }
+
     private static void CoverSamplingKeepsWorkBoundedAndIncludesDepth()
     {
         var indices = CoverCandidateSamplingCore.SelectIndices(96, 12, 6);
@@ -143,6 +212,684 @@ internal static class Program
             "Small cover inventories should be evaluated in full.");
         Equal(0, CoverCandidateSamplingCore.SelectIndices(96, 0, 6).Length,
             "A zero detail budget should select no cover candidates.");
+
+        var defensive = CoverCandidateSamplingCore.SelectIndices(192, 20, 3);
+        Equal(20, defensive.Length,
+            "Defensive building/trench sampling exceeded its bounded detail budget.");
+        SequenceEqual(Enumerable.Range(0, 3), defensive.Take(3),
+            "Defensive sampling did not retain its nearest candidates.");
+        Equal(191, defensive[^1],
+            "Defensive sampling failed to inspect deep building/trench candidates.");
+        True(defensive.Count(index => index >= 96) >= 8,
+            "Defensive sampling remained biased toward nearby open-ground cover.");
+    }
+
+    private static void CommanderCoverChoicesPreserveSquadCohesion()
+    {
+        var smallArea = SquadCohesionCore.StationaryAreaRadius(20f, 1);
+        var crowdedArea = SquadCohesionCore.StationaryAreaRadius(80f, 9);
+        True(smallArea >= 14f && smallArea <= 24f,
+            "A commander stationary area escaped the compact fighting-area limits.");
+        True(crowdedArea >= 14f && crowdedArea <= 24f,
+            "Squad count produced an invalid stationary fighting area.");
+        True(SquadCohesionCore.AllowsCover(
+                new MapPoint(29.9f, 0f), new MapPoint(0f, 0f)),
+            "A valid cover slot inside the squad cohesion leash was rejected.");
+        False(SquadCohesionCore.AllowsCover(
+                new MapPoint(30.1f, 0f), new MapPoint(0f, 0f)),
+            "A distant cover slot was allowed to scatter a squad.");
+    }
+
+    private static void AttackCoverCorridorAllowsFlankingWithinBoundedBacktrack()
+    {
+        var soldier = new MapPoint(0f, 0f);
+
+        // Strict forward progress is always accepted, on- or off-axis.
+        True(AttackCoverCorridorCore.Accepts(
+                soldier, new MapPoint(10f, 50f), new MapPoint(0f, 100f)),
+            "A candidate closer to the waypoint was rejected.");
+
+        // A small lateral step inside the forward corridor that only slightly
+        // increases the distance to a nearby waypoint is accepted.
+        True(AttackCoverCorridorCore.Accepts(
+                soldier, new MapPoint(10f, 15f), new MapPoint(0f, 10f)),
+            "A small lateral step inside the forward corridor was rejected.");
+
+        // A large retreat directly away from the waypoint is rejected.
+        False(AttackCoverCorridorCore.Accepts(
+                soldier, new MapPoint(0f, -20f), new MapPoint(0f, 100f)),
+            "A large backtrack away from the waypoint was accepted.");
+
+        // A candidate only 1 m behind but well off the assault axis is rejected by
+        // the corridor even though its backtrack is small.
+        False(AttackCoverCorridorCore.Accepts(
+                soldier, new MapPoint(6f, -1f), new MapPoint(0f, 100f)),
+            "An off-axis candidate beyond the forward corridor was accepted.");
+
+        // Non-finite inputs fail safe.
+        False(AttackCoverCorridorCore.Accepts(
+                soldier, new MapPoint(float.NaN, 5f), new MapPoint(0f, 100f)),
+            "A NaN candidate was accepted.");
+
+        // Boundary: an on-axis candidate exactly MaximumBacktrackMeters farther from
+        // the waypoint is accepted; a hair beyond is rejected.
+        True(AttackCoverCorridorCore.Accepts(
+                soldier, new MapPoint(0f, 48f), new MapPoint(0f, 20f)),
+            "A candidate exactly on the backtrack boundary was rejected.");
+        False(AttackCoverCorridorCore.Accepts(
+                soldier, new MapPoint(0f, 48.1f), new MapPoint(0f, 20f)),
+            "A candidate just beyond the backtrack boundary was accepted.");
+
+        // A candidate on the soldier's own footprint is accepted regardless of
+        // waypoint geometry.
+        True(AttackCoverCorridorCore.Accepts(
+                soldier, new MapPoint(1f, 0f), new MapPoint(0f, 100f)),
+            "A candidate on the soldier's own footprint was rejected.");
+    }
+
+    private static void CoverClusterSnapsAnchorToDenseProtectiveCover()
+    {
+        var anchor = new MapPoint(0f, 0f);
+
+        // A dense five-candidate building beats a single closer roadside node.
+        var building = new[]
+        {
+            new CoverClusterCandidate(new MapPoint(20f, 0f), 1f),
+            new CoverClusterCandidate(new MapPoint(22f, 1f), 1f),
+            new CoverClusterCandidate(new MapPoint(21f, -2f), 1f),
+            new CoverClusterCandidate(new MapPoint(23f, 2f), 1f),
+            new CoverClusterCandidate(new MapPoint(19f, 3f), 1f),
+            new CoverClusterCandidate(new MapPoint(4f, 0f), 1f)
+        };
+        True(CoverClusterCore.TrySelect(building, anchor, 60f, out var center, out var count),
+            "A dense protective cluster was not selected.");
+        True(count >= CoverClusterCore.MinimumClusterCandidates,
+            "The selected cluster did not meet the minimum density.");
+        True(Distance(center, new MapPoint(21f, 0.8f)) < 6f,
+            "The cluster center did not settle on the dense building.");
+
+        // Empty input selects nothing.
+        False(CoverClusterCore.TrySelect(
+                Array.Empty<CoverClusterCandidate>(), anchor, 60f, out _, out _),
+            "An empty candidate list produced a cluster.");
+
+        // A lone candidate cannot form a cluster.
+        False(CoverClusterCore.TrySelect(
+                new[] { new CoverClusterCandidate(new MapPoint(10f, 0f), 1f) },
+                anchor, 60f, out _, out _),
+            "A single candidate was treated as a cluster.");
+
+        // A dense cluster beyond the maximum shift is rejected.
+        var farBuilding = new[]
+        {
+            new CoverClusterCandidate(new MapPoint(200f, 0f), 1f),
+            new CoverClusterCandidate(new MapPoint(202f, 1f), 1f),
+            new CoverClusterCandidate(new MapPoint(201f, -2f), 1f),
+            new CoverClusterCandidate(new MapPoint(203f, 2f), 1f)
+        };
+        False(CoverClusterCore.TrySelect(farBuilding, anchor, 60f, out _, out _),
+            "A cluster beyond the maximum shift was accepted.");
+
+        // NaN candidates are ignored and cannot seed a cluster.
+        var withNan = new[]
+        {
+            new CoverClusterCandidate(new MapPoint(float.NaN, 0f), 1f),
+            new CoverClusterCandidate(new MapPoint(30f, 0f), 1f),
+            new CoverClusterCandidate(new MapPoint(float.PositiveInfinity, 1f), 1f)
+        };
+        False(CoverClusterCore.TrySelect(withNan, anchor, 60f, out _, out _),
+            "Invalid candidates seeded a cluster.");
+
+        // Deterministic tie-break: two equal-weight clusters resolve to the lowest
+        // X then Z center.
+        var symmetric = new[]
+        {
+            new CoverClusterCandidate(new MapPoint(-30f, 0f), 1f),
+            new CoverClusterCandidate(new MapPoint(-31f, 1f), 1f),
+            new CoverClusterCandidate(new MapPoint(-29f, -1f), 1f),
+            new CoverClusterCandidate(new MapPoint(30f, 0f), 1f),
+            new CoverClusterCandidate(new MapPoint(31f, 1f), 1f),
+            new CoverClusterCandidate(new MapPoint(29f, -1f), 1f)
+        };
+        True(CoverClusterCore.TrySelect(symmetric, anchor, 60f, out var tieCenter, out _),
+            "A symmetric layout failed to select any cluster.");
+        True(tieCenter.X < 0f,
+            "The symmetric tie-break did not prefer the lowest-X cluster center.");
+    }
+
+    private static void CoverDensityLeashGrowsOnlyForDenseClusters()
+    {
+        var baseRadius = 24f;
+
+        // Below the density threshold the leash keeps the compact base radius.
+        Near(baseRadius,
+            SquadCohesionCore.ClusterCohesionRadius(baseRadius, 2),
+            0.001f,
+            "A sparse area grew the cohesion leash.");
+
+        // A dense cluster is allowed to grow up to the expanded ceiling.
+        Near(SquadCohesionCore.MaximumClusterCohesionRadiusMeters,
+            SquadCohesionCore.ClusterCohesionRadius(baseRadius, 12),
+            0.001f,
+            "A dense cluster did not expand the cohesion leash to the ceiling.");
+
+        // The minimum floor is preserved for tiny base radii.
+        True(SquadCohesionCore.ClusterCohesionRadius(5f, 12) >= 14f,
+            "The cluster cohesion radius dropped below the minimum leash.");
+
+        // Boundary: exactly the minimum cluster size does not grow the leash beyond
+        // the base; one more candidate begins to grow it.
+        Near(baseRadius,
+            SquadCohesionCore.ClusterCohesionRadius(
+                baseRadius, CoverClusterCore.MinimumClusterCandidates - 1),
+            0.001f,
+            "A sub-threshold cluster grew the leash.");
+        True(SquadCohesionCore.ClusterCohesionRadius(
+                 baseRadius, CoverClusterCore.MinimumClusterCandidates) > baseRadius,
+            "A threshold cluster did not begin to grow the leash.");
+
+        // Invalid inputs fall back to the base radius.
+        Near(baseRadius,
+            SquadCohesionCore.ClusterCohesionRadius(baseRadius, -3),
+            0.001f,
+            "A negative cluster count altered the leash.");
+    }
+
+    private static void FailedCoverSearchBacksOffProgressively()
+    {
+        var baseInterval = 12f;
+
+        Near(baseInterval,
+            CoverSearchBackoffCore.NextDecisionDelaySeconds(baseInterval, 0),
+            0.001f,
+            "A first failure did not use the normal decision interval.");
+        Near(baseInterval,
+            CoverSearchBackoffCore.NextDecisionDelaySeconds(baseInterval, 1),
+            0.001f,
+            "A single failure did not use the normal decision interval.");
+        Near(20f,
+            CoverSearchBackoffCore.NextDecisionDelaySeconds(baseInterval, 2),
+            0.001f,
+            "A second failure did not extend the decision interval.");
+        Near(30f,
+            CoverSearchBackoffCore.NextDecisionDelaySeconds(baseInterval, 3),
+            0.001f,
+            "A third failure did not reach the maximum backoff.");
+        Near(30f,
+            CoverSearchBackoffCore.NextDecisionDelaySeconds(baseInterval, 9),
+            0.001f,
+            "Repeated failures exceeded the maximum backoff.");
+
+        // Invalid inputs fall back to the base interval.
+        Near(baseInterval,
+            CoverSearchBackoffCore.NextDecisionDelaySeconds(baseInterval, -4),
+            0.001f,
+            "A negative failure count altered the backoff.");
+        Near(baseInterval,
+            CoverSearchBackoffCore.NextDecisionDelaySeconds(float.NaN, 3),
+            0.001f,
+            "An invalid base interval was not rejected.");
+    }
+
+    private static void TacticalPoseLatchRejectsProneCrouchChurn()
+    {
+        True(TacticalPoseStabilityCore.ShouldAccept(
+                TacticalStance.Crouched, TacticalStance.Prone, 1f, 10f, false),
+            "An immediate lower safety posture was delayed.");
+        False(TacticalPoseStabilityCore.ShouldAccept(
+                TacticalStance.Prone, TacticalStance.Crouched, 9.9f, 10f, false),
+            "Prone was released before its minimum stable hold expired.");
+        True(TacticalPoseStabilityCore.ShouldAccept(
+                TacticalStance.Prone, TacticalStance.Crouched, 10f, 10f, false),
+            "A released prone owner could not transition after the hold expired.");
+        False(TacticalPoseStabilityCore.ShouldAccept(
+                TacticalStance.Prone, TacticalStance.Crouched, 20f, 10f, true),
+            "A lower pose was discarded while suppression or protective cover still owned it.");
+        Equal(23.5f, TacticalPoseStabilityCore.RenewHoldUntil(20f, 10f, true),
+            "Active lower-pose ownership did not renew the stability interval.");
+        Equal(23.5f, TacticalPoseStabilityCore.RenewHoldUntil(21f, 23.5f, false),
+            "A released pose owner continued renewing its stability interval.");
+        False(TacticalPoseStabilityCore.ShouldAccept(
+                TacticalStance.Prone, TacticalStance.Crouched, 23.49f, 23.5f, false),
+            "A one-frame owner release bypassed the renewable stability interval.");
+    }
+
+    private static void AuthoredCoverRemainsAFallbackWhenBallisticsCannotClassifyIt()
+    {
+        True(InfantryCoverDecisionCore.ShouldUseAuthoredFallback(false, true),
+            "An authored trench/building slot was discarded when material sampling was inconclusive.");
+        False(InfantryCoverDecisionCore.ShouldUseAuthoredFallback(true, true),
+            "An unverified native slot displaced a measured protective position.");
+        False(InfantryCoverDecisionCore.ShouldUseAuthoredFallback(false, false),
+            "A fallback was fabricated without a valid authored cover node.");
+    }
+
+    private static void ProtectedFiringLaneBeatsEquallyProtectedBlindSlot()
+    {
+        var protectedBlind = new CoverScoreInput(
+            64f, 0f, true, 0, false, false, 1f, 0.2f,
+            PrimaryProtectionFraction: 1f,
+            PreferProtectionOverFiringLine: true);
+        var protectedWithLane = protectedBlind with
+        {
+            AssignedPoseCanFire = true,
+            StandingCanFire = true
+        };
+        True(InfantryCoverDecisionCore.Score(
+                 CoverSelectionMode.DefensiveOccupation, protectedWithLane) <
+             InfantryCoverDecisionCore.Score(
+                 CoverSelectionMode.DefensiveOccupation, protectedBlind),
+            "An equally protected slot with a firing lane did not beat a blind one.");
+    }
+
+    private static void PostureThreatAxisStabilizesAcrossAlternatingBearings()
+    {
+        var east = new MapPoint(1f, 0f);
+
+        // First acquisition adopts the observed bearing immediately.
+        var acquired = ThreatAxisStabilityCore.Update(default, east, 0f);
+        True(acquired.AxisChangedMaterially, "First threat bearing was not adopted.");
+        Near(1f, acquired.State.Axis.X, 0.001f, "First axis was not the observed bearing.");
+
+        // A small drift (~10 deg) follows smoothly without a material change, so the
+        // cached posture evaluation survives.
+        var drifted = ThreatAxisStabilityCore.Update(acquired.State, DirectionAt(10f), 0.1f);
+        False(drifted.AxisChangedMaterially,
+            "A small bearing drift forced a full posture re-evaluation.");
+
+        // A large divergence (~90 deg flank) is a new threat and is adopted at once.
+        var flanked = ThreatAxisStabilityCore.Update(acquired.State, DirectionAt(90f), 0.2f);
+        True(flanked.AxisChangedMaterially,
+            "A genuine new flank threat was not adopted promptly.");
+
+        // A moderate divergence (~45 deg) must persist before it rotates the axis.
+        var moderate = DirectionAt(45f);
+        var pending = ThreatAxisStabilityCore.Update(acquired.State, moderate, 5f);
+        False(pending.AxisChangedMaterially,
+            "A moderate bearing change rotated the axis before persisting.");
+        var early = ThreatAxisStabilityCore.Update(
+            pending.State, moderate,
+            5f + ThreatAxisStabilityCore.SustainedRotationSeconds - 0.01f);
+        False(early.AxisChangedMaterially,
+            "A moderate bearing change was accepted before its persistence window.");
+        var sustained = ThreatAxisStabilityCore.Update(
+            pending.State, moderate, 5f + ThreatAxisStabilityCore.SustainedRotationSeconds);
+        True(sustained.AxisChangedMaterially,
+            "A sustained moderate bearing change was not accepted at its exact window.");
+
+        // A non-finite bearing is rejected and leaves the stable axis untouched.
+        var invalid = ThreatAxisStabilityCore.Update(
+            acquired.State, new MapPoint(float.NaN, 0f), 6f);
+        False(invalid.AxisChangedMaterially, "A non-finite bearing rotated the posture axis.");
+        Near(1f, invalid.State.Axis.X, 0.001f, "A non-finite bearing corrupted the stored axis.");
+    }
+
+    private static void CoverDowngradeToProneRequiresPersistence()
+    {
+        // Suppression and pinning never reach this gate; they keep their instant
+        // reaction upstream. This core only governs cover-re-evaluation downgrades.
+        False(CoverPostureDowngradeCore.ShouldAccept(
+                TacticalStance.Crouched, TacticalStance.Prone, 1f,
+                1f + CoverPostureDowngradeCore.MinimumDowngradeHoldSeconds - 0.01f),
+            "A transient crouch->prone flip dropped the defender below the parapet.");
+        True(CoverPostureDowngradeCore.ShouldAccept(
+                TacticalStance.Crouched, TacticalStance.Prone, 1f,
+                1f + CoverPostureDowngradeCore.MinimumDowngradeHoldSeconds),
+            "A persistent crouch->prone downgrade was not accepted at its exact window.");
+
+        // Upgrades and unchanged stances are never gated here; the separate upgrade
+        // hold path governs those.
+        True(CoverPostureDowngradeCore.ShouldAccept(
+                TacticalStance.Prone, TacticalStance.Crouched, 100f, 0f),
+            "A crouch upgrade was blocked by the prone-downgrade gate.");
+        True(CoverPostureDowngradeCore.ShouldAccept(
+                TacticalStance.Crouched, TacticalStance.Crouched, 100f, 0f),
+            "An unchanged pose was treated as a downgrade.");
+        False(CoverPostureDowngradeCore.ShouldAccept(
+                TacticalStance.Standing, TacticalStance.Prone, 0f, 0.5f),
+            "A standing->prone downgrade skipped its persistence window.");
+
+        // Invalid or inverted timing keeps the safer, still-firing pose.
+        False(CoverPostureDowngradeCore.ShouldAccept(
+                TacticalStance.Crouched, TacticalStance.Prone, float.NaN, 5f),
+            "A non-finite downgrade timestamp was accepted.");
+        False(CoverPostureDowngradeCore.ShouldAccept(
+                TacticalStance.Crouched, TacticalStance.Prone, 10f, 5f),
+            "An inverted downgrade timestamp was accepted.");
+    }
+
+    private static void AuthoredPoseIsKeptOnlyWhenBallisticsCannotClassify()
+    {
+        // On authored cover the ballistics could not classify: keep the authored pose.
+        Equal(CoverPostureChoice.Crouched,
+            AuthoredPoseFallbackCore.ResolvePose(
+                CoverPostureChoice.Prone, false, false, true, CoverPostureChoice.Crouched),
+            "An unclassifiable authored trench slot dropped the soldier prone below the parapet.");
+        True(AuthoredPoseFallbackCore.ResolveProtective(false, false, true),
+            "An accepted authored slot was not treated as protective.");
+
+        // A confidently-measured penetrable barrier keeps the ballistic prone fallback.
+        Equal(CoverPostureChoice.Prone,
+            AuthoredPoseFallbackCore.ResolvePose(
+                CoverPostureChoice.Prone, false, true, true, CoverPostureChoice.Crouched),
+            "A measured, penetrable barrier wrongly kept the authored pose.");
+        False(AuthoredPoseFallbackCore.ResolveProtective(false, true, true),
+            "A measured non-protective barrier was reported protective.");
+
+        // Measured protection is trusted directly whenever it is found.
+        Equal(CoverPostureChoice.Standing,
+            AuthoredPoseFallbackCore.ResolvePose(
+                CoverPostureChoice.Standing, true, false, true, CoverPostureChoice.Crouched),
+            "A measured protective posture was overridden by the authored pose.");
+
+        // Off authored cover the ballistic result always stands.
+        Equal(CoverPostureChoice.Prone,
+            AuthoredPoseFallbackCore.ResolvePose(
+                CoverPostureChoice.Prone, false, false, false, CoverPostureChoice.Standing),
+            "A non-authored open position was granted an authored standing pose.");
+    }
+
+    private static void CoverPostureOwnershipSurvivesBriefContactLoss()
+    {
+        // The prone<->crouch loop: on a prone-protective wall the cover evaluation owns
+        // 'prone' while contact is fresh, but ownership used to lapse with the 3s contact
+        // timer, handing the pose to the generic crouch fallback whenever the enemy
+        // flicked out of sight. Ownership must not depend on that timer.
+        True(CoverPostureOwnershipCore.CoverPoseOwned(
+                hasThreatMemory: true, onUsableCover: true, defensiveHold: false),
+            "An on-cover soldier lost cover-pose ownership between sightings.");
+        True(CoverPostureOwnershipCore.CoverPoseOwned(
+                hasThreatMemory: true, onUsableCover: false, defensiveHold: true),
+            "A defensive anchor lost cover-pose ownership off native cover.");
+        False(CoverPostureOwnershipCore.CoverPoseOwned(
+                hasThreatMemory: false, onUsableCover: true, defensiveHold: false),
+            "Cover-pose ownership persisted with no threat memory.");
+        False(CoverPostureOwnershipCore.CoverPoseOwned(
+                hasThreatMemory: true, onUsableCover: false, defensiveHold: false),
+            "Cover-pose ownership persisted off cover without a stable anchor.");
+    }
+
+    private static void EngagedCoverPoseConvergesInsteadOfLooping()
+    {
+        // Drive the real pose latch with the fixed ownership rule across a long
+        // engagement whose line of sight flickers every few seconds. Because ownership
+        // no longer lapses, the proposal is the stable evaluation pose on every update,
+        // so the latched stance converges to prone and never rises back out of it -
+        // the sustained prone<->crouch cycle is gone.
+        var latched = TacticalStance.Crouched;
+        var holdUntil = 0f;
+        var reachedProne = false;
+        var everRoseAfterProne = false;
+        for (var t = 0f; t <= 30f; t += 0.5f)
+        {
+            var owned = CoverPostureOwnershipCore.CoverPoseOwned(
+                hasThreatMemory: true, onUsableCover: true, defensiveHold: false);
+            var proposed = owned ? TacticalStance.Prone : TacticalStance.Crouched;
+            holdUntil = TacticalPoseStabilityCore.RenewHoldUntil(t, holdUntil, owned);
+            if (TacticalPoseStabilityCore.ShouldAccept(latched, proposed, t, holdUntil, owned))
+            {
+                if (reachedProne && proposed != TacticalStance.Prone)
+                    everRoseAfterProne = true;
+                latched = proposed;
+                holdUntil = t + TacticalPoseStabilityCore.MinimumHoldSeconds;
+            }
+
+            if (latched == TacticalStance.Prone)
+                reachedProne = true;
+        }
+
+        True(reachedProne, "The engaged cover pose never settled on the protective stance.");
+        False(everRoseAfterProne,
+            "The engaged cover pose oscillated back out of the protective stance.");
+        Equal(TacticalStance.Prone, latched,
+            "The engaged cover pose did not converge to a single stance.");
+    }
+
+    private static void SuppressionRecoveryKeepsAnAlreadyProneSoldierDownInTheOpen()
+    {
+        // Root cause: rising prone->crouch in the open while still suppressed produced
+        // the reported prone<->crouch loop. Recovery must keep an already-prone soldier
+        // down off cover, while still crouching a standing/crouched soldier as before -
+        // that reaction and the on-cover fighting crouch must both survive the fix.
+        Equal(TacticalStance.Prone,
+            SuppressionRecoveryPoseCore.Resolve(
+                onUsableCover: false, current: TacticalStance.Prone, coverEvaluationOwnsProne: false),
+            "A prone soldier in the open was raised to crouch by the suppression recovery rule.");
+        Equal(TacticalStance.Crouched,
+            SuppressionRecoveryPoseCore.Resolve(
+                onUsableCover: true, current: TacticalStance.Prone, coverEvaluationOwnsProne: false),
+            "A prone soldier on usable cover with no owned prone evaluation was not allowed to rise to the fighting crouch.");
+        Equal(TacticalStance.Crouched,
+            SuppressionRecoveryPoseCore.Resolve(
+                onUsableCover: false, current: TacticalStance.Crouched, coverEvaluationOwnsProne: false),
+            "The already-crouched suppression reaction was lost off cover.");
+        Equal(TacticalStance.Crouched,
+            SuppressionRecoveryPoseCore.Resolve(
+                onUsableCover: false, current: TacticalStance.Standing, coverEvaluationOwnsProne: false),
+            "The standing->crouch suppression reaction was lost off cover.");
+        Equal(TacticalStance.Prone,
+            SuppressionRecoveryPoseCore.Resolve(
+                onUsableCover: true, current: TacticalStance.Crouched, coverEvaluationOwnsProne: true),
+            "Suppression recovery fought an owned cover evaluation that already measured the slot as prone-only.");
+    }
+
+    private static void SuppressionRecoveryPreventsProneCrouchLoopOnRelease()
+    {
+        // Reproduces the reported loop end to end through the real pose latch: pin
+        // engages (instant prone, held through PinnedMinimumSeconds), then releases
+        // while suppression is still in the crouch band. The old flat Crouch proposal
+        // forced the soldier up in the open on every release; the recovery-core
+        // proposal must keep him prone for the rest of the engagement.
+        var latched = TacticalStance.Crouched;
+        var holdUntil = 0f;
+        var reachedProne = false;
+        var everRoseAfterProne = false;
+        for (var t = 0f; t <= 6f; t += 0.5f)
+        {
+            const bool pinned = true;
+            const TacticalStance proposed = TacticalStance.Prone;
+            holdUntil = TacticalPoseStabilityCore.RenewHoldUntil(t, holdUntil, pinned);
+            if (TacticalPoseStabilityCore.ShouldAccept(latched, proposed, t, holdUntil, pinned))
+            {
+                latched = proposed;
+                holdUntil = t + TacticalPoseStabilityCore.MinimumHoldSeconds;
+            }
+
+            if (latched == TacticalStance.Prone)
+                reachedProne = true;
+        }
+
+        for (var t = 6.5f; t <= 20f; t += 0.5f)
+        {
+            const bool pinned = false;
+            var proposed = SuppressionRecoveryPoseCore.Resolve(
+                onUsableCover: false, latched, coverEvaluationOwnsProne: false);
+            holdUntil = TacticalPoseStabilityCore.RenewHoldUntil(t, holdUntil, pinned);
+            if (TacticalPoseStabilityCore.ShouldAccept(latched, proposed, t, holdUntil, pinned))
+            {
+                if (reachedProne && proposed != TacticalStance.Prone)
+                    everRoseAfterProne = true;
+                latched = proposed;
+                holdUntil = t + TacticalPoseStabilityCore.MinimumHoldSeconds;
+            }
+        }
+
+        True(reachedProne, "The pin never latched the soldier prone.");
+        False(everRoseAfterProne,
+            "Suppression recovery let the pinned soldier rise to crouch in the open on release.");
+        Equal(TacticalStance.Prone, latched,
+            "The soldier did not stay prone through the suppression-band release window.");
+    }
+
+    private static void SuppressionRecoveryDefersToAnOwnedProneCoverEvaluation()
+    {
+        // Reproduces RC2 end to end, matching the mechanism in the plan: contact has
+        // fully lapsed (lowerPoseStillOwned false throughout, as after ContactUntil
+        // expires) while cover-posture ownership stays active (known threat memory +
+        // usable cover, which - unlike the contact timer - does not lapse) and the
+        // suppression crouch band flickers on and off every tick. On the frames the
+        // band is active, UpdateSuppressionReaction proposes through
+        // SuppressionRecoveryPoseCore; on the other frames MaintainOwnedPose's cover
+        // evaluation proposes Prone directly. Before the fix, the suppression
+        // proposal was a hard Crouch on usable cover regardless of what the cover
+        // evaluation measured, so once the hold expired the latch accepted Crouch,
+        // the evaluation's next frame instantly dropped it back to Prone, and it
+        // repeated - the observed prone<->crouch loop. The fix makes both proposers
+        // agree on Prone so the latch has nothing to oscillate over.
+        var latched = TacticalStance.Prone;
+        var holdUntil = 0f;
+        var everRoseAfterProne = false;
+        var tick = 0;
+        for (var t = 0f; t <= 20f; t += 0.5f, tick++)
+        {
+            const bool lowerPoseStillOwned = false; // ContactUntil has already lapsed.
+            var coverOwned = CoverPostureOwnershipCore.CoverPoseOwned(
+                hasThreatMemory: true, onUsableCover: true, defensiveHold: false);
+            var suppressionBandActive = tick % 2 == 0;
+            var proposed = suppressionBandActive
+                ? SuppressionRecoveryPoseCore.Resolve(
+                    onUsableCover: true, latched, coverEvaluationOwnsProne: coverOwned)
+                : TacticalStance.Prone;
+
+            holdUntil = TacticalPoseStabilityCore.RenewHoldUntil(t, holdUntil, lowerPoseStillOwned);
+            if (TacticalPoseStabilityCore.ShouldAccept(
+                    latched, proposed, t, holdUntil, lowerPoseStillOwned))
+            {
+                if (proposed != TacticalStance.Prone)
+                    everRoseAfterProne = true;
+                latched = proposed;
+                holdUntil = t + TacticalPoseStabilityCore.MinimumHoldSeconds;
+            }
+        }
+
+        False(everRoseAfterProne,
+            "Suppression recovery fought the owned cover evaluation and reopened the prone<->crouch loop.");
+        Equal(TacticalStance.Prone, latched,
+            "The latched pose did not stay converged on the protective stance under a flickering suppression band.");
+    }
+
+    private static void WrongSideAnchorReleasesForALiveEngagedThreat()
+    {
+        // Wrong side of cover: a currently-engaged live enemy that the anchored cover
+        // does not stop (measured against the anti-flicker stabilized axis) releases the
+        // sticky anchor for one relocation to face the real threat.
+        True(DefensiveAnchorReevaluationCore.ShouldReleaseForRealThreat(
+                hasThreatMemory: true, engagedRecently: true,
+                coverEvaluationSucceeded: true, coverProtectsAgainstStableThreat: false),
+            "A defender kept an anchor his live enemy could shoot through.");
+
+        // Protective cover is never abandoned.
+        False(DefensiveAnchorReevaluationCore.ShouldReleaseForRealThreat(
+                true, true, true, true),
+            "A protective anchor was abandoned under fire.");
+
+        // No live/recent engagement: the sticky anchor is preserved, so a predicted or
+        // stale bearing cannot churn a settled defender.
+        False(DefensiveAnchorReevaluationCore.ShouldReleaseForRealThreat(
+                true, false, true, false),
+            "An anchor churned without a currently-engaged threat.");
+        False(DefensiveAnchorReevaluationCore.ShouldReleaseForRealThreat(
+                false, true, true, false),
+            "An anchor churned without any threat memory.");
+
+        // An inconclusive evaluation (for example a building slot not reporting native
+        // cover) never releases the anchor.
+        False(DefensiveAnchorReevaluationCore.ShouldReleaseForRealThreat(
+                true, true, false, false),
+            "An anchor was released on an inconclusive cover evaluation.");
+    }
+
+    private static void TargetObservationAccruesOnlyDuringContinuousWatching()
+    {
+        // A candidate is created at t=0 with zero banked time; 9 further samples
+        // every 0.5s (10 samples total) accrue real elapsed time between them.
+        var observed = 0f;
+        var lastSeenAt = 0f;
+        for (var i = 1; i <= 9; i++)
+        {
+            var now = i * 0.5f;
+            observed = TargetConfirmationCore.AccrueObservation(observed, lastSeenAt, now);
+            lastSeenAt = now;
+        }
+
+        Near(4.5f, observed, 0.001f,
+            "Continuous 0.5s sampling did not bank the expected observed time.");
+
+        // The fix's headline case: two glimpses 20 seconds apart must not bank the
+        // gap between them as observation.
+        Equal(0f, TargetConfirmationCore.AccrueObservation(5f, 0f, 20f),
+            "A long gap between glimpses incorrectly banked observed time.");
+
+        // A brief hiccup inside the continuity window credits the sample cap, not
+        // the raw gap.
+        Near(TargetConfirmationCore.MaxSampleCreditSeconds,
+            TargetConfirmationCore.AccrueObservation(0f, 0f, 3f),
+            0.001f,
+            "A brief hiccup inside the continuity window credited more than the sample cap.");
+
+        // Boundary: exactly the continuity-break threshold still accrues (capped);
+        // a hair beyond it resets the streak.
+        Near(TargetConfirmationCore.MaxSampleCreditSeconds,
+            TargetConfirmationCore.AccrueObservation(
+                0f, 0f, TargetConfirmationCore.ContinuityBreakSeconds),
+            0.001f,
+            "The exact continuity boundary incorrectly reset the observed streak.");
+        Equal(0f,
+            TargetConfirmationCore.AccrueObservation(
+                0f, 0f, TargetConfirmationCore.ContinuityBreakSeconds + 0.01f),
+            "A gap just past the continuity boundary failed to reset the observed streak.");
+    }
+
+    private static void ContactReportReplacementPrefersFresherInformation()
+    {
+        // A stale, more direct report must not replace a fresher relayed report.
+        False(ContactReportStoreCore.ShouldReplace(
+                100f, ContactDeliveryKind.Radio, 90f, ContactDeliveryKind.Direct),
+            "A stale direct report replaced a fresher radio report.");
+
+        // A fresher report replaces an older one regardless of delivery kind, in
+        // both directions.
+        True(ContactReportStoreCore.ShouldReplace(
+                90f, ContactDeliveryKind.Direct, 100f, ContactDeliveryKind.Radio),
+            "A fresher radio report did not replace an older direct sighting.");
+        True(ContactReportStoreCore.ShouldReplace(
+                90f, ContactDeliveryKind.Radio, 100f, ContactDeliveryKind.Direct),
+            "A fresher direct sighting did not replace an older radio report.");
+
+        // Exact same ObservedAt: the more direct kind wins.
+        True(ContactReportStoreCore.ShouldReplace(
+                100f, ContactDeliveryKind.Radio, 100f, ContactDeliveryKind.Direct),
+            "A tied timestamp did not prefer the more direct delivery kind.");
+        False(ContactReportStoreCore.ShouldReplace(
+                100f, ContactDeliveryKind.Direct, 100f, ContactDeliveryKind.Radio),
+            "A tied timestamp let a less direct report replace a more direct one.");
+
+        // Same timestamp and same kind must not churn.
+        False(ContactReportStoreCore.ShouldReplace(
+                100f, ContactDeliveryKind.Voice, 100f, ContactDeliveryKind.Voice),
+            "An identical report replaced itself.");
+    }
+
+    private static void ContactConfidenceDecaysLinearlyToZero()
+    {
+        Near(1f, ContactReportStoreCore.DecayedConfidence(1f, 0f, 30f), 0.001f,
+            "Fresh confidence did not start at the initial value.");
+        Near(0.5f, ContactReportStoreCore.DecayedConfidence(1f, 15f, 30f), 0.001f,
+            "Confidence at the halfway point did not decay linearly.");
+        Near(0f, ContactReportStoreCore.DecayedConfidence(1f, 30f, 30f), 0.001f,
+            "Confidence at the exact lifetime boundary was not fully decayed.");
+        Near(0f, ContactReportStoreCore.DecayedConfidence(1f, 45f, 30f), 0.001f,
+            "Confidence beyond its lifetime went negative instead of clamping to zero.");
+
+        // A non-positive lifetime must not divide by zero.
+        Finite(ContactReportStoreCore.DecayedConfidence(1f, 5f, 0f),
+            "A non-positive lifetime produced a non-finite confidence value.");
+    }
+
+    private static MapPoint DirectionAt(float degrees)
+    {
+        var radians = degrees * MathF.PI / 180f;
+        return new MapPoint(MathF.Cos(radians), MathF.Sin(radians));
     }
 
     private static void CoverFsmHoldsUsefulCover()
@@ -521,6 +1268,82 @@ internal static class Program
             "An unowned native destination clear was blocked.");
     }
 
+    private static void PlayerHoldArrivalClaimsStableProtectedPositions()
+    {
+        True(PlayerHoldPositionCore.OrderChanged(
+                false, default, 0f, new MapPoint(10f, 20f), 12f),
+            "A newly arrived player-held soldier did not acquire local position ownership.");
+        False(PlayerHoldPositionCore.OrderChanged(
+                true, new MapPoint(10f, 20f), 12f,
+                new MapPoint(10.5f, 20.5f), 12.25f),
+            "Minor native order jitter replaced an otherwise stable player hold.");
+        True(PlayerHoldPositionCore.OrderChanged(
+                true, new MapPoint(10f, 20f), 12f,
+                new MapPoint(12f, 20f), 12f),
+            "A materially moved player hold retained stale cover ownership.");
+        True(PlayerHoldPositionCore.ShouldSeekCover(true, false, false, true),
+            "An exposed soldier inside a player hold did not seek cover.");
+        False(PlayerHoldPositionCore.ShouldSeekCover(false, false, false, true),
+            "A soldier left the native route before reaching the player hold.");
+        False(PlayerHoldPositionCore.ShouldSeekCover(true, true, false, true),
+            "An active player-hold cover move was replaced before completion.");
+        False(PlayerHoldPositionCore.ShouldSeekCover(true, false, true, true),
+            "A stable player-hold cover anchor was churned.");
+        False(PlayerHoldPositionCore.ShouldSeekCover(true, false, false, false),
+            "A player-hold cover search ignored its bounded retry cadence.");
+    }
+
+    private static void StableAnchorsKeepTheirSpatialReservations()
+    {
+        False(InfantryCoverDecisionCore.ShouldReleaseUnoccupiedReservation(
+                false, false, true),
+            "A latched building or trench slot lost its reservation when native cover status flickered.");
+        True(InfantryCoverDecisionCore.ShouldReleaseUnoccupiedReservation(
+                false, false, false),
+            "An unoccupied, unanchored cover reservation was retained indefinitely.");
+        False(InfantryCoverDecisionCore.ShouldReleaseUnoccupiedReservation(
+                true, false, false),
+            "A cover reservation was released while its soldier was still in transit.");
+    }
+
+    private static void AutonomousDefendersSeekCoverEvenWithVisibleContact()
+    {
+        True(InfantryCoverDecisionCore.ShouldSeekInitialDefensiveCover(
+                true, false, false, true, false),
+            "An exposed autonomous defender without contact did not seek a fighting position.");
+        True(InfantryCoverDecisionCore.ShouldSeekInitialDefensiveCover(
+                true, false, false, true, true),
+            "A visible enemy incorrectly pinned an exposed autonomous defender in place.");
+        False(InfantryCoverDecisionCore.ShouldSeekInitialDefensiveCover(
+                false, false, false, true, true),
+            "A soldier without defensive-position ownership was taken over.");
+        False(InfantryCoverDecisionCore.ShouldSeekInitialDefensiveCover(
+                true, true, false, true, true),
+            "A stable defensive anchor was churned during contact.");
+        False(InfantryCoverDecisionCore.ShouldSeekInitialDefensiveCover(
+                true, false, true, true, true),
+            "An active defensive cover move was replaced during contact.");
+        False(InfantryCoverDecisionCore.ShouldSeekInitialDefensiveCover(
+                true, false, false, false, true),
+            "A defensive cover search ignored its bounded retry cadence.");
+    }
+
+    private static void PlayerHoldCoverDoesNotTakeOverOtherExternalOrders()
+    {
+        True(ExternalMovementPolicyCore.AllowsPlayerHoldCover(
+                true, false, true, true),
+            "Autonomous squadmates were not allowed to occupy cover under a valid player hold.");
+        False(ExternalMovementPolicyCore.AllowsPlayerHoldCover(
+                true, true, true, true),
+            "A Lua/script-owned order was replaced by player-hold cover logic.");
+        False(ExternalMovementPolicyCore.AllowsPlayerHoldCover(
+                true, false, false, true),
+            "The player's own soldier was taken over by autonomous cover logic.");
+        False(ExternalMovementPolicyCore.AllowsPlayerHoldCover(
+                true, false, true, false),
+            "A non-hold player command was replaced by autonomous cover logic.");
+    }
+
     private static void WalkingInPlaceTriggersAQuietRecoveryHold()
     {
         Equal(MovementProgressDecision.Observe,
@@ -676,13 +1499,16 @@ internal static class Program
                 exposedDestination),
             "A clear firing lane was mistaken for a protected defensive position.");
 
+        // The no-fire penalty now matches an attacker's Normal slot (500), so a defender
+        // still refuses to abandon markedly stronger cover for a fire line only when the
+        // protection gap is decisive. A modest gap now correctly favors a firing lane.
         var strongCoverWithoutFireLine = protectedDestinationAcrossOpenGround;
         var weakCoverWithFireLine = protectedDestinationAcrossOpenGround with
         {
             DistanceSqr = 100f,
             AssignedPoseCanFire = true,
             StandingCanFire = true,
-            PrimaryProtectionFraction = 0.75f
+            PrimaryProtectionFraction = 0.4f
         };
         True(InfantryCoverDecisionCore.Score(
                  CoverSelectionMode.DefensiveOccupation,
@@ -714,9 +1540,12 @@ internal static class Program
             64f, 0f, true, 0, false, false, 1f, 0.2f,
             PrimaryProtectionFraction: 1f,
             PreferProtectionOverFiringLine: true);
+        // Protection gap widened (0.75 -> 0.4) because the no-fire penalty now equals an
+        // attacker's Normal slot (500); a defender keeps decisively stronger cover but no
+        // longer clings to a fully blind slot when a well-protected slot offers a lane.
         var weakerCoverWithFireLine = new CoverScoreInput(
             64f, 0f, true, 0, true, true, 1f, 0.2f,
-            PrimaryProtectionFraction: 0.75f,
+            PrimaryProtectionFraction: 0.4f,
             PreferProtectionOverFiringLine: true);
 
         True(InfantryCoverDecisionCore.Score(
@@ -893,6 +1722,23 @@ internal static class Program
 
         var defensive = Plan(StandardSquads(3), Reports(1f), StandardAxes(), offensive: false);
         False(defensive.AttackAuthorized, "A non-offensive operation authorized attack.");
+    }
+
+    private static void AttackerAggressivenessAdjustsAttackGate()
+    {
+        var squads = Enumerable.Range(1, 10)
+            .Select(id => Squad(id, strength: 4f, peak: 4f, suppression: 0.40f))
+            .ToArray();
+
+        var cautious = Plan(squads, Reports(30f), StandardAxes(), aggressiveness: 0.5f);
+        False(cautious.AttackAuthorized,
+            "A cautious attack posture authorized a marginally supported assault.");
+
+        var aggressive = Plan(squads, Reports(30f), StandardAxes(), aggressiveness: 1.5f);
+        True(aggressive.AttackAuthorized,
+            "An aggressive attack posture did not release a marginally supported assault.");
+        True(aggressive.Metrics.ReserveSquadCount < cautious.Metrics.ReserveSquadCount,
+            "An aggressive attack posture did not commit more squads.");
     }
 
     private static void SmokeBlocksManeuverUntilReady()
@@ -1157,6 +2003,25 @@ internal static class Program
             "A faction holding the objective was not put in defend posture.");
     }
 
+    private static void ContestedOwnershipRetainsOneDefendingSide()
+    {
+        Equal(StrategicPosture.Defend,
+            StrategicPostureCore.Resolve(false, false, StrategicPosture.Defend,
+                StrategicPosture.Attack),
+            "A contested objective converted its established defender into an attacker.");
+        Equal(StrategicPosture.Attack,
+            StrategicPostureCore.Resolve(false, false, StrategicPosture.Attack,
+                StrategicPosture.Defend),
+            "A contested objective cancelled an established assault.");
+        Equal(StrategicPosture.Defend,
+            StrategicPostureCore.Resolve(false, false, null, StrategicPosture.Defend),
+            "An initially ambiguous defender side did not use defensive doctrine.");
+        Equal(StrategicPosture.Attack,
+            StrategicPostureCore.Resolve(true, false, StrategicPosture.Defend,
+                StrategicPosture.Defend),
+            "Known enemy ownership failed to transition a defender into attack posture.");
+    }
+
     private static void AttackerAndDefenderPlannerCoresSelectTheirPostures()
     {
         var input = new CommanderPlanInput(
@@ -1174,6 +2039,299 @@ internal static class Program
         False(defend.AttackAuthorized, "The defender planner opened an assault gate.");
         True(defend.Directives.All(directive => directive.Action == CommanderAction.Hold),
             "The defender planner emitted a maneuver action.");
+        Equal(null, defend.MainAxisId, "The defender planner retained an attacker main axis.");
+        Equal(null, defend.FlankAxisId, "The defender planner retained an attacker flank axis.");
+        var positions = input.Squads!.ToDictionary(squad => squad.Id, squad => squad.Position);
+        True(defend.Directives.All(directive =>
+                directive.Destination == positions[directive.SquadId]),
+            "The defender planner sent squads to the exact objective center.");
+    }
+
+    private static void AttackersLeaveACapturedObjectiveForAFarUnsecuredOne()
+    {
+        var candidates = new[]
+        {
+            new ObjectiveCandidate(1, 5f, true),
+            new ObjectiveCandidate(2, 500f, false)
+        };
+        Equal(2, ObjectiveSelectionCore.Select(candidates, true, 1),
+            "An attacker standing on a captured objective did not push on to the far uncaptured one.");
+    }
+
+    private static void AttackersWithEveryObjectiveSecuredDefendTheBestOne()
+    {
+        var candidates = new[]
+        {
+            new ObjectiveCandidate(1, 50f, true),
+            new ObjectiveCandidate(2, 10f, true)
+        };
+        Equal(2, ObjectiveSelectionCore.Select(candidates, true, 1),
+            "An attacker with every objective already captured did not fall back to defending the best one.");
+    }
+
+    private static void AttackerStickinessKeepsTheCurrentUnsecuredObjective()
+    {
+        var candidates = new[]
+        {
+            new ObjectiveCandidate(1, 50f, false),
+            new ObjectiveCandidate(2, 400f, false)
+        };
+        Equal(2, ObjectiveSelectionCore.Select(candidates, true, 2),
+            "A nearer unsecured objective pulled the attacker off its current uncaptured objective.");
+    }
+
+    private static void AttackerStickinessReleasesOnceItsObjectiveIsSecured()
+    {
+        var candidates = new[]
+        {
+            new ObjectiveCandidate(2, 400f, true),
+            new ObjectiveCandidate(3, 50f, false)
+        };
+        Equal(3, ObjectiveSelectionCore.Select(candidates, true, 2),
+            "The attacker did not move on once its current objective became friendly-secured.");
+    }
+
+    private static void DefenderObjectiveSelectionIsUnchangedByThePenalty()
+    {
+        // Effective score = distance + (140 if friendly-secured). A secured objective
+        // only keeps winning while the unsecured alternative is more than ~140m farther
+        // away than it is; this replicates the original inline scoring untouched.
+        var unsecuredFarEnough = new[]
+        {
+            new ObjectiveCandidate(1, 10f, true),
+            new ObjectiveCandidate(2, 200f, false)
+        };
+        Equal(1, ObjectiveSelectionCore.Select(unsecuredFarEnough, false, null),
+            "A defender abandoned a secured objective for an unsecured one more than 140m farther away.");
+
+        var unsecuredWithinGap = new[]
+        {
+            new ObjectiveCandidate(1, 10f, true),
+            new ObjectiveCandidate(2, 100f, false)
+        };
+        Equal(2, ObjectiveSelectionCore.Select(unsecuredWithinGap, false, null),
+            "A defender clung to a secured objective even though the unsecured alternative was within the 140m penalty gap.");
+    }
+
+    private static void ObjectiveSelectionTiesAreBrokenByLowerId()
+    {
+        var candidates = new[]
+        {
+            new ObjectiveCandidate(5, 20f, false),
+            new ObjectiveCandidate(2, 20f, false)
+        };
+        Equal(2, ObjectiveSelectionCore.Select(candidates, false, null),
+            "An objective-selection tie was not broken in favor of the lower Id.");
+    }
+
+    private static TankEngagementInput TankInput(
+        bool hasArmoredTarget = true,
+        float distance = 150f,
+        float timeSinceVisible = 0f,
+        float lifeFraction = 1f,
+        bool hullFacesThreat = true,
+        bool reverseAvailable = true,
+        bool rearBlocked = false,
+        bool reverseTimerElapsed = true,
+        float standoff = 180f,
+        float reverseDistance = 100f,
+        float damagedThreshold = 0.45f)
+        => new(
+            hasArmoredTarget, distance, timeSinceVisible, lifeFraction, hullFacesThreat,
+            reverseAvailable, rearBlocked, reverseTimerElapsed, standoff, reverseDistance,
+            damagedThreshold);
+
+    private static void TankEngagementEntersAndReleasesHoldWithHysteresis()
+    {
+        Equal(TankEngagementState.Follow,
+            TankEngagementDecisionCore.NextState(
+                TankEngagementState.Follow, TankInput(distance: 181f)),
+            "Follow entered Hold before the standoff distance was reached.");
+        Equal(TankEngagementState.Hold,
+            TankEngagementDecisionCore.NextState(
+                TankEngagementState.Follow, TankInput(distance: 180f)),
+            "Follow did not enter Hold on the standoff boundary.");
+
+        // Hold must not release on a distance just past standoff; the exit
+        // threshold sits at standoff * 1.15, not at standoff itself.
+        Equal(TankEngagementState.Hold,
+            TankEngagementDecisionCore.NextState(
+                TankEngagementState.Hold, TankInput(distance: 200f)),
+            "Hold released before its hysteresis exit distance.");
+        Equal(TankEngagementState.Follow,
+            TankEngagementDecisionCore.NextState(
+                TankEngagementState.Hold, TankInput(distance: 207.01f)),
+            "Hold failed to release once the enemy passed the exit distance.");
+    }
+
+    private static void TankEngagementLosFlickerGrantsGraceBeforeReleasingHold()
+    {
+        Equal(TankEngagementState.Hold,
+            TankEngagementDecisionCore.NextState(
+                TankEngagementState.Hold, TankInput(distance: 150f, timeSinceVisible: 3f)),
+            "A one-frame LOS flicker released an active hold before its grace period.");
+        Equal(TankEngagementState.Follow,
+            TankEngagementDecisionCore.NextState(
+                TankEngagementState.Hold, TankInput(distance: 150f, timeSinceVisible: 3.01f)),
+            "Hold never released after the target stayed unseen beyond the grace window.");
+    }
+
+    private static void TankEngagementHoldAndReverseNeverDitherAroundTheirBoundaries()
+    {
+        // Sweeping distance +/-5m around the reverse boundary (100m) while already
+        // in Reverse must never bounce back to Hold on a single step.
+        foreach (var distance in new[] { 95f, 100f, 105f, 95f, 105f })
+        {
+            Equal(TankEngagementState.Reverse,
+                TankEngagementDecisionCore.NextState(
+                    TankEngagementState.Reverse,
+                    TankInput(distance: distance, reverseTimerElapsed: true)),
+                $"Reverse dithered at {distance}m, inside its hysteresis band.");
+        }
+
+        // Sweeping distance +/-5m around the standoff boundary (180m) while
+        // already in Hold must never bounce to Follow on a single step.
+        foreach (var distance in new[] { 175f, 180f, 185f, 175f, 185f })
+        {
+            Equal(TankEngagementState.Hold,
+                TankEngagementDecisionCore.NextState(
+                    TankEngagementState.Hold, TankInput(distance: distance)),
+                $"Hold dithered at {distance}m, inside its hysteresis band.");
+        }
+    }
+
+    private static void TankEngagementDamagedReverseDoesNotLoopWhenRearIsBlocked()
+    {
+        Equal(TankEngagementState.Reverse,
+            TankEngagementDecisionCore.NextState(
+                TankEngagementState.Hold,
+                TankInput(distance: 150f, lifeFraction: 0.4f, rearBlocked: false)),
+            "A damaged tank with a clear rear did not begin a tactical reverse.");
+        Equal(TankEngagementState.Hold,
+            TankEngagementDecisionCore.NextState(
+                TankEngagementState.Hold,
+                TankInput(distance: 150f, lifeFraction: 0.4f, rearBlocked: true)),
+            "A damaged tank reversed into a blocked rear instead of holding to fight.");
+
+        // Once reversing, a blocked rear (or lost reverse capability) must end the
+        // retreat immediately rather than loop a blind reverse forever.
+        Equal(TankEngagementState.Hold,
+            TankEngagementDecisionCore.NextState(
+                TankEngagementState.Reverse,
+                TankInput(distance: 90f, reverseTimerElapsed: false, rearBlocked: true)),
+            "Reverse kept looping after its rear became blocked.");
+        Equal(TankEngagementState.Hold,
+            TankEngagementDecisionCore.NextState(
+                TankEngagementState.Reverse,
+                TankInput(distance: 90f, reverseTimerElapsed: false, reverseAvailable: false)),
+            "Reverse kept looping after reverse capability was lost.");
+
+        // A target that dies or goes unseen past the grace window must end the
+        // reverse and resume pathing, even while still deep inside the reverse
+        // band; otherwise the tank backs up from nothing forever.
+        Equal(TankEngagementState.Follow,
+            TankEngagementDecisionCore.NextState(
+                TankEngagementState.Reverse,
+                TankInput(distance: 90f, reverseTimerElapsed: false, timeSinceVisible: 3.01f)),
+            "Reverse never released after its target stayed unseen beyond the grace window.");
+        Equal(TankEngagementState.Follow,
+            TankEngagementDecisionCore.NextState(
+                TankEngagementState.Reverse,
+                TankInput(hasArmoredTarget: false, distance: 90f, reverseTimerElapsed: false)),
+            "Reverse outlived a target that no longer exists.");
+    }
+
+    private static void TankEngagementHullRotationOnlyAllowedInHoldOutsideReverseBand()
+    {
+        False(TankEngagementDecisionCore.AllowHullRotation(
+                TankEngagementState.Follow, 150f, 100f, false),
+            "Hull rotation was allowed outside of Hold.");
+        False(TankEngagementDecisionCore.AllowHullRotation(
+                TankEngagementState.Reverse, 150f, 100f, false),
+            "Hull rotation was allowed while reversing.");
+        False(TankEngagementDecisionCore.AllowHullRotation(
+                TankEngagementState.Hold, 90f, 100f, false),
+            "Hull rotation was allowed inside the close reverse band.");
+        False(TankEngagementDecisionCore.AllowHullRotation(
+                TankEngagementState.Hold, 150f, 100f, true),
+            "Hull rotation was requested while already facing the threat.");
+        True(TankEngagementDecisionCore.AllowHullRotation(
+                TankEngagementState.Hold, 150f, 100f, false),
+            "Hull rotation was withheld at standoff range while side-on to the threat.");
+    }
+
+    private static void TankStallWatchdogRecoversResetsAndGivesUp()
+    {
+        False(TankStallWatchdogCore.IsStalled(3f, 14.99f),
+            "The watchdog fired before its 15s window elapsed.");
+        True(TankStallWatchdogCore.IsStalled(3f, 15f),
+            "The watchdog failed to fire after 15s with under 4m of displacement.");
+        False(TankStallWatchdogCore.IsStalled(4f, 20f),
+            "The watchdog fired despite 4m of displacement (its own threshold).");
+
+        False(TankStallWatchdogCore.HasNetProgress(9.99f),
+            "Net progress was credited below the 10m threshold.");
+        True(TankStallWatchdogCore.HasNetProgress(10f),
+            "Net progress was not credited at the 10m threshold.");
+
+        False(TankStallWatchdogCore.ShouldGiveUp(2), "The watchdog gave up before 3 failed recoveries.");
+        True(TankStallWatchdogCore.ShouldGiveUp(3), "The watchdog did not give up after 3 failed recoveries.");
+    }
+
+    private static void CommanderOrdersChangePhaseInsteadOfChurningDestinations()
+    {
+        var stationary = new StableCommanderOrder(
+            7, CommanderRole.SupportByFire, CommanderAction.Hold);
+        False(CommanderOrderStabilityCore.ShouldReplace(
+                stationary,
+                new StableCommanderOrder(
+                    7, CommanderRole.SupportByFire, CommanderAction.Prepare)),
+            "A stationary planner heartbeat replaced an accepted support position.");
+        True(CommanderOrderStabilityCore.ShouldReplace(
+                stationary,
+                new StableCommanderOrder(
+                    7, CommanderRole.SupportByFire, CommanderAction.Attack)),
+            "A real hold-to-attack phase transition failed to replace the old order.");
+        True(CommanderOrderStabilityCore.ShouldReplace(
+                stationary,
+                new StableCommanderOrder(
+                    8, CommanderRole.SupportByFire, CommanderAction.Hold)),
+            "An objective transition retained the previous objective's order.");
+        True(CommanderOrderStabilityCore.ShouldReplace(
+                stationary,
+                new StableCommanderOrder(
+                    7, CommanderRole.Reserve, CommanderAction.Hold)),
+            "A deliberate role transition failed to replace the old order.");
+        False(CommanderOrderStabilityCore.ShouldReplace(
+                stationary,
+                new StableCommanderOrder(
+                    7, CommanderRole.Reserve, CommanderAction.Hold),
+                ignoreRole: true),
+            "A defensive role rebalance churned an otherwise unchanged hold order.");
+    }
+
+    private static void ObjectiveFormationDistributesSquadsAwayFromTheCenter()
+    {
+        var center = new MapPoint(100f, 200f);
+        var defensive = Enumerable.Range(0, 6)
+            .Select(slot => ObjectiveFormationCore.DefensiveSector(center, 40f, slot))
+            .ToArray();
+        var entries = Enumerable.Range(0, 6)
+            .Select(slot => ObjectiveFormationCore.AttackEntry(center, 40f, slot))
+            .ToArray();
+
+        Equal(defensive.Length, defensive.Distinct().Count(),
+            "Two defensive squads received the same objective-sector destination.");
+        Equal(entries.Length, entries.Distinct().Count(),
+            "Two attacking squads received the same objective-entry destination.");
+        True(defensive.All(point => point != center),
+            "A defender was ordered directly to the objective center.");
+        True(entries.All(point => point != center),
+            "An attacker was ordered directly to the objective center.");
+        True(defensive.All(point => Distance(point, center) <= 28.01f),
+            "A defensive sector escaped the defended objective area.");
+        True(entries.All(point => Distance(point, center) <= 20.01f),
+            "An attack entry escaped its bounded objective approach.");
     }
 
     private static void CommandLeasesAreStableAndRejectStaleWork()
@@ -1197,6 +2355,43 @@ internal static class Program
         False(registry.TryAcquire(request with { ObjectiveRevision = 2 }, 12f, out _),
             "Delayed work from the prior objective replaced a current command.");
         True(registry.IsCurrent(revisionThree, 12f), "The current objective lease was lost.");
+    }
+
+    private static void CommandLeaseDebugSnapshotIsOrderedAndPrunesExpiredWork()
+    {
+        var registry = new CommandLeaseRegistryCore();
+        True(registry.TryAcquire(
+                LeaseRequest(30, "vehicle", CommandAuthority.CommanderIntent, 1) with
+                {
+                    Channel = CommandChannel.VehicleOrders,
+                    ValidUntil = 20f
+                },
+                5f, out _),
+            "Vehicle debug lease setup failed.");
+        True(registry.TryAcquire(
+                LeaseRequest(10, "squad", CommandAuthority.CommanderIntent, 1) with
+                {
+                    ValidUntil = 20f
+                },
+                5f, out _),
+            "Squad debug lease setup failed.");
+        True(registry.TryAcquire(
+                LeaseRequest(5, "expired", CommandAuthority.CommanderIntent, 1) with
+                {
+                    Channel = CommandChannel.AircraftOrders,
+                    ValidUntil = 6f
+                },
+                5f, out _),
+            "Expired debug lease setup failed.");
+
+        var snapshot = new List<CommandLease>();
+        registry.CopyActive(10f, snapshot);
+        Equal(2, snapshot.Count, "The visual snapshot retained an expired command lease.");
+        Equal(CommandChannel.SquadOrders, snapshot[0].Key.Channel,
+            "The visual snapshot did not use deterministic channel ordering.");
+        Equal(CommandChannel.VehicleOrders, snapshot[1].Key.Channel,
+            "The visual snapshot did not retain the active vehicle lease.");
+        Equal(2, registry.Count, "Snapshot cleanup did not prune the expired registry entry.");
     }
 
     private static void DefensiveOrdersIgnorePlannerHeartbeatAndRoleChurn()
@@ -1239,17 +2434,17 @@ internal static class Program
     {
         var snapshot = new SoldierTacticalSnapshot(
             7, 1, 4, StrategicPosture.Defend, false, false, true, false,
-            true, false, false, false, new MapPoint(0f, 0f), new MapPoint(10f, 0f));
+            true, false, false, new MapPoint(0f, 0f), new MapPoint(10f, 0f));
         var proposals = new[]
         {
             new TacticalProposal(TacticalChannel.Movement, TacticalAction.Move,
-                CommandAuthority.ImmediateCombat, "contact", new MapPoint(2f, 0f), "bound"),
+                CommandAuthority.ImmediateCombat, ProposalSource.Contact, new MapPoint(2f, 0f), "bound"),
             new TacticalProposal(TacticalChannel.Movement, TacticalAction.Hold,
-                CommandAuthority.ProtectedFortification, "fortification", new MapPoint(1f, 0f), "slot"),
+                CommandAuthority.ProtectedFortification, ProposalSource.ProtectedAssignment, new MapPoint(1f, 0f), "slot"),
             new TacticalProposal(TacticalChannel.Pose, TacticalAction.Crouch,
-                CommandAuthority.CriticalSuppression, "suppression", default, "duck"),
+                CommandAuthority.CriticalSuppression, ProposalSource.Suppression, default, "duck"),
             new TacticalProposal(TacticalChannel.Pose, TacticalAction.Stand,
-                CommandAuthority.ImmediateCombat, "contact", default, "fire")
+                CommandAuthority.ImmediateCombat, ProposalSource.Contact, default, "fire")
         };
 
         var expected = TacticalArbitrationCore.Resolve(snapshot, proposals);
@@ -1266,6 +2461,410 @@ internal static class Program
             Equal(expected.Winners[TacticalChannel.Pose], actual.Winners[TacticalChannel.Pose],
                 "Pose arbitration depended on proposal order.");
         }
+    }
+
+    private static void ProtectedAssignmentOutranksCoverHoldAtEqualAuthority()
+    {
+        var snapshot = new SoldierTacticalSnapshot(
+            12, 2, 1, StrategicPosture.Defend, false, false, true, false,
+            false, false, false, new MapPoint(0f, 0f), new MapPoint(5f, 0f));
+        var coverHold = new TacticalProposal(TacticalChannel.Movement, TacticalAction.Hold,
+            CommandAuthority.ProtectedFortification, ProposalSource.CoverHold, new MapPoint(0f, 0f), "cover");
+        var protectedAssignment = new TacticalProposal(TacticalChannel.Movement, TacticalAction.Move,
+            CommandAuthority.ProtectedFortification, ProposalSource.ProtectedAssignment, new MapPoint(1f, 0f),
+            "assignment");
+
+        var forward = TacticalArbitrationCore.Resolve(snapshot, new[] { coverHold, protectedAssignment });
+        Equal(ProposalSource.ProtectedAssignment, forward.Winners[TacticalChannel.Movement].Source,
+            "A protected fortification/weapon assignment lost to cover-hold at equal authority.");
+
+        var reversed = TacticalArbitrationCore.Resolve(snapshot, new[] { protectedAssignment, coverHold });
+        Equal(ProposalSource.ProtectedAssignment, reversed.Winners[TacticalChannel.Movement].Source,
+            "Submission order changed the protected-assignment vs cover-hold tie-break.");
+
+        var defensivePosition = new TacticalProposal(TacticalChannel.Movement, TacticalAction.Hold,
+            CommandAuthority.ProtectedFortification, ProposalSource.DefensivePosition, new MapPoint(2f, 0f),
+            "defend");
+
+        var defenseVsCoverForward = TacticalArbitrationCore.Resolve(
+            snapshot, new[] { coverHold, defensivePosition });
+        Equal(ProposalSource.DefensivePosition, defenseVsCoverForward.Winners[TacticalChannel.Movement].Source,
+            "Defensive position control lost to cover-hold at equal authority.");
+
+        var defenseVsCoverReversed = TacticalArbitrationCore.Resolve(
+            snapshot, new[] { defensivePosition, coverHold });
+        Equal(ProposalSource.DefensivePosition, defenseVsCoverReversed.Winners[TacticalChannel.Movement].Source,
+            "Submission order changed the defensive-position vs cover-hold tie-break.");
+    }
+
+    private static SoldierTacticalSnapshot ProposalSnapshot(
+        bool playerLed = false,
+        bool scriptOwned = false,
+        bool suppressed = false,
+        bool needsReloadSafety = false,
+        bool lethalHazard = false,
+        MapPoint position = default,
+        MapPoint threatPosition = default,
+        MapPoint hazardPosition = default,
+        ContactMovementSensor contactMovement = default,
+        bool autonomous = true,
+        bool hasPlayerHoldOrder = false,
+        bool hasProtectedAssignment = false,
+        bool tankThreat = false,
+        bool hasCommanderIntent = false,
+        MapPoint commanderIntentDestination = default,
+        bool mounted = false)
+    {
+        return new SoldierTacticalSnapshot(
+            1, 1, 1, StrategicPosture.Attack, playerLed, scriptOwned, true, mounted,
+            suppressed, needsReloadSafety, lethalHazard, position, threatPosition,
+            hazardPosition, contactMovement, autonomous, hasPlayerHoldOrder,
+            hasProtectedAssignment, tankThreat, hasCommanderIntent, commanderIntentDestination);
+    }
+
+    private static void ExternalSquadWithoutPlayerHoldCoverEmitsOnlyNativeAndExternal()
+    {
+        var snapshot = ProposalSnapshot(playerLed: true, hasPlayerHoldOrder: false);
+        var destination = new List<TacticalProposal>();
+        ProposalGenerationCore.Collect(snapshot, new TacticalPolicyOptions(true, true), destination);
+
+        Equal(2, destination.Count,
+            "An external squad without a player-hold order produced more than Native+External.");
+        True(destination.Any(p => p.Channel == TacticalChannel.Movement && p.Source == ProposalSource.Native),
+            "The native fallback proposal was missing.");
+        var external = destination.Single(p => p.Source == ProposalSource.External);
+        Equal(TacticalChannel.Movement, external.Channel, "The external proposal was not on the movement channel.");
+        Equal(TacticalAction.Native, external.Action, "The external proposal did not defer to native movement.");
+        Equal(CommandAuthority.PlayerOrScript, external.Priority, "The external proposal used the wrong authority.");
+        False(destination.Any(p => p.Source is ProposalSource.Hazard or ProposalSource.ActionSafety
+                or ProposalSource.Suppression),
+            "A hazard/safety/suppression proposal leaked in for an external squad.");
+    }
+
+    private static void PlayerHoldCoverFollowsCommittedCoverMove()
+    {
+        var holdSensor = new ContactMovementSensor(
+            HasActionableContact: false, HasRecentContact: false, HasCommittedCoverMove: false,
+            HasStableCoverHold: false, HasTimedCoverHold: false, CanClaimReachedCover: false,
+            HasEngagementHold: false);
+        var position = new MapPoint(5f, 9f);
+        var holding = ProposalSnapshot(playerLed: true, hasPlayerHoldOrder: true, autonomous: true,
+            position: position, contactMovement: holdSensor);
+        var destination = new List<TacticalProposal>();
+        ProposalGenerationCore.Collect(holding, new TacticalPolicyOptions(true, true), destination);
+        var holdProposal = destination.Single(p => p.Source == ProposalSource.PlayerHold);
+        Equal(TacticalAction.Hold, holdProposal.Action,
+            "An uncommitted player-hold cover move issued Move instead of Hold.");
+        Equal(position, holdProposal.Destination,
+            "The player-hold proposal did not target the squad's hold position.");
+
+        var moving = holding with { ContactMovement = holdSensor with { HasCommittedCoverMove = true } };
+        destination.Clear();
+        ProposalGenerationCore.Collect(moving, new TacticalPolicyOptions(true, true), destination);
+        var moveProposal = destination.Single(p => p.Source == ProposalSource.PlayerHold);
+        Equal(TacticalAction.Move, moveProposal.Action,
+            "A committed cover move under player hold did not issue Move.");
+    }
+
+    private static ProposalSource MovementSafetyLadderWinner(List<TacticalProposal> proposals)
+    {
+        var ladder = proposals.Where(p => p.Channel == TacticalChannel.Movement &&
+            p.Source is ProposalSource.Hazard or ProposalSource.ActionSafety or ProposalSource.Suppression)
+            .ToArray();
+        Equal(1, ladder.Length, "The movement safety ladder did not emit exactly one proposal.");
+        return ladder[0].Source;
+    }
+
+    private static void MovementSafetyLadderPicksHazardThenSafetyThenSuppression()
+    {
+        var options = new TacticalPolicyOptions(true, true);
+
+        var hazardDestination = new List<TacticalProposal>();
+        ProposalGenerationCore.Collect(
+            ProposalSnapshot(lethalHazard: true, needsReloadSafety: true, suppressed: true),
+            options, hazardDestination);
+        Equal(ProposalSource.Hazard, MovementSafetyLadderWinner(hazardDestination),
+            "Lethal hazard did not win the movement safety ladder over reload safety and suppression.");
+
+        var safetyDestination = new List<TacticalProposal>();
+        ProposalGenerationCore.Collect(
+            ProposalSnapshot(lethalHazard: false, needsReloadSafety: true, suppressed: true),
+            options, safetyDestination);
+        Equal(ProposalSource.ActionSafety, MovementSafetyLadderWinner(safetyDestination),
+            "Reload safety did not win the movement safety ladder over suppression.");
+
+        var suppressionDestination = new List<TacticalProposal>();
+        ProposalGenerationCore.Collect(
+            ProposalSnapshot(lethalHazard: false, needsReloadSafety: false, suppressed: true),
+            options, suppressionDestination);
+        Equal(ProposalSource.Suppression, MovementSafetyLadderWinner(suppressionDestination),
+            "Suppression did not produce a movement hold once hazard and reload safety were absent.");
+    }
+
+    private static void ProtectedAssignmentSkipsDefensivePositionBranch()
+    {
+        var sensor = new ContactMovementSensor(
+            HasActionableContact: false, HasRecentContact: false, HasCommittedCoverMove: false,
+            HasStableCoverHold: false, HasTimedCoverHold: false, CanClaimReachedCover: false,
+            HasEngagementHold: false, NeedsDefensivePositionControl: true);
+        var options = new TacticalPolicyOptions(true, true);
+
+        var protectedDestination = new List<TacticalProposal>();
+        ProposalGenerationCore.Collect(
+            ProposalSnapshot(hasProtectedAssignment: true, contactMovement: sensor),
+            options, protectedDestination);
+        True(protectedDestination.Any(p => p.Source == ProposalSource.ProtectedAssignment),
+            "A protected fortification/weapon assignment did not produce a proposal.");
+        False(protectedDestination.Any(p => p.Source == ProposalSource.DefensivePosition),
+            "The defensive-position branch ran even though a protected assignment was active.");
+
+        var unprotectedDestination = new List<TacticalProposal>();
+        ProposalGenerationCore.Collect(
+            ProposalSnapshot(hasProtectedAssignment: false, contactMovement: sensor),
+            options, unprotectedDestination);
+        False(unprotectedDestination.Any(p => p.Source == ProposalSource.ProtectedAssignment),
+            "A protected-assignment proposal appeared without a protected assignment.");
+        True(unprotectedDestination.Any(p => p.Source == ProposalSource.DefensivePosition),
+            "The defensive-position branch did not run once the protected assignment was released.");
+    }
+
+    private static void ContactRequiresPolicyEnabledAndNoTankThreatOtherwiseTankFearWins()
+    {
+        var contactSensor = new ContactMovementSensor(
+            HasActionableContact: true, HasRecentContact: false, HasCommittedCoverMove: false,
+            HasStableCoverHold: false, HasTimedCoverHold: false, CanClaimReachedCover: false,
+            HasEngagementHold: false);
+        var threat = new MapPoint(30f, 40f);
+        var contactAllowed = ProposalSnapshot(contactMovement: contactSensor, threatPosition: threat);
+
+        var allowedDestination = new List<TacticalProposal>();
+        ProposalGenerationCore.Collect(contactAllowed, new TacticalPolicyOptions(true, true), allowedDestination);
+        True(allowedDestination.Any(p => p.Source == ProposalSource.Contact),
+            "Contact response did not fire when policy was enabled, there was no tank threat, " +
+            "and the sensor demanded local control.");
+
+        var policyDisabledDestination = new List<TacticalProposal>();
+        ProposalGenerationCore.Collect(
+            contactAllowed, new TacticalPolicyOptions(false, true), policyDisabledDestination);
+        False(policyDisabledDestination.Any(p => p.Source == ProposalSource.Contact),
+            "Contact response fired even though ContactResponseEnabled was false.");
+
+        var tankThreatened = contactAllowed with { TankThreat = true };
+        var tankDestination = new List<TacticalProposal>();
+        ProposalGenerationCore.Collect(tankThreatened, new TacticalPolicyOptions(true, true), tankDestination);
+        False(tankDestination.Any(p => p.Source == ProposalSource.Contact),
+            "Contact response fired even though a tank threat was present.");
+        var tankFear = tankDestination.Single(p => p.Source == ProposalSource.TankFear);
+        Equal(TacticalChannel.Movement, tankFear.Channel, "Tank fear did not target the movement channel.");
+        Equal(TacticalAction.Move, tankFear.Action, "Tank fear did not command a move.");
+        Equal(CommandAuthority.ImmediateCombat, tankFear.Priority,
+            "Tank fear did not use immediate-combat authority.");
+        Equal(threat, tankFear.Destination, "Tank fear did not target the sensed threat position.");
+    }
+
+    private static void MountedCrewNeverReceivesATankFearProposal()
+    {
+        var snapshot = ProposalSnapshot(tankThreat: true, mounted: true);
+        var destination = new List<TacticalProposal>();
+        ProposalGenerationCore.Collect(snapshot, new TacticalPolicyOptions(true, true), destination);
+        False(destination.Any(p => p.Source == ProposalSource.TankFear),
+            "A mounted crewman received a tank-fear proposal that would pull him off his own vehicle.");
+
+        var dismounted = snapshot with { Mounted = false };
+        var dismountedDestination = new List<TacticalProposal>();
+        ProposalGenerationCore.Collect(dismounted, new TacticalPolicyOptions(true, true), dismountedDestination);
+        True(dismountedDestination.Any(p => p.Source == ProposalSource.TankFear),
+            "A dismounted soldier under tank threat did not receive a tank-fear proposal.");
+    }
+
+    private static void ArmorRoleAllocationIsStickyAndOnlyRebuildsOnDiscreteTriggers()
+    {
+        // Three tanks: the 20% top-up must reserve exactly the weakest one.
+        var threeTanks = new[]
+        {
+            new ArmorTankState(1, 0.9f, 0.10f, 8f),
+            new ArmorTankState(2, 0.9f, 0.10f, 6f),
+            new ArmorTankState(3, 0.9f, 0.10f, 4f)
+        };
+        var built = ArmorRoleAllocationCore.Allocate(
+            threeTanks, ArmorRoleAllocationState.Empty, mainAxisUsable: true, flankAxisUsable: true);
+        Equal(3, built.Roles.Count, "The initial allocation did not assign a role to every tank.");
+        Equal(1, built.Roles.Count(pair => pair.Value == ArmorRoleAssignment.Reserve),
+            "A force of three tanks did not reserve exactly its 20% top-up.");
+        Equal(ArmorRoleAssignment.Reserve, built.Roles[3],
+            "The reserve top-up did not pick the weakest tank by EffectivePower.");
+
+        // A suppression wobble that crosses a rounded 0.1 boundary but stays clear
+        // of the entry/exit thresholds must not touch any role.
+        var wobbled = new[]
+        {
+            threeTanks[0] with { Suppression = 0.14f },
+            threeTanks[1] with { Suppression = 0.16f },
+            threeTanks[2] with { Suppression = 0.11f }
+        };
+        var afterWobble = ArmorRoleAllocationCore.Allocate(
+            wobbled, built, mainAxisUsable: true, flankAxisUsable: true);
+        foreach (var pair in built.Roles)
+        {
+            Equal(pair.Value, afterWobble.Roles[pair.Key],
+                $"Tank {pair.Key} changed role from a suppression wobble that crossed no threshold.");
+        }
+
+        // Committed roles must not reorder just because the power ordering flips,
+        // as long as no tank's reserve eligibility, the tank set, axis usability,
+        // or the top-up count changed.
+        var powerFlipped = new[]
+        {
+            wobbled[0] with { EffectivePower = 1f },
+            wobbled[1] with { EffectivePower = 2f },
+            wobbled[2] with { EffectivePower = 20f }
+        };
+        var afterPowerFlip = ArmorRoleAllocationCore.Allocate(
+            powerFlipped, afterWobble, mainAxisUsable: true, flankAxisUsable: true);
+        foreach (var pair in afterWobble.Roles)
+        {
+            Equal(pair.Value, afterPowerFlip.Roles[pair.Key],
+                $"Tank {pair.Key} changed role from an EffectivePower reordering alone.");
+        }
+
+        // Damage/suppression hysteresis, isolated from the top-up mechanic with a
+        // two-tank force (below the >=3 top-up threshold) so EffectivePower never
+        // drives a role change here.
+        var twoTanks = new[]
+        {
+            new ArmorTankState(10, 0.9f, 0.10f, 8f),
+            new ArmorTankState(11, 0.9f, 0.10f, 6f)
+        };
+        var twoBuilt = ArmorRoleAllocationCore.Allocate(
+            twoTanks, ArmorRoleAllocationState.Empty, mainAxisUsable: true, flankAxisUsable: true);
+        False(twoBuilt.Roles.Values.Contains(ArmorRoleAssignment.Reserve),
+            "A two-tank force reserved a tank below the >=3 top-up threshold.");
+
+        var damaged = new[] { twoTanks[0] with { HullFraction = 0.30f }, twoTanks[1] };
+        var afterDamage = ArmorRoleAllocationCore.Allocate(
+            damaged, twoBuilt, mainAxisUsable: true, flankAxisUsable: true);
+        Equal(ArmorRoleAssignment.Reserve, afterDamage.Roles[10],
+            "A tank below the hull-fraction reserve entry threshold was not sent to Reserve.");
+
+        // Recovering just past the entry threshold, but short of the tighter exit
+        // threshold, must not bring the tank back to a committed role.
+        var partiallyRecovered = new[] { damaged[0] with { HullFraction = 0.50f }, damaged[1] };
+        var afterPartialRecovery = ArmorRoleAllocationCore.Allocate(
+            partiallyRecovered, afterDamage, mainAxisUsable: true, flankAxisUsable: true);
+        Equal(ArmorRoleAssignment.Reserve, afterPartialRecovery.Roles[10],
+            "A damage-reserved tank returned to a committed role before crossing the recovery threshold.");
+
+        var fullyRecovered = new[]
+        {
+            partiallyRecovered[0] with { HullFraction = 0.60f, Suppression = 0.10f },
+            partiallyRecovered[1]
+        };
+        var afterFullRecovery = ArmorRoleAllocationCore.Allocate(
+            fullyRecovered, afterPartialRecovery, mainAxisUsable: true, flankAxisUsable: true);
+        True(afterFullRecovery.Roles[10] != ArmorRoleAssignment.Reserve,
+            "A tank that cleared both recovery thresholds never left Reserve.");
+    }
+
+    private static void CommanderIntentProposesMoveToTheAcceptedDestination()
+    {
+        var intent = new MapPoint(77f, -12f);
+        var snapshot = ProposalSnapshot(hasCommanderIntent: true, commanderIntentDestination: intent);
+        var destination = new List<TacticalProposal>();
+        ProposalGenerationCore.Collect(snapshot, new TacticalPolicyOptions(true, true), destination);
+        var commander = destination.Single(p => p.Source == ProposalSource.Commander);
+        Equal(TacticalChannel.Movement, commander.Channel, "Commander intent did not target the movement channel.");
+        Equal(TacticalAction.Move, commander.Action, "Commander intent did not command a move.");
+        Equal(CommandAuthority.CommanderIntent, commander.Priority, "Commander intent used the wrong authority.");
+        Equal(intent, commander.Destination, "Commander intent did not carry the accepted squad destination.");
+
+        var withoutIntent = snapshot with { HasCommanderIntent = false };
+        var withoutDestination = new List<TacticalProposal>();
+        ProposalGenerationCore.Collect(withoutIntent, new TacticalPolicyOptions(true, true), withoutDestination);
+        False(withoutDestination.Any(p => p.Source == ProposalSource.Commander),
+            "A commander proposal appeared without an accepted commander intent.");
+    }
+
+    private static void ReloadSafetyAddsProneAndFireInhibitionAlongsideTheHold()
+    {
+        var snapshot = ProposalSnapshot(needsReloadSafety: true);
+        var destination = new List<TacticalProposal>();
+        ProposalGenerationCore.Collect(snapshot, new TacticalPolicyOptions(true, true), destination);
+
+        var hold = destination.Single(p =>
+            p.Channel == TacticalChannel.Movement && p.Source == ProposalSource.ActionSafety);
+        Equal(TacticalAction.Hold, hold.Action, "Reload safety did not hold the movement channel.");
+
+        var pose = destination.Single(p => p.Channel == TacticalChannel.Pose && p.Source == ProposalSource.ActionSafety);
+        Equal(TacticalAction.Prone, pose.Action, "Reload safety did not drop to prone on the pose channel.");
+        Equal(CommandAuthority.RequiredSafety, pose.Priority,
+            "Reload safety pose proposal used the wrong authority.");
+
+        var firePermission = destination.Single(p =>
+            p.Channel == TacticalChannel.FirePermission && p.Source == ProposalSource.ActionSafety);
+        Equal(TacticalAction.InhibitFire, firePermission.Action, "Reload safety did not inhibit fire.");
+        Equal(CommandAuthority.RequiredSafety, firePermission.Priority,
+            "Reload safety fire-permission proposal used the wrong authority.");
+    }
+
+    private static void MovementDebugProjectionUsesOnlyExecutorDestination()
+    {
+        var snapshot = new SoldierTacticalSnapshot(
+            91, 4, 8, StrategicPosture.Attack, false, false, true, false,
+            true, false, false, default, default);
+        var proposalContext = new MapPoint(100f, 100f);
+        var resolution = TacticalArbitrationCore.Resolve(snapshot, new[]
+        {
+            new TacticalProposal(
+                TacticalChannel.Movement,
+                TacticalAction.Move,
+                CommandAuthority.CommanderIntent,
+                ProposalSource.Commander,
+                proposalContext,
+                "advance")
+        });
+
+        var withoutExecutor = MovementDebugProjectionCore.Project(resolution, false, default);
+        Equal(ProposalSource.Commander, withoutExecutor.Source,
+            "The movement debug view lost the arbitration owner when the executor had no route.");
+        Equal(TacticalAction.Move, withoutExecutor.Action,
+            "The movement debug view lost the winning action.");
+        False(withoutExecutor.HasExecutorDestination,
+            "A semantic proposal destination was incorrectly presented as an active route.");
+
+        var liveExecutorDestination = new MapPoint(24f, -7f);
+        var withExecutor = MovementDebugProjectionCore.Project(
+            resolution, true, liveExecutorDestination);
+        True(withExecutor.HasExecutorDestination,
+            "The live movement executor destination was not exposed to diagnostics.");
+        Equal(liveExecutorDestination, withExecutor.ExecutorDestination,
+            "The debug route did not use the live movement executor destination.");
+        False(withExecutor.ExecutorDestination.Equals(proposalContext),
+            "The debug route substituted arbitration context for the live executor destination.");
+    }
+
+    private static void AiDebugAllegianceScopeIsExplicitAndFailClosed()
+    {
+        True(AiDebugAllegianceCore.Includes(
+                AiDebugScope.All, false, false, false),
+            "The all-sides debug scope unexpectedly required a player faction.");
+        False(AiDebugAllegianceCore.Includes(
+                AiDebugScope.Allies, false, true, false),
+            "Allied scope silently became all-sides when the player faction was missing.");
+        False(AiDebugAllegianceCore.Includes(
+                AiDebugScope.Enemies, true, false, true),
+            "Enemy scope guessed the allegiance of an unknown candidate faction.");
+        True(AiDebugAllegianceCore.Includes(
+                AiDebugScope.Allies, true, true, false),
+            "A game-classified friendly was omitted from allied scope.");
+        False(AiDebugAllegianceCore.Includes(
+                AiDebugScope.Allies, true, true, true),
+            "A game-classified enemy leaked into allied scope.");
+        True(AiDebugAllegianceCore.Includes(
+                AiDebugScope.Enemies, true, true, true),
+            "A game-classified enemy was omitted from enemy scope.");
+        False(AiDebugAllegianceCore.Includes(
+                AiDebugScope.Enemies, true, true, false),
+            "A game-classified friendly leaked into enemy scope.");
     }
 
     private static void SupportRequestsAreDeduplicatedByObjectiveRevision()
@@ -1377,15 +2976,15 @@ internal static class Program
             "The protected gun transit lease was rejected.");
         var snapshot = new SoldierTacticalSnapshot(
             55, 5, 4, StrategicPosture.Defend, false, false, true, false,
-            false, false, false, true, default, default);
+            false, false, true, default, default);
         var resolution = TacticalArbitrationCore.Resolve(snapshot, new[]
         {
             new TacticalProposal(TacticalChannel.Movement, TacticalAction.Move,
-                CommandAuthority.ProtectedFortification, "static-weapon", new MapPoint(10f, 10f), "resume"),
+                CommandAuthority.ProtectedFortification, ProposalSource.ProtectedAssignment, new MapPoint(10f, 10f), "resume"),
             new TacticalProposal(TacticalChannel.Movement, TacticalAction.Move,
-                CommandAuthority.LethalEmergency, "hazard", new MapPoint(-5f, 0f), "temporary")
+                CommandAuthority.LethalEmergency, ProposalSource.Hazard, new MapPoint(-5f, 0f), "temporary")
         });
-        Equal("hazard", resolution.Winners[TacticalChannel.Movement].Source,
+        Equal(ProposalSource.Hazard, resolution.Winners[TacticalChannel.Movement].Source,
             "A lethal hazard did not temporarily interrupt weapon transit.");
         True(registry.IsCurrent(assignment, 2f),
             "The protected weapon assignment was destroyed by a temporary movement interruption.");
@@ -1471,10 +3070,12 @@ internal static class Program
         IReadOnlyList<CommanderAxisCandidate> axes,
         bool offensive = true,
         bool smokeRequired = false,
-        bool smokeReady = false)
+        bool smokeReady = false,
+        float aggressiveness = 1f)
     {
         return CommanderPlannerCore.Plan(new CommanderPlanInput(
-            new MapPoint(100f, 100f), offensive, smokeRequired, smokeReady, squads, reports, axes));
+            new MapPoint(100f, 100f), offensive, smokeRequired, smokeReady, squads, reports, axes,
+            aggressiveness));
     }
 
     private static CommanderSquadSnapshot[] StandardSquads(int count)
@@ -1601,6 +3202,13 @@ internal static class Program
     {
         if (!float.IsFinite(value))
             throw new InvalidOperationException(message);
+    }
+
+    private static float Distance(MapPoint left, MapPoint right)
+    {
+        var x = left.X - right.X;
+        var z = left.Z - right.Z;
+        return MathF.Sqrt(x * x + z * z);
     }
 
     private static void SequenceEqual<T>(IEnumerable<T> expected, IEnumerable<T> actual, string message)

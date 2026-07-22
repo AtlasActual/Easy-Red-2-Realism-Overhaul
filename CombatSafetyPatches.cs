@@ -195,6 +195,33 @@ internal static class CombatSafety
     internal static bool SameFaction(string? a, string? b)
         => !string.IsNullOrEmpty(a) && !string.IsNullOrEmpty(b) &&
            string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
+    internal static bool TryGetDebugFiringLane(
+        int soldierId,
+        out Vector3 origin,
+        out Vector3 direction,
+        out float radius,
+        out float distance,
+        out bool friendlyPresent)
+    {
+        if (FiringLaneSamples.TryGetValue(soldierId, out var sample) &&
+            Time.time < sample.ExpiresAt)
+        {
+            origin = sample.Origin;
+            direction = sample.Direction;
+            radius = sample.LaneRadius;
+            distance = sample.FallbackDistance;
+            friendlyPresent = sample.FriendlyPresent;
+            return true;
+        }
+
+        origin = default;
+        direction = default;
+        radius = 0f;
+        distance = 0f;
+        friendlyPresent = false;
+        return false;
+    }
 }
 
 [HarmonyPatch(typeof(GenericGun), nameof(GenericGun.Fire))]
@@ -214,6 +241,8 @@ internal static class HandheldFriendlyFirePatch
 
         if (InfantryAntiArmorFireDiscipline.ShouldWithhold(shooter, __instance))
         {
+            AiDebugTelemetry.RecordDecision(AiDebugCategory.Combat, shooter.GetInstanceID(),
+                "Fire withheld: ineffective handheld weapon against armored target");
             __result = false;
             return false;
         }
@@ -222,6 +251,8 @@ internal static class HandheldFriendlyFirePatch
         if (ContactResponse.TryPreventBlockedCoverShot(
                 shooter, origin, shooter.GetFireDir()))
         {
+            AiDebugTelemetry.RecordDecision(AiDebugCategory.Combat, shooter.GetInstanceID(),
+                "Fire withheld: selected cover blocks muzzle clearance");
             __result = false;
             return false;
         }
@@ -236,6 +267,8 @@ internal static class HandheldFriendlyFirePatch
             return true;
         }
 
+        AiDebugTelemetry.RecordDecision(AiDebugCategory.Combat, shooter.GetInstanceID(),
+            "Fire withheld: friendly occupies handheld firing lane");
         __result = false;
         return false;
     }
@@ -266,6 +299,8 @@ internal static class MountedFriendlyFirePatch
             return true;
         }
 
+        AiDebugTelemetry.RecordDecision(AiDebugCategory.Combat, shooter.GetInstanceID(),
+            "Fire withheld: friendly occupies mounted firing lane");
         MountedGunnerSuppression.StopTurretGun(__instance);
         return false;
     }
@@ -331,7 +366,11 @@ internal static class SafeAiGrenadeThrowPatch
 
         var target = __instance.GetCurrentBestVisibleEnemy();
         if (target == null)
+        {
+            AiDebugTelemetry.RecordDecision(AiDebugCategory.Danger, __instance.GetInstanceID(),
+                "Grenade rejected: no visible target");
             return false;
+        }
 
         var isProne = __instance.m_pose == SoldierPose.Prone;
         var squad = __instance.joinedSquad;
@@ -343,22 +382,36 @@ internal static class SafeAiGrenadeThrowPatch
             // Defenders and prone crawlers wait until stationary. An assaulting
             // soldier instead makes a short crouched throwing halt; the native
             // squad order remains intact and resumes after the throw animation.
+            AiDebugTelemetry.RecordDecision(AiDebugCategory.Danger, __instance.GetInstanceID(),
+                "Grenade rejected: unstable moving throw platform");
             return false;
         }
 
         var now = Time.time;
         var id = __instance.GetInstanceID();
         if (!AiState.CooldownReady(AiState.NextGrenadeThrow, id, now))
+        {
+            AiDebugTelemetry.RecordDecision(AiDebugCategory.Danger, id,
+                "Grenade rejected: throw cooldown active");
             return false;
+        }
 
         var targetPosition = target.GetCenterOfUnit();
         var distance = Vector3.Distance(__instance.GetCenterOfUnit(), targetPosition);
         if (distance < Settings.GrenadeMinimumRange.Value ||
-            distance > Settings.GrenadeMaximumRange.Value ||
-            CombatSafety.FriendlyNear(
+            distance > Settings.GrenadeMaximumRange.Value)
+        {
+            AiDebugTelemetry.RecordDecision(AiDebugCategory.Danger, id,
+                $"Grenade rejected: target range {distance:0}m outside safe envelope");
+            return false;
+        }
+
+        if (CombatSafety.FriendlyNear(
                 targetPosition, __instance.faction,
                 Settings.GrenadeFriendlySafetyRadius.Value, __instance))
         {
+            AiDebugTelemetry.RecordDecision(AiDebugCategory.Danger, id,
+                "Grenade rejected: friendly inside blast safety radius");
             return false;
         }
 

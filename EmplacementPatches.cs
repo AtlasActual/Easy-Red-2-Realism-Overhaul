@@ -14,7 +14,6 @@ namespace ER2RealismOverhaul;
 internal static class StaticAntiTankStaffing
 {
     private const float ObjectiveDefensiveMarginMeters = 12f;
-    private const float GlobalInventoryCadenceSeconds = 0.75f;
     private const float TransitProgressEpsilonMeters = 0.75f;
     private const float UnreachableTransitSeconds = 18f;
     private const float PlayerOrderReleaseGraceSeconds = 12f;
@@ -36,7 +35,12 @@ internal static class StaticAntiTankStaffing
             return;
         }
 
-        _nextInventoryAt = now + GlobalInventoryCadenceSeconds;
+        // A full inventory walks every friendly squad and static weapon, then
+        // allocates and sorts several temporary collections.  Honor the exposed
+        // setting instead of running that global work several times per second;
+        // especially after reinforcements arrive, the old cadence produced enough
+        // managed garbage to cause recurring collection hitches.
+        _nextInventoryAt = now + Settings.StaticAtAssignmentCooldown.Value;
         _updating = true;
         try
         {

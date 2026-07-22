@@ -416,6 +416,11 @@ internal static class AtmosphericParticleSystemPersistencePatch
 
 internal static class AtmosphericParticleEmissionPersistence
 {
+    // Extended smoke can leave many pooled particle systems pending at once.
+    // Their stop time does not need frame-perfect polling, while checking every
+    // system's native state every frame is needlessly expensive in barrages.
+    private const float PendingEmissionPollInterval = 0.25f;
+
     private sealed class PendingEmission
     {
         internal ParticleSystem System = null!;
@@ -424,6 +429,7 @@ internal static class AtmosphericParticleEmissionPersistence
 
     private static readonly Dictionary<int, PendingEmission> Pending = new();
     private static readonly List<int> Completed = new();
+    private static float _nextPollAt;
 
     internal static void KeepEmittingUntil(ParticleSystem system, float stopAt)
     {
@@ -444,6 +450,11 @@ internal static class AtmosphericParticleEmissionPersistence
         if (Pending.Count == 0)
             return;
 
+        var now = Time.time;
+        if (now < _nextPollAt)
+            return;
+
+        _nextPollAt = now + PendingEmissionPollInterval;
         Completed.Clear();
         foreach (var pair in Pending)
         {
@@ -456,7 +467,7 @@ internal static class AtmosphericParticleEmissionPersistence
                     continue;
                 }
 
-                if (Time.time < pair.Value.StopAt)
+                if (now < pair.Value.StopAt)
                     continue;
 
                 system.enableEmission = false;

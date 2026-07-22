@@ -178,17 +178,50 @@ internal readonly struct PenetrationSpawnRequest
     internal BulletPenetrationState State { get; }
 }
 
+internal readonly struct ImpactHoleSpawnRequest
+{
+    internal ImpactHoleSpawnRequest(
+        string prefabName,
+        Il2CppSystem.Action<GameObject, float> callback,
+        Vector3 position,
+        Vector3 normal,
+        float scale,
+        Transform parent)
+    {
+        PrefabName = prefabName;
+        Callback = callback;
+        Position = position;
+        Normal = normal;
+        Scale = scale;
+        Parent = parent;
+    }
+
+    internal string PrefabName { get; }
+    internal Il2CppSystem.Action<GameObject, float> Callback { get; }
+    internal Vector3 Position { get; }
+    internal Vector3 Normal { get; }
+    internal float Scale { get; }
+    internal Transform Parent { get; }
+}
+
 internal static class BulletPenetration
 {
     private const float ExitEpsilon = 0.045f;
     private const float MinimumExitSpeed = 90f;
     private const int MaximumQueuedContinuations = 256;
+    // Bullet construction can allocate physics state, effects, and native objects.
+    // Keep the critical continuation responsive without allowing a dense burst to
+    // construct several projectiles in the same frame.
+    private const int MaximumContinuationsSpawnedPerFrame = 2;
+    private const int MaximumQueuedImpactHoles = 64;
+    private const int MaximumImpactHolesSpawnedPerFrame = 2;
     private const string SmallImpactHolePrefab = "TankHole_Small";
     private const string NormalImpactHolePrefab = "TankHole_Normal";
     private const string ImpactHoleBundle = "er2fxs";
 
     private static readonly Dictionary<IntPtr, BulletPenetrationState> States = new();
     private static readonly Queue<PenetrationSpawnRequest> SpawnQueue = new();
+    private static readonly Queue<ImpactHoleSpawnRequest> ImpactHoleSpawnQueue = new();
     private static readonly List<IntPtr> StaleTokens = new();
     private static readonly Il2CppSystem.Action<GameObject, float> SmallImpactHoleSpawned =
         DelegateSupport.ConvertDelegate<Il2CppSystem.Action<GameObject, float>>(
@@ -560,7 +593,7 @@ internal static class BulletPenetration
     internal static void DrainSpawnQueue()
     {
         var spawned = 0;
-        while (SpawnQueue.Count > 0 && spawned++ < 64)
+        while (SpawnQueue.Count > 0 && spawned++ < MaximumContinuationsSpawnedPerFrame)
         {
             var request = SpawnQueue.Dequeue();
             try
@@ -586,12 +619,14 @@ internal static class BulletPenetration
             }
         }
 
+        DrainImpactHoleSpawnQueue();
         PruneStaleStates();
     }
 
     internal static void ResetWhenInactive()
     {
         SpawnQueue.Clear();
+        ImpactHoleSpawnQueue.Clear();
         States.Clear();
         _pendingSpawnState = null;
     }
@@ -1202,11 +1237,11 @@ internal static class BulletPenetration
 
         var entryPosition = impact.EntryPosition + impact.EntryNormal * 0.006f;
         var exitPosition = impact.ExitPosition - impact.Direction * (ExitEpsilon - 0.006f);
-        SpawnImpactHole(prefabName, callback, entryPosition, impact.EntryNormal, scale, impact.SurfaceTransform);
-        SpawnImpactHole(prefabName, callback, exitPosition, impact.Direction, scale, impact.SurfaceTransform);
+        QueueImpactHole(prefabName, callback, entryPosition, impact.EntryNormal, scale, impact.SurfaceTransform);
+        QueueImpactHole(prefabName, callback, exitPosition, impact.Direction, scale, impact.SurfaceTransform);
     }
 
-    private static void SpawnImpactHole(
+    private static void QueueImpactHole(
         string prefabName,
         Il2CppSystem.Action<GameObject, float> callback,
         Vector3 position,
@@ -1214,20 +1249,41 @@ internal static class BulletPenetration
         float scale,
         Transform parent)
     {
+        if (ImpactHoleSpawnQueue.Count >= MaximumQueuedImpactHoles)
+            return;
+
+        ImpactHoleSpawnQueue.Enqueue(new ImpactHoleSpawnRequest(
+            prefabName,
+            callback,
+            position,
+            normal,
+            scale,
+            parent));
+    }
+
+    private static void DrainImpactHoleSpawnQueue()
+    {
+        var spawned = 0;
+        while (ImpactHoleSpawnQueue.Count > 0 && spawned++ < MaximumImpactHolesSpawnedPerFrame)
+            SpawnImpactHole(ImpactHoleSpawnQueue.Dequeue());
+    }
+
+    private static void SpawnImpactHole(ImpactHoleSpawnRequest request)
+    {
         try
         {
-            if (ResourcesManager.instance == null || normal.sqrMagnitude < 0.01f)
+            if (ResourcesManager.instance == null || request.Normal.sqrMagnitude < 0.01f)
                 return;
 
-            var rotation = Quaternion.FromToRotation(Vector3.up, normal.normalized) *
+            var rotation = Quaternion.FromToRotation(Vector3.up, request.Normal.normalized) *
                            Quaternion.AngleAxis(UnityEngine.Random.Range(0f, 360f), Vector3.up);
             var routine = PrefabPool.PopOrInstantiateAsync(
-                prefabName,
-                position,
+                request.PrefabName,
+                request.Position,
                 rotation,
-                Vector3.one * scale,
-                parent,
-                callback,
+                Vector3.one * request.Scale,
+                request.Parent,
+                request.Callback,
                 ImpactHoleBundle,
                 string.Empty);
             ResourcesManager.instance.StartCoroutine(routine);

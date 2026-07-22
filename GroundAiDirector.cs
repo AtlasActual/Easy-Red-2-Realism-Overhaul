@@ -24,6 +24,7 @@ internal static class GroundAiDirector
     private static readonly Dictionary<string, FactionPostureState> FactionPostures =
         new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<int, SoldierTacticalResolution> SoldierResolutions = new();
+    private static readonly List<TacticalProposal> TacticalProposalBuffer = new(12);
     private static readonly HashSet<int> CommanderSquads = new();
     private static readonly HashSet<int> CommanderSquadsSeen = new();
     private static readonly Dictionary<int, CommanderDefensiveArea> CommanderDefensiveAreas = new();
@@ -42,10 +43,19 @@ internal static class GroundAiDirector
         CommanderMvp.Update(manager, now);
     }
 
-    internal static void BeginCommanderPlanning()
+    internal static void BeginCommanderPlanning(IEnumerable<int>? protectedSquadIds = null)
     {
         _planning = true;
         CommanderSquadsSeen.Clear();
+        // The commander now plans one side per tick (staggered every
+        // SidePlanningStaggerSeconds). The idle side's squads are not re-leased
+        // this tick, so seed them as already "seen" or CompleteCommanderPlanning
+        // below would treat them as stale and release their command leases.
+        if (protectedSquadIds != null)
+        {
+            foreach (var id in protectedSquadIds)
+                CommanderSquadsSeen.Add(id);
+        }
     }
 
     internal static void CompleteCommanderPlanning()
@@ -153,6 +163,51 @@ internal static class GroundAiDirector
             CommanderSquads.Add(id);
     }
 
+    /// <summary>
+    /// Replaces only the accepted commander intent while preserving the objective
+    /// revision already owned by this squad. Order executors call this after their
+    /// stability policy has selected the destination that will actually be kept.
+    /// </summary>
+    internal static void RefreshCommanderSquadIntent(
+        Squad? squad,
+        CommanderRole role,
+        Vector3 destination,
+        float now)
+    {
+        if (squad == null || !IsFinite(destination))
+            return;
+
+        var id = ContactKnowledge.GetSquadId(squad);
+        if (!Leases.TryGet(CommandChannel.SquadOrders, id, now, out var current) ||
+            !string.Equals(current.Owner, CommanderOwner, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        LeaseCommanderSquad(squad, current.ObjectiveRevision, role, destination, now);
+    }
+
+    internal static bool TryGetCommanderSquadIntent(
+        Squad? squad,
+        out Vector3 destination)
+    {
+        destination = default;
+        if (squad == null)
+            return false;
+
+        var id = ContactKnowledge.GetSquadId(squad);
+        if (!Leases.TryGet(CommandChannel.SquadOrders, id, Time.time, out var lease) ||
+            !string.Equals(lease.Owner, CommanderOwner, StringComparison.Ordinal) ||
+            !lease.Destination.IsFinite)
+        {
+            return false;
+        }
+
+        destination = new Vector3(lease.Destination.X, squad.Leader?.transform.position.y ?? 0f,
+            lease.Destination.Z);
+        return true;
+    }
+
     internal static bool OwnsSquad(Squad? squad)
     {
         if (squad == null || !Settings.CommanderEnabled.Value ||
@@ -178,9 +233,9 @@ internal static class GroundAiDirector
     }
 
     /// <summary>
-    /// Records the position owned by the commander lease independently of the game's
-    /// mutable Squad.order fields. Native AI may rewrite those fields after HoldArea;
-    /// it must not silently cancel the director's defensive-position ownership.
+    /// Records a stationary fighting area independently of the game's mutable
+    /// Squad.order fields. This covers defenders as well as attackers waiting in a
+    /// support, reserve, or assault-bound position.
     /// </summary>
     internal static void RegisterCommanderDefensiveArea(
         Squad? squad,
@@ -192,8 +247,7 @@ internal static class GroundAiDirector
 
         var id = ContactKnowledge.GetSquadId(squad);
         if (!Leases.TryGet(CommandChannel.SquadOrders, id, Time.time, out var lease) ||
-            !string.Equals(lease.Owner, CommanderOwner, StringComparison.Ordinal) ||
-            !IsDefendingSquad(squad))
+            !string.Equals(lease.Owner, CommanderOwner, StringComparison.Ordinal))
         {
             CommanderDefensiveAreas.Remove(id);
             return;
@@ -203,6 +257,12 @@ internal static class GroundAiDirector
             lease.ObjectiveRevision,
             center,
             radius);
+    }
+
+    internal static void ClearCommanderStationaryArea(Squad? squad)
+    {
+        if (squad != null)
+            CommanderDefensiveAreas.Remove(ContactKnowledge.GetSquadId(squad));
     }
 
     internal static bool TryGetCommanderDefensiveArea(
@@ -223,8 +283,7 @@ internal static class GroundAiDirector
         if (!CommanderDefensiveAreas.TryGetValue(id, out var area) ||
             !Leases.TryGet(CommandChannel.SquadOrders, id, Time.time, out var lease) ||
             !string.Equals(lease.Owner, CommanderOwner, StringComparison.Ordinal) ||
-            lease.ObjectiveRevision != area.ObjectiveRevision ||
-            !IsDefendingSquad(squad))
+            lease.ObjectiveRevision != area.ObjectiveRevision)
         {
             CommanderDefensiveAreas.Remove(id);
             return false;
@@ -233,6 +292,31 @@ internal static class GroundAiDirector
         center = area.Center;
         radius = area.Radius;
         return true;
+    }
+
+    internal static bool TryGetCommanderCohesionAnchor(
+        Squad? squad,
+        out Vector3 center,
+        out float radius)
+    {
+        center = default;
+        radius = SquadCohesionCore.CommanderMemberRadiusMeters;
+        var leader = squad?.Leader;
+        if (squad == null || leader == null || !OwnsSquad(squad))
+            return false;
+
+        // When a stationary area is registered its radius already reflects the cover
+        // cluster the squad was anchored to (fix 3/4). Use it as the cohesion leash
+        // so a squad spread along a building or trench line is not compressed back
+        // into a flat 30 m disc; never tighten below the default member radius.
+        if (TryGetCommanderDefensiveArea(squad, out _, out var areaRadius) &&
+            float.IsFinite(areaRadius) && areaRadius > 0f)
+        {
+            radius = Mathf.Max(SquadCohesionCore.CommanderMemberRadiusMeters, areaRadius);
+        }
+
+        center = leader.transform.position;
+        return IsFinite(center);
     }
 
     internal static void MarkMissionScripted(Squad? squad)
@@ -250,25 +334,43 @@ internal static class GroundAiDirector
         CommanderDefensiveAreas.Remove(squadId);
     }
 
-    internal static bool ExecuteCommanderSquadOrder(Squad? squad, Action nativeWrite)
+    /// <summary>
+    /// Shared guard/try/release/log body for the commander-order executors below.
+    /// Each caller supplies its own guard expression as <paramref name="authorized"/>
+    /// (so a missing entity never reaches <paramref name="release"/>), the native
+    /// call to attempt, the lease to release on failure, and the entity description
+    /// to fold into the warning log.
+    /// </summary>
+    private static bool ExecuteGuardedNativeOrder(
+        bool authorized, Action? nativeWrite, Action release, string failureContext)
     {
-        if (squad == null || nativeWrite == null || !OwnsSquad(squad))
+        if (!authorized)
             return false;
 
-        var id = ContactKnowledge.GetSquadId(squad);
         try
         {
-            nativeWrite();
+            nativeWrite!();
             return true;
         }
         catch (Exception ex)
         {
             // Fail open to native AI for this entity. Keeping an invalid lease is
             // more damaging than losing one commander order.
-            ReleaseCommanderSquad(id);
-            Plugin.LogSource.LogWarning($"Ground director released failed squad order {id}: {ex.Message}");
+            release();
+            Plugin.LogSource.LogWarning(
+                $"Ground director released failed {failureContext}: {ex.Message}");
             return false;
         }
+    }
+
+    internal static bool ExecuteCommanderSquadOrder(Squad? squad, Action nativeWrite)
+    {
+        var id = squad == null ? 0 : ContactKnowledge.GetSquadId(squad);
+        return ExecuteGuardedNativeOrder(
+            squad != null && nativeWrite != null && OwnsSquad(squad),
+            nativeWrite,
+            () => ReleaseCommanderSquad(id),
+            $"squad order {id}");
     }
 
     internal static void LeaseCommanderVehicle(
@@ -302,27 +404,48 @@ internal static class GroundAiDirector
         Squad? crew,
         Action nativeWrite)
     {
-        if (vehicle == null || crew == null || nativeWrite == null || !OwnsSquad(crew) ||
-            !Leases.TryGet(CommandChannel.VehicleOrders, vehicle.GetInstanceID(), Time.time,
-                out var lease) ||
+        var id = vehicle == null ? 0 : vehicle.GetInstanceID();
+        return ExecuteGuardedNativeOrder(
+            vehicle != null && crew != null && nativeWrite != null && OwnsSquad(crew) &&
+            Leases.TryGet(CommandChannel.VehicleOrders, id, Time.time, out var lease) &&
+            string.Equals(lease.Owner, CommanderOwner, StringComparison.Ordinal),
+            nativeWrite,
+            () => Leases.Release(CommandChannel.VehicleOrders, id, CommanderOwner),
+            $"vehicle order {id}");
+    }
+
+    /// <summary>
+    /// True when the commander has leased this vehicle for an offensive armor
+    /// role (assault or flank support). The lease is the semantically correct
+    /// signal for "this tank is committed to the assault" — Squad.order alone
+    /// misses defending/reserve armor that still has a live movement order.
+    /// </summary>
+    internal static bool VehicleHasOffensiveArmorRole(Vehicle? vehicle)
+    {
+        if (vehicle == null)
+            return false;
+
+        var id = vehicle.GetInstanceID();
+        if (!Leases.TryGet(CommandChannel.VehicleOrders, id, Time.time, out var lease) ||
             !string.Equals(lease.Owner, CommanderOwner, StringComparison.Ordinal))
         {
             return false;
         }
 
-        try
-        {
-            nativeWrite();
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Leases.Release(CommandChannel.VehicleOrders, vehicle.GetInstanceID(), CommanderOwner);
-            Plugin.LogSource.LogWarning(
-                $"Ground director released failed vehicle order {vehicle.GetInstanceID()}: {ex.Message}");
-            return false;
-        }
+        // nameof, not Enum.ToString(): this runs per frame for a parked tank near
+        // infantry, and Enum.ToString() allocates. The member names are identical
+        // to the CommanderMvp.ArmorRole names written into the lease, so the
+        // compile-time constants compare exactly the same.
+        return string.Equals(lease.Role, nameof(ArmorRoleAssignment.AssaultSupport), StringComparison.Ordinal) ||
+               string.Equals(lease.Role, nameof(ArmorRoleAssignment.FlankSupport), StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// Releases a wedged tank's commander vehicle lease so the next planning
+    /// pass can reassign it, mirroring ReleaseCommanderAircraft below.
+    /// </summary>
+    internal static void ReleaseCommanderVehicle(int vehicleId)
+        => Leases.Release(CommandChannel.VehicleOrders, vehicleId, CommanderOwner);
 
     internal static bool LeaseCommanderAircraft(
         VehiclePlane? plane,
@@ -353,26 +476,14 @@ internal static class GroundAiDirector
         VehiclePlane? plane,
         Action nativeWrite)
     {
-        if (ai == null || plane == null || nativeWrite == null ||
-            !Leases.TryGet(CommandChannel.AircraftOrders, plane.GetInstanceID(), Time.time,
-                out var lease) ||
-            !string.Equals(lease.Owner, CommanderOwner, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        try
-        {
-            nativeWrite();
-            return true;
-        }
-        catch (Exception ex)
-        {
-            ReleaseCommanderAircraft(plane.GetInstanceID());
-            Plugin.LogSource.LogWarning(
-                $"Ground director released failed aircraft order {plane.GetInstanceID()}: {ex.Message}");
-            return false;
-        }
+        var id = plane == null ? 0 : plane.GetInstanceID();
+        return ExecuteGuardedNativeOrder(
+            ai != null && plane != null && nativeWrite != null &&
+            Leases.TryGet(CommandChannel.AircraftOrders, id, Time.time, out var lease) &&
+            string.Equals(lease.Owner, CommanderOwner, StringComparison.Ordinal),
+            nativeWrite,
+            () => ReleaseCommanderAircraft(id),
+            $"aircraft order {id}");
     }
 
     internal static void ReleaseCommanderAircraft(int aircraftId)
@@ -415,6 +526,9 @@ internal static class GroundAiDirector
             throw;
         }
     }
+
+    internal static void ReleaseAutonomousAircraft(int aircraftId)
+        => Leases.Release(CommandChannel.AircraftOrders, aircraftId, AircraftAutonomyOwner);
 
     internal static void ExecuteAircraftSafetyCancellation(AIPlane? ai, VehiclePlane? plane)
     {
@@ -494,28 +608,16 @@ internal static class GroundAiDirector
         Vehicle? weapon,
         Action nativeWrite)
     {
-        if (soldier == null || weapon == null || nativeWrite == null ||
-            !Leases.TryGet(CommandChannel.InfantryAssignment, soldier.GetInstanceID(), Time.time,
-                out var lease) ||
-            !string.Equals(lease.Owner, StaticWeaponOwner, StringComparison.Ordinal) ||
-            !string.Equals(lease.Constraints, $"weapon={weapon.GetInstanceID()}",
-                StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        try
-        {
-            nativeWrite();
-            return true;
-        }
-        catch (Exception ex)
-        {
-            ReleaseInfantryAssignment(soldier);
-            Plugin.LogSource.LogWarning(
-                $"Ground director released failed weapon assignment {soldier.GetInstanceID()}: {ex.Message}");
-            return false;
-        }
+        var id = soldier == null ? 0 : soldier.GetInstanceID();
+        var weaponId = weapon == null ? 0 : weapon.GetInstanceID();
+        return ExecuteGuardedNativeOrder(
+            soldier != null && weapon != null && nativeWrite != null &&
+            Leases.TryGet(CommandChannel.InfantryAssignment, id, Time.time, out var lease) &&
+            string.Equals(lease.Owner, StaticWeaponOwner, StringComparison.Ordinal) &&
+            string.Equals(lease.Constraints, $"weapon={weaponId}", StringComparison.Ordinal),
+            nativeWrite,
+            () => ReleaseInfantryAssignment(soldier),
+            $"weapon assignment {id}");
     }
 
     internal static void ReleaseInfantryAssignment(Soldier? soldier)
@@ -663,7 +765,12 @@ internal static class GroundAiDirector
             AiState.TankCoverHideUntil.Remove(id);
 
         var snapshot = CaptureSnapshot(ai, soldier, squad);
-        var resolution = TacticalArbitrationCore.Resolve(snapshot, CollectProposals(snapshot, soldier));
+        var reusableResolution = SoldierResolutions.TryGetValue(id, out var priorResolution)
+            ? priorResolution
+            : new SoldierTacticalResolution(snapshot);
+        CollectProposals(snapshot, TacticalProposalBuffer);
+        var resolution = TacticalArbitrationCore.ResolveInto(
+            reusableResolution, snapshot, TacticalProposalBuffer);
         SoldierResolutions[id] = resolution;
 
         // Suppression, fire safety, and lethal hazard systems remain local safety
@@ -674,12 +781,13 @@ internal static class GroundAiDirector
 
         var movementSource = resolution.Winners.TryGetValue(TacticalChannel.Movement, out var movement)
             ? movement.Source
-            : "native";
-        if (string.Equals(movementSource, "defensive-position", StringComparison.Ordinal))
+            : ProposalSource.Native;
+        if (movementSource == ProposalSource.DefensivePosition)
             ContactResponse.UpdateDefensivePosition(ai, soldier);
-        else if (string.Equals(movementSource, "contact", StringComparison.Ordinal) ||
-            string.Equals(movementSource, "cover-hold", StringComparison.Ordinal) ||
-            string.Equals(movementSource, "suppression", StringComparison.Ordinal))
+        else if (movementSource == ProposalSource.PlayerHold)
+            ContactResponse.UpdateDefensivePosition(ai, soldier);
+        else if (movementSource is ProposalSource.Contact or ProposalSource.CoverHold or
+            ProposalSource.Suppression)
             ContactResponse.Update(ai, soldier);
         else if (!Settings.ContactResponseEnabled.Value)
             ContactResponse.Disable(ai, soldier);
@@ -688,10 +796,9 @@ internal static class GroundAiDirector
                 ai,
                 soldier,
                 releaseDefensiveAnchor:
-                    string.Equals(movementSource, "external", StringComparison.Ordinal) ||
-                    string.Equals(movementSource, "protected-assignment", StringComparison.Ordinal));
+                    movementSource is ProposalSource.External or ProposalSource.ProtectedAssignment);
 
-        if (string.Equals(movementSource, "hazard", StringComparison.Ordinal))
+        if (movementSource == ProposalSource.Hazard)
         {
             SoldierFireDanger.Execute(
                 ai,
@@ -701,7 +808,7 @@ internal static class GroundAiDirector
                 now);
         }
 
-        if (string.Equals(movementSource, "tank-fear", StringComparison.Ordinal))
+        if (movementSource == ProposalSource.TankFear)
             SoldierSequentialUpdatePatch.ApplyTankFear(ai, soldier);
 
         ContactResponse.ApplyMovementProgressWatchdog(
@@ -728,6 +835,12 @@ internal static class GroundAiDirector
         EntityFactions.Remove(soldierId);
         SoldierFireDanger.Remove(soldierId);
     }
+
+    internal static SoldierTacticalResolution? DebugResolution(int soldierId)
+        => SoldierResolutions.TryGetValue(soldierId, out var resolution) ? resolution : null;
+
+    internal static void CollectDebugLeases(float now, List<CommandLease> destination)
+        => Leases.CopyActive(now, destination);
 
     internal static void ClearRuntimeState()
     {
@@ -771,6 +884,7 @@ internal static class GroundAiDirector
             scriptOwned = string.Equals(externalLease.Owner, ScriptOwner, StringComparison.Ordinal);
         }
         var lethalHazard = SoldierFireDanger.TrySense(soldier, Time.time, out var escape);
+        var hasCommanderIntent = TryGetCommanderSquadIntent(squad, out var commanderDestination);
         return new SoldierTacticalSnapshot(
             soldier.GetInstanceID(),
             squad == null ? 0 : ContactKnowledge.GetSquadId(squad),
@@ -781,117 +895,28 @@ internal static class GroundAiDirector
             soldier.IsAlive,
             soldier.IsOnVehicle(),
             soldier.GetSuppressionValue() >= Settings.CrouchSuppression.Value,
-            false,
             soldier.IsReloading,
             lethalHazard,
             new MapPoint(position.x, position.z),
             new MapPoint(threat.x, threat.z),
             new MapPoint(escape.x, escape.z),
-            ContactResponse.SenseMovement(ai, soldier, Time.time));
+            ContactResponse.SenseMovement(ai, soldier, Time.time),
+            AiOwnership.IsAutonomous(soldier),
+            ContactResponse.TryGetPlayerHoldOrder(soldier, out _, out _),
+            HasProtectedInfantryAssignment(soldier),
+            SoldierSequentialUpdatePatch.HasNearbyTankThreat(soldier),
+            hasCommanderIntent,
+            new MapPoint(commanderDestination.x, commanderDestination.z));
     }
 
-    private static IEnumerable<TacticalProposal> CollectProposals(
+    private static void CollectProposals(
         SoldierTacticalSnapshot snapshot,
-        Soldier soldier)
+        List<TacticalProposal> destination)
     {
-        var tankThreat = Settings.TankFearEnabled.Value &&
-                         SoldierSequentialUpdatePatch.HasNearbyTankThreat(soldier);
-        yield return new TacticalProposal(
-            TacticalChannel.Movement, TacticalAction.Native, CommandAuthority.NativeFallback,
-            "native", default, string.Empty);
-
-        if (snapshot.PlayerLed || snapshot.ScriptOwned)
-        {
-            yield return new TacticalProposal(
-                TacticalChannel.Movement, TacticalAction.Native, CommandAuthority.PlayerOrScript,
-                "external", default, "preserve player/script squad order");
-        }
-        else if (snapshot.LethalHazard)
-        {
-            yield return new TacticalProposal(
-                TacticalChannel.Movement, TacticalAction.Move, CommandAuthority.LethalEmergency,
-                "hazard", snapshot.HazardPosition, "temporary emergency override");
-        }
-        else if (snapshot.NeedsMedicalSafety || snapshot.NeedsReloadSafety)
-        {
-            yield return new TacticalProposal(
-                TacticalChannel.Movement, TacticalAction.Hold, CommandAuthority.RequiredSafety,
-                "action-safety", snapshot.Position, "complete medical or reload action safely");
-        }
-        else if (snapshot.Suppressed)
-        {
-            yield return new TacticalProposal(
-                TacticalChannel.Movement, TacticalAction.Hold, CommandAuthority.CriticalSuppression,
-                "suppression", snapshot.Position, "pin in protection");
-        }
-
-        if (HasProtectedInfantryAssignment(soldier))
-        {
-            yield return new TacticalProposal(
-                TacticalChannel.Movement, TacticalAction.Move, CommandAuthority.ProtectedFortification,
-                "protected-assignment", default, "retain fortification or weapon lease");
-        }
-
-        if (!HasProtectedInfantryAssignment(soldier) &&
-            CombatMovementPolicyCore.NeedsDefensivePositionControl(
-                snapshot.ContactMovement))
-        {
-            yield return new TacticalProposal(
-                TacticalChannel.Movement, TacticalAction.Hold,
-                CommandAuthority.ProtectedFortification,
-                "defensive-position", snapshot.Position,
-                "take one useful defensive position and remain there");
-        }
-
-        if (Settings.ContactResponseEnabled.Value && !tankThreat &&
-            CombatMovementPolicyCore.NeedsProtectedCoverControl(snapshot.ContactMovement))
-        {
-            yield return new TacticalProposal(
-                TacticalChannel.Movement, TacticalAction.Hold,
-                CommandAuthority.ProtectedFortification,
-                "cover-hold", snapshot.Position, "retain reached fortified cover");
-        }
-
-        if (Settings.ContactResponseEnabled.Value && !tankThreat &&
-            CombatMovementPolicyCore.NeedsLocalCombatControl(snapshot.ContactMovement))
-        {
-            yield return new TacticalProposal(
-                TacticalChannel.Movement,
-                CombatMovementPolicyCore.SelectLocalAction(snapshot.ContactMovement),
-                CommandAuthority.ImmediateCombat,
-                "contact", snapshot.ThreatPosition, "contact response");
-        }
-
-        if (tankThreat)
-        {
-            yield return new TacticalProposal(
-                TacticalChannel.Movement, TacticalAction.Move, CommandAuthority.ImmediateCombat,
-                "tank-fear", snapshot.ThreatPosition, "armor threat");
-        }
-
-        if (CommanderMvp.OwnsSquad(soldier.joinedSquad))
-        {
-            yield return new TacticalProposal(
-                TacticalChannel.Movement, TacticalAction.Move, CommandAuthority.CommanderIntent,
-                "commander", default, "squad intent");
-        }
-
-        if (snapshot.Suppressed)
-        {
-            yield return new TacticalProposal(
-                TacticalChannel.Pose, TacticalAction.Crouch, CommandAuthority.CriticalSuppression,
-                "suppression", default, "reduce exposure");
-        }
-
-        if (snapshot.NeedsMedicalSafety || snapshot.NeedsReloadSafety)
-        {
-            yield return new TacticalProposal(
-                TacticalChannel.Pose, TacticalAction.Prone, CommandAuthority.RequiredSafety,
-                "action-safety", default, "protect required action");
-            yield return new TacticalProposal(
-                TacticalChannel.FirePermission, TacticalAction.InhibitFire, CommandAuthority.RequiredSafety,
-                "action-safety", default, "do not interrupt required action");
-        }
+        var options = new TacticalPolicyOptions(
+            Settings.ContactResponseEnabled.Value,
+            Settings.TankFearEnabled.Value);
+        ProposalGenerationCore.Collect(snapshot, options, destination);
     }
 
     private static void ObserveExternalOwnership(Squad squad)

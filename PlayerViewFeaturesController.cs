@@ -56,7 +56,7 @@ internal sealed class PlayerViewFeaturesController : MonoBehaviour
                 return;
             }
 
-            if (Input.GetKeyDown(KeyCode.K))
+            if (Input.GetKeyDown(Settings.CompassKey.Value))
                 _compassVisibleUntil = Time.unscaledTime + CompassRevealDurationSeconds;
 
             _compassVisible = Settings.CompassAlwaysVisible.Value ||
@@ -72,7 +72,7 @@ internal sealed class PlayerViewFeaturesController : MonoBehaviour
             {
                 SetBinocularsActive(false);
             }
-            else if (Input.GetKeyDown(KeyCode.CapsLock))
+            else if (Input.GetKeyDown(Settings.BinocularsKey.Value))
             {
                 SetBinocularsActive(!_binocularsActive);
             }
@@ -276,7 +276,8 @@ internal sealed class PlayerViewFeaturesController : MonoBehaviour
 
     [HideFromIl2Cpp]
     private static bool IsFreeLookKeyHeld() =>
-        Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
+        Input.GetKey(Settings.FreeLookKey.Value) ||
+        (Settings.FreeLookKey.Value == KeyCode.LeftAlt && Input.GetKey(KeyCode.RightAlt));
 
     [HideFromIl2Cpp]
     private void DrawBinocularOverlay()
@@ -709,7 +710,15 @@ internal static class PlayerBinocularCameraPatch
     [HarmonyPostfix]
     private static void Postfix()
     {
-        PlayerViewFeaturesController.ApplyBinocularView();
+        var __t = ModTimeProbe.Begin();
+        try
+        {
+            PlayerViewFeaturesController.ApplyBinocularView();
+        }
+        finally
+        {
+            ModTimeProbe.End(ModTimeSite.Other, __t);
+        }
     }
 }
 

@@ -1,5 +1,6 @@
 using Corvostudio.Weapons;
 using HarmonyLib;
+using Il2CppInterop.Runtime;
 using UnityEngine;
 
 namespace ER2RealismOverhaul;
@@ -162,11 +163,24 @@ internal static class KnownTargetSuppressiveFire
             soldier.SetGunTriggerPressed(true);
             state.TriggerOwned = true;
         }
-        catch (Exception ex)
+        catch (NullReferenceException)
+        {
+            // The game can briefly retain a despawning native reference mid-burst;
+            // tear down the attempt instead of surfacing the teardown as an error.
+            if (soldier != null && state != null)
+                Cancel(ai, soldier, state, preserveNativeAim: false);
+        }
+        catch (Il2CppException)
+        {
+            // Exceptions raised by native IL2CPP methods are surfaced through
+            // Il2CppException during the same despawn window.
+            if (soldier != null && state != null)
+                Cancel(ai, soldier, state, preserveNativeAim: false);
+        }
+        catch (ObjectCollectedException)
         {
             if (soldier != null && state != null)
                 Cancel(ai, soldier, state, preserveNativeAim: false);
-            Plugin.LogSource.LogWarning($"Known-target suppressive fire failed: {ex.Message}");
         }
     }
 
@@ -270,7 +284,7 @@ internal static class KnownTargetSuppressiveFire
 
         var contact = AiState.GetContactState(soldierId);
         if (contact.SuppressionMovementOwned || contact.SuppressionFireInhibited ||
-            contact.FireInhibitedByRange)
+            contact.FireInhibitedByRange || contact.FireInhibitedByArmoredTarget)
         {
             return false;
         }
@@ -295,7 +309,8 @@ internal static class KnownTargetSuppressiveFire
             return false;
         }
 
-        if (AiState.GetContactState(soldierId).FireInhibitedByMovement)
+        var continueContact = AiState.GetContactState(soldierId);
+        if (continueContact.FireInhibitedByMovement || continueContact.FireInhibitedByArmoredTarget)
             return false;
 
         return AiState.TargetMemory.TryGetValue(soldierId, out var memory) &&
@@ -384,7 +399,15 @@ internal static class KnownTargetSuppressiveFireFixedUpdatePatch
     [HarmonyPriority(Priority.Last)]
     private static void Postfix(SoldierAI __instance)
     {
-        if (__instance != null)
-            KnownTargetSuppressiveFire.FixedUpdate(__instance);
+        var __t = ModTimeProbe.Begin();
+        try
+        {
+            if (__instance != null)
+                KnownTargetSuppressiveFire.FixedUpdate(__instance);
+        }
+        finally
+        {
+            ModTimeProbe.End(ModTimeSite.SuppressiveFire, __t);
+        }
     }
 }

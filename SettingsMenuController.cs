@@ -45,6 +45,7 @@ internal sealed class SettingsMenuController : MonoBehaviour
     private bool _inputBlockErrorLogged;
     private bool _inputRestorePending;
     private bool _wheelInputAvailable = true;
+    private string? _capturingKeybindId;
     private CursorLockMode _previousCursorLock;
     private int _restoreInputAfterFrame;
     private readonly List<Behaviour> _blockedUiBehaviours = new();
@@ -78,6 +79,13 @@ internal sealed class SettingsMenuController : MonoBehaviour
         if (_inputRestorePending)
             BlockUnderlyingUi();
         TryRestoreUnderlyingUi();
+
+        if (_open && _capturingKeybindId != null)
+        {
+            BlockUnderlyingUi();
+            CaptureKeybindInput();
+            return;
+        }
 
         if (Input.GetKeyDown(KeyCode.F10))
         {
@@ -219,21 +227,31 @@ internal sealed class SettingsMenuController : MonoBehaviour
             "CATEGORIES",
             _smallStyle!);
 
-        var resetHeight = S(36f);
-        var resetGap = S(7f);
+        var actionHeight = S(36f);
+        var actionGap = S(7f);
         var resetAllRect = new Rect(
             rect.x + padding,
-            rect.yMax - padding - resetHeight,
+            rect.yMax - padding - actionHeight,
             rect.width - padding * 2f,
-            resetHeight);
+            actionHeight);
         var resetCategoryRect = new Rect(
             resetAllRect.x,
-            resetAllRect.y - resetGap - resetHeight,
+            resetAllRect.y - actionGap - actionHeight,
             resetAllRect.width,
-            resetHeight);
+            actionHeight);
+        var disableAllRect = new Rect(
+            resetCategoryRect.x,
+            resetCategoryRect.y - actionGap - actionHeight,
+            resetCategoryRect.width,
+            actionHeight);
+        var enableAllRect = new Rect(
+            disableAllRect.x,
+            disableAllRect.y - actionGap - actionHeight,
+            disableAllRect.width,
+            actionHeight);
 
         var categoryTop = rect.y + S(42f);
-        var categoryBottom = resetCategoryRect.y - S(14f);
+        var categoryBottom = enableAllRect.y - S(14f);
         var categoryGap = S(4f);
         var categoryHeight = (categoryBottom - categoryTop - categoryGap * (_categories.Length - 1)) / _categories.Length;
         categoryHeight = Mathf.Clamp(categoryHeight, S(24f), S(43f));
@@ -266,6 +284,20 @@ internal sealed class SettingsMenuController : MonoBehaviour
 
         var wasEnabled = GUI.enabled;
         GUI.enabled = wasEnabled && !SettingsSyncController.AreSettingsReadOnly && _draft != null;
+        if (DrawButton(enableAllRect, "ENABLE ALL SYSTEMS", SuccessDarkColor, SuccessColor, BorderColor, _buttonStyle!))
+        {
+            var changed = _draft!.SetAllSwitches(true);
+            _message = changed == 0
+                ? "All system switches are already enabled."
+                : $"Enabled {changed} system switches. Apply to save.";
+        }
+        if (DrawButton(disableAllRect, "DISABLE ALL SYSTEMS", RaisedColor, DangerColor, BorderColor, _buttonStyle!))
+        {
+            var changed = _draft!.SetAllSwitches(false);
+            _message = changed == 0
+                ? "All system switches are already disabled."
+                : $"Disabled {changed} system switches. Apply to save.";
+        }
         if (DrawButton(resetCategoryRect, "RESET CATEGORY", RaisedColor, HoverColor, BorderColor, _buttonStyle!))
         {
             _draft!.ResetCategory(_selectedCategory);
@@ -509,11 +541,17 @@ internal sealed class SettingsMenuController : MonoBehaviour
         GUI.enabled = wasEnabled && !SettingsSyncController.AreSettingsReadOnly;
         if (setting.Entry.SettingType == typeof(bool))
             DrawBooleanControl(setting, controlRect);
+        else if (setting.Entry.SettingType == typeof(KeyCode))
+            DrawKeybindControl(setting, controlRect);
         else
             DrawNumberControl(setting, controlRect);
 
         if (DrawButton(resetRect, "RESET", PanelColor, HoverColor, BorderColor, _buttonStyle!))
+        {
             _draft.Reset(setting);
+            if (_capturingKeybindId == setting.Id)
+                _capturingKeybindId = null;
+        }
         GUI.enabled = wasEnabled;
     }
 
@@ -539,6 +577,38 @@ internal sealed class SettingsMenuController : MonoBehaviour
                 _buttonStyle!))
         {
             _draft.Set(setting, current ? "false" : "true");
+        }
+    }
+
+    [HideFromIl2Cpp]
+    private void DrawKeybindControl(MenuSetting setting, Rect rect)
+    {
+        if (_draft == null)
+            return;
+
+        var capturing = string.Equals(_capturingKeybindId, setting.Id, StringComparison.Ordinal);
+        var width = Mathf.Min(S(220f), rect.width);
+        var buttonRect = new Rect(
+            rect.xMax - width,
+            rect.y + (rect.height - S(38f)) * 0.5f,
+            width,
+            S(38f));
+        var label = capturing
+            ? "PRESS A KEY...  [ESC CANCELS]"
+            : SettingsCatalog.HumanizeKeyCode(_draft.Get(setting));
+        if (DrawButton(
+                buttonRect,
+                label,
+                capturing ? AccentDarkColor : PanelColor,
+                capturing ? AccentColor : HoverColor,
+                capturing ? AccentColor : BorderColor,
+                _buttonStyle!))
+        {
+            _capturingKeybindId = capturing ? null : setting.Id;
+            _searchFocused = false;
+            _message = capturing
+                ? "Key rebinding cancelled."
+                : "Press a key to bind it. Escape cancels.";
         }
     }
 
@@ -959,6 +1029,7 @@ internal sealed class SettingsMenuController : MonoBehaviour
         _message = string.Empty;
         _lastRenderErrorSignature = string.Empty;
         _searchFocused = false;
+        _capturingKeybindId = null;
         _open = true;
         _inputRestorePending = false;
         _previousCursorVisible = Cursor.visible;
@@ -990,6 +1061,7 @@ internal sealed class SettingsMenuController : MonoBehaviour
 
         _open = false;
         _searchFocused = false;
+        _capturingKeybindId = null;
         _draft = null;
         _message = string.Empty;
         ScheduleUnderlyingUiRestore();
@@ -1022,6 +1094,38 @@ internal sealed class SettingsMenuController : MonoBehaviour
             CloseMenu();
 
         RestoreUnderlyingUiNow();
+    }
+
+    [HideFromIl2Cpp]
+    private void CaptureKeybindInput()
+    {
+        if (_draft == null || _capturingKeybindId == null)
+            return;
+
+        if (Input.GetKeyDown(KeyCode.Escape))
+        {
+            _capturingKeybindId = null;
+            _message = "Key rebinding cancelled.";
+            return;
+        }
+
+        foreach (var keyCode in Enum.GetValues<KeyCode>())
+        {
+            if (keyCode == KeyCode.None || (int)keyCode >= (int)KeyCode.JoystickButton0 || !Input.GetKeyDown(keyCode))
+                continue;
+
+            var setting = SettingsCatalog.All.FirstOrDefault(candidate => candidate.Id == _capturingKeybindId);
+            if (setting == null)
+            {
+                _capturingKeybindId = null;
+                return;
+            }
+
+            _draft.Set(setting, keyCode.ToString());
+            _capturingKeybindId = null;
+            _message = $"Bound {setting.DisplayName} to {SettingsCatalog.HumanizeKeyCode(keyCode.ToString())}. Apply to save.";
+            return;
+        }
     }
 
     [HideFromIl2Cpp]

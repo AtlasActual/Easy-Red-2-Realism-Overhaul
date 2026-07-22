@@ -9,12 +9,57 @@ internal static class TankTactics
     private const float MinimumTurningThrottle = 0.55f;
     private const float TurningSteerThreshold = 0.45f;
 
+    // Rear-safety probe geometry (checklist: "single cheap probe when a reverse is
+    // about to begin"). The cast starts behind the hull's own collider so the tank
+    // does not immediately hit itself, then reaches out to ~10m from hull center.
+    private const float RearProbeStartOffset = 2.5f;
+    private const float RearProbeDistance = 10f;
+    private const float RearProbeRadius = 2f;
+    private const float RearFriendlySearchDistance = 12f;
+
+    private const float WatchdogRecoverySeconds = 2f;
+
+    // Component checks never change for a live vehicle, so a stale cache entry is
+    // harmless; the alternative is a GetComponent/turret lookup per vehicle per
+    // frame, which is the actual cost these caches remove.
+    private static readonly Dictionary<int, bool> ArmoredVehicleCache = new();
+    private static readonly Dictionary<int, bool> RotatingTurretCache = new();
+
     internal static bool TryGetLocalAiTank(AIVehicle ai, out Vehicle vehicle)
     {
         vehicle = ai.veh;
         return vehicle != null &&
                vehicle.GetComponent<VehicleTank>() != null &&
                vehicle.IsLocalAIDriving();
+    }
+
+    internal static bool IsArmoredVehicle(Vehicle vehicle)
+    {
+        var id = vehicle.GetInstanceID();
+        if (ArmoredVehicleCache.TryGetValue(id, out var isArmored))
+            return isArmored;
+
+        isArmored = vehicle.GetComponent<VehicleTank>() != null;
+        ArmoredVehicleCache[id] = isArmored;
+        return isArmored;
+    }
+
+    internal static bool IsArmoredVehicle(Spottable? target)
+    {
+        var vehicle = target?.TryCast<Vehicle>();
+        return vehicle != null && IsArmoredVehicle(vehicle);
+    }
+
+    internal static bool HasRotatingTurret(Vehicle vehicle)
+    {
+        var id = vehicle.GetInstanceID();
+        if (RotatingTurretCache.TryGetValue(id, out var hasTurret))
+            return hasTurret;
+
+        var turret = vehicle.GetMainTurret(false);
+        hasTurret = turret != null && turret.IsRotatingTurret;
+        RotatingTurretCache[id] = hasTurret;
+        return hasTurret;
     }
 
     internal static bool TryGetCloseArmoredThreat(
@@ -30,7 +75,7 @@ internal static class TankTactics
 
         if (vehicle == null || vehicle.GetComponent<VehicleTank>() == null ||
             !vehicle.IsLocalAIDriving() || !ai.hasEnemy || target == null ||
-            !target.IsWheeledVehicleOrTank())
+            !IsArmoredVehicle(target))
             return false;
 
         var towardEnemy = target.GetCenterOfUnit() - vehicle.GetCenterOfUnit();
@@ -54,8 +99,16 @@ internal static class TankTactics
         try
         {
             var squad = vehicle.GetDriver()?.joinedSquad;
-            return squad != null &&
-                   (squad.order == Order.attackFromSide || squad.order == Order.charge);
+            if (squad != null &&
+                (squad.order == Order.attackFromSide || squad.order == Order.charge))
+            {
+                return true;
+            }
+
+            // The lease is the semantically correct signal: it also covers
+            // defending/reserve armor with a live commander movement order that
+            // Squad.order alone would miss.
+            return GroundAiDirector.VehicleHasOffensiveArmorRole(vehicle);
         }
         catch
         {
@@ -106,6 +159,244 @@ internal static class TankTactics
         vehicle.Move(correctedDrive);
         ai.lastDriveThrottle = correctedDrive.y;
     }
+
+    internal static float FlattenedDistance(Vector3 a, Vector3 b)
+    {
+        var offset = b - a;
+        offset.y = 0f;
+        return offset.magnitude;
+    }
+
+    /// <summary>
+    /// A single cheap probe evaluated only when a reverse is about to begin:
+    /// a short sphere-cast behind the hull, plus a scan of the tank's own crew
+    /// squad for a dismounted friendly standing in the reverse lane. Never a
+    /// global soldier scan.
+    /// </summary>
+    internal static bool IsRearBlocked(AIVehicle ai, Vehicle vehicle)
+    {
+        var hullCenter = vehicle.GetCenterOfUnit();
+        var backward = -vehicle.transform.forward;
+        var origin = hullCenter + backward * RearProbeStartOffset;
+        if (Physics.SphereCast(
+                origin,
+                RearProbeRadius,
+                backward,
+                out _,
+                RearProbeDistance - RearProbeStartOffset,
+                Physics.DefaultRaycastLayers,
+                QueryTriggerInteraction.Ignore))
+        {
+            return true;
+        }
+
+        var squad = vehicle.GetDriver()?.joinedSquad;
+        if (squad == null)
+            return false;
+
+        var count = squad.CountMembers;
+        for (var index = 0; index < count; index++)
+        {
+            var member = squad.GetMember(index);
+            if (member == null || !member.IsAlive || member.IsOnVehicle())
+                continue;
+
+            var offset = member.transform.position - hullCenter;
+            offset.y = 0f;
+            if (offset.sqrMagnitude > RearFriendlySearchDistance * RearFriendlySearchDistance)
+                continue;
+
+            if (Vector3.Dot(offset, backward) > 0f)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Evaluates the persistent engagement state machine for a vehicle in (or
+    /// recently in) armored contact and acts only on transitions: brake once on
+    /// entering Hold, force straight reverse once on entering Reverse. This is
+    /// what stops the previous per-frame brake fighting per-frame path
+    /// resumption (the reported yo-yo around the reverse line).
+    /// </summary>
+    internal static void UpdateArmoredEngagement(
+        AIVehicle ai,
+        Vehicle vehicle,
+        Vehicle? visibleTarget,
+        TankEngagementRuntimeState runtime,
+        int id,
+        float now)
+    {
+        var visibleNow = false;
+        var distance = runtime.LastKnownDistance;
+        var hullFacesThreat = runtime.LastKnownHullFacesThreat;
+
+        if (visibleTarget != null)
+        {
+            var towardEnemy = visibleTarget.GetCenterOfUnit() - vehicle.GetCenterOfUnit();
+            towardEnemy.y = 0f;
+            if (towardEnemy.sqrMagnitude >= 0.01f)
+            {
+                distance = towardEnemy.magnitude;
+                var signedAngle = Vector3.SignedAngle(vehicle.transform.forward, towardEnemy, Vector3.up);
+                hullFacesThreat = HullFacesThreat(signedAngle);
+                runtime.LastArmoredTargetSeenAt = now;
+                runtime.LastKnownDistance = distance;
+                runtime.LastKnownHullFacesThreat = hullFacesThreat;
+                visibleNow = true;
+            }
+        }
+
+        var timeSinceVisible = visibleNow ? 0f : now - runtime.LastArmoredTargetSeenAt;
+        var previousState = runtime.State;
+        var hasArmoredTarget = visibleNow || previousState != TankEngagementState.Follow;
+        if (!hasArmoredTarget)
+        {
+            runtime.State = TankEngagementState.Follow;
+            return;
+        }
+
+        var lifeFraction = vehicle.Maxlife > 0
+            ? Mathf.Clamp01((float)vehicle.life / vehicle.Maxlife)
+            : 1f;
+
+        // The rear probe only runs right at the point a reverse is being
+        // considered: entering Reverse from Hold, or re-arming a lapsed reverse
+        // window while already in Reverse. It is never a per-Hold-frame cost.
+        var retroLapsed = !ai.going_in_retro;
+        var wouldConsiderReverse =
+            (previousState == TankEngagementState.Hold &&
+                (distance <= Settings.TankReverseDistance.Value ||
+                 lifeFraction <= Settings.TankDamagedThreshold.Value)) ||
+            (previousState == TankEngagementState.Reverse && retroLapsed);
+        var rearBlocked = wouldConsiderReverse && IsRearBlocked(ai, vehicle);
+
+        var input = new TankEngagementInput(
+            hasArmoredTarget,
+            distance,
+            timeSinceVisible,
+            lifeFraction,
+            hullFacesThreat,
+            ai.ForcedRetroAvailable,
+            rearBlocked,
+            !ai.going_in_retro,
+            Settings.TankStandoffDistance.Value,
+            Settings.TankReverseDistance.Value,
+            Settings.TankDamagedThreshold.Value);
+
+        var nextState = TankEngagementDecisionCore.NextState(previousState, input);
+        runtime.State = nextState;
+
+        if (nextState != previousState)
+            runtime.ResetWatchdog();
+
+        if (nextState == TankEngagementState.Reverse)
+        {
+            if (previousState != TankEngagementState.Reverse)
+            {
+                BeginStraightReverse(ai, vehicle);
+                AiState.Trace(
+                    $"Tank tactics: vehicle {id} reversing; enemy={distance:0}m, life={lifeFraction:P0}");
+            }
+            else
+            {
+                // Force any active tactical retreat to remain a straight reverse,
+                // correcting a curved retro mode the native AI may have selected.
+                ai.retroBehaviour = AIVehicle.RetroBehaviour.backward;
+
+                // The native forced-retro window (TankReverseSeconds) can lapse
+                // while the FSM still wants to reverse (enemy holding inside the
+                // reverse band). Re-arm it so a Reverse state always means the tank
+                // is actually backing up rather than coasting to a stationary halt
+                // that neither moves nor brakes. The rear was re-probed this same
+                // evaluation (see wouldConsiderReverse), so this is not a blind
+                // re-entry; it is a bounded, rear-checked continuation.
+                if (retroLapsed && ai.ForcedRetroAvailable)
+                    ai.ForceRetroFor(
+                        Settings.TankReverseSeconds.Value, AIVehicle.RetroBehaviour.backward);
+            }
+        }
+        else if (nextState == TankEngagementState.Hold && previousState != TankEngagementState.Hold)
+        {
+            StopWithoutHullTurn(vehicle);
+            AiState.Trace($"Tank tactics: vehicle {id} holding to engage at {distance:0}m");
+        }
+        else if (nextState == TankEngagementState.Follow && previousState != TankEngagementState.Follow)
+        {
+            AiState.Trace($"Tank tactics: vehicle {id} resuming path");
+        }
+    }
+
+    /// <summary>
+    /// While following an active commander destination with no engagement, sample
+    /// progress every few seconds. A tank making no real progress gets one forced
+    /// straight reverse to clear the obstruction; after repeated failures without
+    /// net progress the commander vehicle lease is released so it can be reassigned.
+    /// </summary>
+    internal static void UpdateStallWatchdog(
+        AIVehicle ai,
+        Vehicle vehicle,
+        TankEngagementRuntimeState runtime,
+        int id,
+        float now)
+    {
+        if (!ai.destinationActive || ai.DestinationReached)
+        {
+            runtime.ResetWatchdog();
+            return;
+        }
+
+        if (now < runtime.WatchdogNextSampleAt)
+            return;
+        runtime.WatchdogNextSampleAt = now + TankStallWatchdogCore.SampleIntervalSeconds;
+
+        var position = vehicle.GetCenterOfUnit();
+        if (!runtime.WatchdogProgressAnchorSet)
+        {
+            runtime.WatchdogProgressAnchorPosition = position;
+            runtime.WatchdogProgressAnchorSet = true;
+        }
+        else if (TankStallWatchdogCore.HasNetProgress(
+                     FlattenedDistance(runtime.WatchdogProgressAnchorPosition, position)))
+        {
+            runtime.WatchdogProgressAnchorPosition = position;
+            runtime.WatchdogFailedRecoveries = 0;
+        }
+
+        if (!runtime.WatchdogWindowActive)
+        {
+            runtime.WatchdogWindowStartAt = now;
+            runtime.WatchdogWindowStartPosition = position;
+            runtime.WatchdogWindowActive = true;
+            return;
+        }
+
+        var secondsSinceWindowStart = now - runtime.WatchdogWindowStartAt;
+        if (secondsSinceWindowStart < TankStallWatchdogCore.StallWindowSeconds)
+            return;
+
+        var displacement = FlattenedDistance(runtime.WatchdogWindowStartPosition, position);
+        runtime.WatchdogWindowStartAt = now;
+        runtime.WatchdogWindowStartPosition = position;
+
+        if (!TankStallWatchdogCore.IsStalled(displacement, secondsSinceWindowStart))
+            return;
+
+        runtime.WatchdogFailedRecoveries++;
+        if (TankStallWatchdogCore.ShouldGiveUp(runtime.WatchdogFailedRecoveries))
+        {
+            AiState.Trace(
+                $"Tank tactics: vehicle {id} watchdog giving up after repeated stalls; releasing commander lease");
+            GroundAiDirector.ReleaseCommanderVehicle(id);
+            runtime.WatchdogFailedRecoveries = 0;
+            return;
+        }
+
+        AiState.Trace($"Tank tactics: vehicle {id} watchdog recovery: forcing reverse to clear a stall");
+        if (ai.ForcedRetroAvailable)
+            ai.ForceRetroFor(WatchdogRecoverySeconds, AIVehicle.RetroBehaviour.backward);
+    }
 }
 
 [HarmonyPatch(typeof(AIVehicle), "RotateVehicleTowardEnemy")]
@@ -114,50 +405,81 @@ internal static class AiTankPivotProtectionPatch
     [HarmonyPrefix]
     private static bool Prefix(AIVehicle __instance)
     {
-        if (!Settings.TankTacticsEnabled.Value || !MultiplayerAuthority.CanMutateGameplay())
-            return true;
-
+        var __t = ModTimeProbe.Begin();
         try
         {
-            if (!TankTactics.TryGetLocalAiTank(__instance, out var vehicle))
+            if (!Settings.TankTacticsEnabled.Value || !MultiplayerAuthority.CanMutateGameplay())
                 return true;
 
-            // Never let the native enemy-facing routine steer the hull while a
-            // tactical retreat is active. The turret remains free to track.
-            if (__instance.going_in_retro)
+            try
             {
-                __instance.retroBehaviour = AIVehicle.RetroBehaviour.backward;
+                if (!TankTactics.TryGetLocalAiTank(__instance, out var vehicle))
+                    return true;
+
+                if (!TankTactics.HasRotatingTurret(vehicle))
+                {
+                    // Hull rotation is this vehicle's only means of aiming; never
+                    // withhold it from the native routine.
+                    return true;
+                }
+
+                var id = vehicle.GetInstanceID();
+                var runtime = AiState.GetTankEngagementState(id);
+                var state = runtime.State;
+
+                if (state == TankEngagementState.Reverse)
+                {
+                    // Never let the native enemy-facing routine steer the hull while a
+                    // tactical retreat is active. The turret remains free to track.
+                    __instance.retroBehaviour = AIVehicle.RetroBehaviour.backward;
+                    return false;
+                }
+
+                if (state == TankEngagementState.Hold)
+                {
+                    var allowRotation = TankEngagementDecisionCore.AllowHullRotation(
+                        state,
+                        runtime.LastKnownDistance,
+                        Settings.TankReverseDistance.Value,
+                        runtime.LastKnownHullFacesThreat);
+                    if (allowRotation)
+                    {
+                        // Standoff range and not yet facing: let the native routine
+                        // rotate the hull toward the threat, as vision.md prescribes.
+                        return true;
+                    }
+
+                    // Close range, or already facing: stop and do not resume the
+                    // native path. This is the fix for the reported yo-yo — the hold
+                    // must not advance one node every time this runs.
+                    TankTactics.StopWithoutHullTurn(vehicle);
+                    return false;
+                }
+
+                // Follow: no armored contact close enough to hold or reverse against.
+                if (__instance.destinationActive && !__instance.DestinationReached)
+                {
+                    // stopToShoot routes tanks here even with a valid path. Continue
+                    // that path and leave target tracking to the turret instead of
+                    // exchanging the movement order for a stationary hull pivot.
+                    __instance.MoveTowardCurrentNodeTank();
+                    return false;
+                }
+
+                // No movement order exists. Clear both throttle and steering before
+                // braking; Brake() alone leaves the last steering input latched.
+                TankTactics.StopWithoutHullTurn(vehicle);
                 return false;
             }
-
-            if (TankTactics.TryGetCloseArmoredThreat(
-                    __instance, out vehicle, out _, out var signedHullAngle) &&
-                !TankTactics.HullFacesThreat(signedHullAngle))
+            catch (Exception ex)
             {
-                // Under direct armored contact, open distance without rotating
-                // the side or rear through the enemy's firing line.
-                TankTactics.BeginStraightReverse(__instance, vehicle);
-                return false;
+                Plugin.LogSource.LogWarning($"Tank pivot protection failed: {ex.Message}");
+                return true;
             }
-
-            if (__instance.destinationActive && !__instance.DestinationReached)
-            {
-                // stopToShoot routes tanks here even with a valid path. Continue
-                // that path and leave target tracking to the turret instead of
-                // exchanging the movement order for a stationary hull pivot.
-                __instance.MoveTowardCurrentNodeTank();
-                return false;
-            }
-
-            // No movement order exists. Clear both throttle and steering before
-            // braking; Brake() alone leaves the last steering input latched.
-            TankTactics.StopWithoutHullTurn(vehicle);
-            return false;
         }
-        catch (Exception ex)
+        finally
         {
-            Plugin.LogSource.LogWarning($"Tank pivot protection failed: {ex.Message}");
-            return true;
+            ModTimeProbe.End(ModTimeSite.VehicleAi, __t);
         }
     }
 }
@@ -168,23 +490,31 @@ internal static class AiTankForwardTurnCommitmentPatch
     [HarmonyPostfix]
     private static void Postfix(AIVehicle __instance)
     {
-        if (!Settings.TankTacticsEnabled.Value || !MultiplayerAuthority.CanMutateGameplay())
-            return;
-
+        var __t = ModTimeProbe.Begin();
         try
         {
-            if (!TankTactics.TryGetLocalAiTank(__instance, out var vehicle))
+            if (!Settings.TankTacticsEnabled.Value || !MultiplayerAuthority.CanMutateGameplay())
                 return;
 
-            // Native path following can request almost pure steering at low
-            // throttle. A tracked vehicle then spins indefinitely without making
-            // progress toward the node. Bound steering and commit enough forward
-            // throttle to turn as an arc instead.
-            TankTactics.PreserveForwardMotionWhileTurning(__instance, vehicle);
+            try
+            {
+                if (!TankTactics.TryGetLocalAiTank(__instance, out var vehicle))
+                    return;
+
+                // Native path following can request almost pure steering at low
+                // throttle. A tracked vehicle then spins indefinitely without making
+                // progress toward the node. Bound steering and commit enough forward
+                // throttle to turn as an arc instead.
+                TankTactics.PreserveForwardMotionWhileTurning(__instance, vehicle);
+            }
+            catch (Exception ex)
+            {
+                Plugin.LogSource.LogWarning($"Tank forward-turn commitment failed: {ex.Message}");
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            Plugin.LogSource.LogWarning($"Tank forward-turn commitment failed: {ex.Message}");
+            ModTimeProbe.End(ModTimeSite.VehicleAi, __t);
         }
     }
 }
@@ -195,94 +525,70 @@ internal static class AiVehicleUpdatePatch
     [HarmonyPostfix]
     private static void Postfix(AIVehicle __instance)
     {
-        if (!Settings.TankTacticsEnabled.Value || !MultiplayerAuthority.CanMutateGameplay())
-            return;
-
+        var __t = ModTimeProbe.Begin();
         try
         {
-            var vehicle = __instance.veh;
-            if (vehicle == null || vehicle.GetComponent<VehicleTank>() == null || !vehicle.IsLocalAIDriving())
-                return;
-            if (!__instance.hasEnemy || vehicle.CurrentVisibleTarget == null)
+            if (!Settings.TankTacticsEnabled.Value || !MultiplayerAuthority.CanMutateGameplay())
                 return;
 
-            var target = vehicle.CurrentVisibleTarget;
-            var armoredTarget = target.IsWheeledVehicleOrTank();
-            var distance = Vector3.Distance(vehicle.GetCenterOfUnit(), target.GetCenterOfUnit());
-            var holdDistance = armoredTarget
-                ? Settings.TankStandoffDistance.Value
-                : Settings.TankInfantryHoldDistance.Value;
-            if (distance > holdDistance)
-                return;
-
-            if (!armoredTarget)
+            try
             {
-                // Infantry contact must not become a permanent movement veto for
-                // armor committed to an assault. Without this exception the postfix
-                // applied the brakes every frame inside the hold distance, so native
-                // fire-and-move logic could never resume the advance.
-                if (TankTactics.HasForwardAttackOrder(vehicle))
+                var vehicle = __instance.veh;
+                if (vehicle == null || vehicle.GetComponent<VehicleTank>() == null || !vehicle.IsLocalAIDriving())
                     return;
 
-                // Halt without ordering a hull turn. The turret may continue tracking
-                // infantry while defending or uncommitted armor exploits its current
-                // firing position.
-                TankTactics.StopWithoutHullTurn(vehicle);
-                return;
+                var id = vehicle.GetInstanceID();
+                var runtime = AiState.GetTankEngagementState(id);
+                var now = Time.time;
+                var target = __instance.hasEnemy ? vehicle.CurrentVisibleTarget : null;
+                var armoredVehicleTarget = target?.TryCast<Vehicle>();
+                var armoredTarget = armoredVehicleTarget != null && TankTactics.IsArmoredVehicle(armoredVehicleTarget);
+
+                if (armoredTarget || runtime.State != TankEngagementState.Follow)
+                {
+                    TankTactics.UpdateArmoredEngagement(
+                        __instance, vehicle, armoredTarget ? armoredVehicleTarget : null, runtime, id, now);
+                }
+                else
+                {
+                    runtime.State = TankEngagementState.Follow;
+                    if (target != null)
+                        HandleInfantryContact(__instance, vehicle, target);
+                }
+
+                if (runtime.State == TankEngagementState.Follow)
+                    TankTactics.UpdateStallWatchdog(__instance, vehicle, runtime, id, now);
             }
-
-            var towardEnemy = target.GetCenterOfUnit() - vehicle.GetCenterOfUnit();
-            towardEnemy.y = 0f;
-            if (towardEnemy.sqrMagnitude < 0.01f)
-                return;
-            towardEnemy.Normalize();
-
-            var signedAngle = Vector3.SignedAngle(vehicle.transform.forward, towardEnemy, Vector3.up);
-            var hullIsFacingThreat = TankTactics.HullFacesThreat(signedAngle);
-
-            // Force any active tactical retreat to remain a straight reverse. This
-            // also corrects a curved retro mode selected earlier by the native AI.
-            if (__instance.going_in_retro)
+            catch (Exception ex)
             {
-                __instance.retroBehaviour = AIVehicle.RetroBehaviour.backward;
-                return;
-            }
-
-            if (!hullIsFacingThreat)
-            {
-                // Do not pivot or steer around under fire. Preserve the current hull
-                // orientation and open distance in a straight reverse.
-                TankTactics.BeginStraightReverse(__instance, vehicle);
-                return;
-            }
-
-            var now = Time.time;
-            var id = vehicle.GetInstanceID();
-            if (!AiState.CooldownReady(AiState.NextTankTactic, id, now))
-                return;
-            AiState.NextTankTactic[id] = now + 4f;
-
-            var lifeFraction = vehicle.Maxlife > 0
-                ? Mathf.Clamp01((float)vehicle.life / vehicle.Maxlife)
-                : 1f;
-            if ((distance <= Settings.TankReverseDistance.Value ||
-                 lifeFraction <= Settings.TankDamagedThreshold.Value) &&
-                __instance.ForcedRetroAvailable)
-            {
-                TankTactics.BeginStraightReverse(__instance, vehicle);
-                AiState.Trace(
-                    $"Tank tactics: vehicle {id} reversing; enemy={distance:0}m, life={lifeFraction:P0}");
-            }
-            else
-            {
-                TankTactics.StopWithoutHullTurn(vehicle);
-                AiState.Trace($"Tank tactics: vehicle {id} holding to engage at {distance:0}m");
+                Plugin.LogSource.LogWarning($"Tank tactical update failed: {ex.Message}");
             }
         }
-        catch (Exception ex)
+        finally
         {
-            Plugin.LogSource.LogWarning($"Tank tactical update failed: {ex.Message}");
+            ModTimeProbe.End(ModTimeSite.VehicleAi, __t);
         }
+    }
+
+    private static void HandleInfantryContact(AIVehicle ai, Vehicle vehicle, Spottable target)
+    {
+        var distance = TankTactics.FlattenedDistance(vehicle.GetCenterOfUnit(), target.GetCenterOfUnit());
+        if (distance > Settings.TankInfantryHoldDistance.Value)
+            return;
+
+        // Infantry contact must not become a permanent movement veto for a tank
+        // with a live commander order. Only a tank with no active destination
+        // (already parked) halts to fight; one en route keeps driving.
+        if (ai.destinationActive && !ai.DestinationReached)
+            return;
+
+        // The turret may continue tracking infantry while defending or
+        // uncommitted armor exploits its current firing position, and an
+        // assault-committed tank keeps moving instead of braking every frame.
+        if (TankTactics.HasForwardAttackOrder(vehicle))
+            return;
+
+        TankTactics.StopWithoutHullTurn(vehicle);
     }
 }
 
@@ -292,22 +598,46 @@ internal static class TankAccelerationPatch
     [HarmonyPrefix]
     private static void Prefix(VehicleTank __instance, out float __state)
     {
-        __state = __instance.accelerationSpeed;
-        __instance.accelerationSpeed = __state * Settings.TankAccelerationMultiplier.Value;
+        var __t = ModTimeProbe.Begin();
+        try
+        {
+            __state = __instance.accelerationSpeed;
+            __instance.accelerationSpeed = __state * Settings.TankAccelerationMultiplier.Value;
+        }
+        finally
+        {
+            ModTimeProbe.End(ModTimeSite.VehicleAi, __t);
+        }
     }
 
     [HarmonyPostfix]
     private static void Postfix(VehicleTank __instance, float __state)
     {
-        __instance.accelerationSpeed = __state;
+        var __t = ModTimeProbe.Begin();
+        try
+        {
+            __instance.accelerationSpeed = __state;
+        }
+        finally
+        {
+            ModTimeProbe.End(ModTimeSite.VehicleAi, __t);
+        }
     }
 
     [HarmonyFinalizer]
     private static Exception? Finalizer(VehicleTank __instance, Exception? __exception, float __state)
     {
-        // Keep the prefab's native value intact even when FixedUpdate throws so
-        // live slider edits never compound across physics frames.
-        __instance.accelerationSpeed = __state;
-        return __exception;
+        var __t = ModTimeProbe.Begin();
+        try
+        {
+            // Keep the prefab's native value intact even when FixedUpdate throws so
+            // live slider edits never compound across physics frames.
+            __instance.accelerationSpeed = __state;
+            return __exception;
+        }
+        finally
+        {
+            ModTimeProbe.End(ModTimeSite.VehicleAi, __t);
+        }
     }
 }

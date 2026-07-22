@@ -277,6 +277,7 @@ internal static class MountedGunnerSuppressionUpdatePatch
     [HarmonyPostfix]
     private static void Postfix(SoldierAI __instance)
     {
+        var __t = ModTimeProbe.Begin();
         try
         {
             MountedGunnerSuppression.Update(__instance);
@@ -284,6 +285,10 @@ internal static class MountedGunnerSuppressionUpdatePatch
         catch (Exception ex)
         {
             Plugin.LogSource.LogWarning($"Mounted gunner suppression update failed: {ex.Message}");
+        }
+        finally
+        {
+            ModTimeProbe.End(ModTimeSite.Other, __t);
         }
     }
 }

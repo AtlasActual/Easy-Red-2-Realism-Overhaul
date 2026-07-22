@@ -196,32 +196,40 @@ internal static class AircraftEvasionControlPatch
     [HarmonyPostfix]
     private static void Postfix(AIPlane __instance)
     {
-        if (!Settings.AircraftEvasionEnabled.Value ||
-            !MultiplayerAuthority.CanMutateGameplay() ||
-            __instance == null || __instance.veh == null || !__instance.HasAIDriver)
+        var __t = ModTimeProbe.Begin();
+        try
         {
-            return;
+            if (!Settings.AircraftEvasionEnabled.Value ||
+                !MultiplayerAuthority.CanMutateGameplay() ||
+                __instance == null || __instance.veh == null || !__instance.HasAIDriver)
+            {
+                return;
+            }
+
+            var id = __instance.veh.GetInstanceID();
+            var now = Time.time;
+            TryDetectMeaningfulDamage(__instance, id, now);
+            TryDetectNearMiss(__instance, id, now);
+
+            if (!AiState.AircraftEvasionUntil.TryGetValue(id, out var until))
+                return;
+
+            if (now >= until || !AiState.AircraftEvasionDirection.TryGetValue(id, out var direction))
+            {
+                AiState.AircraftEvasionUntil.Remove(id);
+                AiState.AircraftEvasionDirection.Remove(id);
+                return;
+            }
+
+            // Applied after the native controller for only a short window. Once it
+            // expires the native mission/target state resumes without being replaced.
+            __instance.veh.targetRotation = Quaternion.LookRotation(direction, Vector3.up);
+            __instance.veh.throttle = 100f;
         }
-
-        var id = __instance.veh.GetInstanceID();
-        var now = Time.time;
-        TryDetectMeaningfulDamage(__instance, id, now);
-        TryDetectNearMiss(__instance, id, now);
-
-        if (!AiState.AircraftEvasionUntil.TryGetValue(id, out var until))
-            return;
-
-        if (now >= until || !AiState.AircraftEvasionDirection.TryGetValue(id, out var direction))
+        finally
         {
-            AiState.AircraftEvasionUntil.Remove(id);
-            AiState.AircraftEvasionDirection.Remove(id);
-            return;
+            ModTimeProbe.End(ModTimeSite.Other, __t);
         }
-
-        // Applied after the native controller for only a short window. Once it
-        // expires the native mission/target state resumes without being replaced.
-        __instance.veh.targetRotation = Quaternion.LookRotation(direction, Vector3.up);
-        __instance.veh.throttle = 100f;
     }
 
     private static void TryDetectNearMiss(AIPlane ai, int id, float now)
@@ -250,7 +258,9 @@ internal static class AircraftEvasionControlPatch
                 var bullet = bullets[index];
                 var shooter = bullet?.shooter;
                 if (bullet == null || !bullet.canDamage || bullet.isMortar || shooter == null ||
-                    string.Equals(shooter.faction, aircraftFaction, StringComparison.OrdinalIgnoreCase))
+                    string.IsNullOrWhiteSpace(shooter.faction) ||
+                    string.IsNullOrWhiteSpace(aircraftFaction) ||
+                    !ResourcesManager.IsEnemyFaction(aircraftFaction, shooter.faction))
                 {
                     continue;
                 }
@@ -413,8 +423,6 @@ internal static class AircraftEvasionControlPatch
     }
 }
 
-<<<<<<< Updated upstream
-=======
 [HarmonyPatch(typeof(AIPlane), "Update")]
 internal static class AircraftAutonomousEngagementPatch
 {
@@ -424,60 +432,73 @@ internal static class AircraftAutonomousEngagementPatch
     [HarmonyPostfix]
     private static void Postfix(AIPlane __instance)
     {
-        if (__instance == null || __instance.veh == null ||
-            !CommanderMvp.AllowsAutonomousAircraftTargeting(__instance, __instance.veh))
-        {
-            return;
-        }
-
-        var id = __instance.veh.GetInstanceID();
-        var now = Time.time;
-        if (AiState.AircraftEvasionUntil.TryGetValue(id, out var evadingUntil) &&
-            now < evadingUntil)
-        {
-            return;
-        }
-
+        var __t = ModTimeProbe.Begin();
         try
         {
-            // Only supplement the native idle patrol state. Commander attacks,
-            // scripted flights, refuelling, takeoff, and existing native attacks
-            // retain full authority over the aircraft.
-            if (__instance.planeState != AIPlane.PlaneAIState.flyingAroundArea ||
-                __instance.targetToAttack != null || __instance.hasEnemy ||
-                __instance.hasEnemyTank ||
-                !AiState.CooldownReady(NextOpportunityScans, id, now))
+            if (__instance == null || __instance.veh == null ||
+                !CommanderMvp.AllowsAutonomousAircraftTargeting(__instance, __instance.veh))
             {
                 return;
             }
 
-            NextOpportunityScans[id] = now + OpportunityScanIntervalSeconds;
-            var target = __instance.GetBestAircraftVisibleEnemy();
-            if (target == null)
-                return;
-
-            var targetKind = target.IsAirVehicle() ? "aircraft" : "ground";
-            if (!GroundAiDirector.ExecuteAutonomousAircraftOrder(
-                    __instance,
-                    __instance.veh,
-                    target.GetCenterOfUnit(),
-                    () => __instance.DoAttackTarget(target),
-                    now))
+            var id = __instance.veh.GetInstanceID();
+            var now = Time.time;
+            if (AiState.AircraftEvasionUntil.TryGetValue(id, out var evadingUntil) &&
+                now < evadingUntil)
             {
                 return;
             }
-            if (__instance.targetToAttack == null)
-                return;
 
-            AiState.Trace($"Aircraft autonomy: plane {id} engaging {targetKind} target of opportunity");
+            try
+            {
+                // Only supplement the native idle patrol state. Commander attacks,
+                // scripted flights, refuelling, takeoff, and existing native attacks
+                // retain full authority over the aircraft.
+                if (__instance.planeState != AIPlane.PlaneAIState.flyingAroundArea ||
+                    __instance.targetToAttack != null || __instance.hasEnemy ||
+                    __instance.hasEnemyTank ||
+                    !AiState.CooldownReady(NextOpportunityScans, id, now))
+                {
+                    return;
+                }
+
+                NextOpportunityScans[id] = now + OpportunityScanIntervalSeconds;
+                var target = __instance.GetBestAircraftVisibleEnemy();
+                if (target == null)
+                    return;
+
+                var targetKind = target.IsAirVehicle() ? "aircraft" : "ground";
+                if (!GroundAiDirector.ExecuteAutonomousAircraftOrder(
+                        __instance,
+                        __instance.veh,
+                        target.GetCenterOfUnit(),
+                        () => __instance.DoAttackTarget(target),
+                        now))
+                {
+                    return;
+                }
+                if (__instance.targetToAttack == null)
+                {
+                    // The native attack was rejected (for example by the friendly-fire
+                    // safety prefix). Free the channel instead of holding an idle lease.
+                    GroundAiDirector.ReleaseAutonomousAircraft(id);
+                    return;
+                }
+
+                AiState.Trace($"Aircraft autonomy: plane {id} engaging {targetKind} target of opportunity");
+            }
+            catch (Il2CppInterop.Runtime.ObjectCollectedException)
+            {
+                // A target despawned during the native visibility query.
+            }
+            catch (Exception ex)
+            {
+                Plugin.LogSource.LogWarning($"Aircraft opportunity scan failed: {ex.Message}");
+            }
         }
-        catch (Il2CppInterop.Runtime.ObjectCollectedException)
+        finally
         {
-            // A target despawned during the native visibility query.
-        }
-        catch (Exception ex)
-        {
-            Plugin.LogSource.LogWarning($"Aircraft opportunity scan failed: {ex.Message}");
+            ModTimeProbe.End(ModTimeSite.Other, __t);
         }
     }
 
@@ -485,7 +506,6 @@ internal static class AircraftAutonomousEngagementPatch
         => NextOpportunityScans.Remove(id);
 }
 
->>>>>>> Stashed changes
 [HarmonyPatch(typeof(Vehicle), "OnDestroy")]
 internal static class AircraftStateCleanupPatch
 {
@@ -498,11 +518,8 @@ internal static class AircraftStateCleanupPatch
         var id = __instance.GetInstanceID();
         AircraftFlightPhysics.Remove((VehiclePlane)__instance);
         AircraftEvasionControlPatch.Remove(id);
-<<<<<<< Updated upstream
-=======
         AircraftAutonomousEngagementPatch.Remove(id);
         GroundAiDirector.ReleaseAircraft(id);
->>>>>>> Stashed changes
         AiState.AircraftEvasionUntil.Remove(id);
         AiState.AircraftEvasionDirection.Remove(id);
     }

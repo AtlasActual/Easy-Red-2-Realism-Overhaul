@@ -1,5 +1,6 @@
 using System.Globalization;
 using BepInEx.Configuration;
+using UnityEngine;
 
 namespace ER2RealismOverhaul;
 
@@ -36,6 +37,27 @@ internal sealed class SettingsDraft
     {
         foreach (var setting in SettingsCatalog.All)
             Reset(setting);
+    }
+
+    /// <summary>
+    /// Sets every boolean system switch together without disturbing numeric tuning,
+    /// input preferences, or the always-available F10 settings-menu shortcut.
+    /// </summary>
+    internal int SetAllSwitches(bool enabled)
+    {
+        var value = SettingsCatalog.FormatValue(enabled);
+        var changed = 0;
+        foreach (var setting in SettingsCatalog.All)
+        {
+            if (setting.Entry.SettingType != typeof(bool) || !SettingsCatalog.IsSystemSwitch(setting))
+                continue;
+
+            if (_values[setting.Id] != value)
+                changed++;
+            _values[setting.Id] = value;
+        }
+
+        return changed;
     }
 
     internal bool TryGetNormalizedValues(out IReadOnlyDictionary<string, string> values, out string error)
@@ -142,10 +164,21 @@ internal sealed class SettingsDraft
             return true;
         }
 
+        if (entry.SettingType == typeof(KeyCode) &&
+            Enum.TryParse<KeyCode>(text, true, out var keyCode) &&
+            Enum.IsDefined(keyCode))
+        {
+            value = keyCode;
+            error = string.Empty;
+            return true;
+        }
+
         value = entry.DefaultValue;
         error = entry.SettingType == typeof(bool)
             ? "enter true or false."
-            : "enter a valid number using a decimal point.";
+            : entry.SettingType == typeof(KeyCode)
+                ? "choose a valid key."
+                : "enter a valid number using a decimal point.";
         return false;
     }
 
