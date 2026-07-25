@@ -832,8 +832,8 @@ internal static class SoldierSequentialUpdatePatch
                 ContactResponse.StopTacticalMovement(
                     __instance,
                     soldier,
-                    ContactResponse.StationaryHoldPose(soldier),
-                    Time.deltaTime);
+                    Time.deltaTime,
+                    "native-hold-defensive");
             }
         }
         catch (Exception ex)
@@ -1029,10 +1029,8 @@ internal static class SoldierSequentialUpdatePatch
             ContactResponse.StopDangerMovement(
                 ai,
                 soldier,
-                ContactResponse.IsOnUsableCover(soldier)
-                    ? ContactResponse.StationaryHoldPose(soldier)
-                    : SoldierPose.Prone,
-                Time.deltaTime);
+                Time.deltaTime,
+                "tank-fear-playerhold");
             if (!wasAlreadyHiding)
                 AiState.Trace($"Tank fear: soldier {id} hiding at the player hold from tank at {distance:0}m");
             return;
@@ -1047,8 +1045,8 @@ internal static class SoldierSequentialUpdatePatch
             ContactResponse.StopDangerMovement(
                 ai,
                 soldier,
-                ContactResponse.StationaryHoldPose(soldier),
-                Time.deltaTime);
+                Time.deltaTime,
+                "tank-fear-cover");
             if (!wasAlreadyHiding)
                 AiState.Trace($"Tank fear: soldier {id} hiding in cover from tank at {distance:0}m");
             return;
@@ -1083,7 +1081,7 @@ internal static class SoldierSequentialUpdatePatch
         // the open; he makes himself small and waits for a viable move.
         var wasProneHiding = AiState.IsHidingFromTank(id, now);
         AiState.TankCoverHideUntil[id] = now + 1f;
-        ContactResponse.StopDangerMovement(ai, soldier, SoldierPose.Prone, Time.deltaTime);
+        ContactResponse.StopDangerMovement(ai, soldier, Time.deltaTime);
         if (!wasProneHiding)
             AiState.Trace($"Tank fear: soldier {id} went prone while waiting for tank-masked cover at {distance:0}m");
     }

@@ -57,7 +57,6 @@ internal static partial class ContactResponse
     /// contact-halt flag, so the flag can no longer disagree with the actual locomotion
     /// state), and <see cref="MovementOwner.Free"/> writes nothing at all so native
     /// locomotion is untouched on frames this mod has nothing to say about.
-    /// <paramref name="fallbackPose"/> is only the pose arbiter's ownerless fallback.
     /// <paramref name="resolvePose"/> is false on the round-robin stagger's write-through
     /// frames, which re-assert the already latched pose instead of re-resolving it.
     /// Returns the committed owner.
@@ -68,7 +67,6 @@ internal static partial class ContactResponse
         float deltaTime,
         float now,
         MovementOwner declared,
-        SoldierPose fallbackPose,
         string? traceSource = null,
         bool resolvePose = true)
     {
@@ -92,10 +90,26 @@ internal static partial class ContactResponse
             ResolveMovementOwner(soldier, state, soldierId, now, declared),
             deltaTime,
             now,
-            fallbackPose,
             traceSource,
             resolvePose);
     }
+
+    /// <summary>
+    /// THE pose for a soldier this mod is halting when the pose arbiter finds no tactical
+    /// owner (plan 020 D1). It used to be whatever <c>fallbackPose</c> the halting call
+    /// site passed in, and that was the last multi-writer disagreement left after plan 014:
+    /// two sites halting the same defender on alternate decisions - one passing
+    /// <c>StationaryHoldPose</c> (Crouch), one a hardcoded Prone - flip-flopped him
+    /// forever, and the owner-aware latch could not arbitrate it because both commit under
+    /// the same <see cref="PoseOwner.HaltFallback"/>. That is the prone-crouch loop.
+    ///
+    /// Crouch is the correct answer here by construction, not by tuning: every reason a
+    /// halted soldier should be prone - pinned, suppressed, on fire, hiding from armour,
+    /// exposed reload, a measured cover-geometry pose - is an owner ABOVE HaltFallback in
+    /// the ladder, so reaching this line means none of them applies. A man halted with no
+    /// tactical reason to be down takes a fighting crouch, not a nap in the open.
+    /// </summary>
+    private const SoldierPose OwnerlessHaltPose = SoldierPose.Crouch;
 
     /// <summary>
     /// The write half of <see cref="ApplyMovementDecision"/>, split out only so the
@@ -110,7 +124,6 @@ internal static partial class ContactResponse
         MovementOwner owner,
         float deltaTime,
         float now,
-        SoldierPose fallbackPose,
         string? traceSource,
         bool resolvePose)
     {
@@ -150,12 +163,12 @@ internal static partial class ContactResponse
         if (resolvePose)
         {
             pose = ApplyArbitratedPose(
-                ai, soldier, now, resolveDecisionTail: true, fallbackPose, traceSource);
+                ai, soldier, now, resolveDecisionTail: true, OwnerlessHaltPose, traceSource);
         }
         else
         {
             ReassertLatchedPose(ai, soldier);
-            pose = state.HasLatchedTacticalPose ? state.LatchedTacticalPose : fallbackPose;
+            pose = state.HasLatchedTacticalPose ? state.LatchedTacticalPose : OwnerlessHaltPose;
         }
 
         soldier.StopMove(pose, deltaTime);
@@ -180,7 +193,14 @@ internal static partial class ContactResponse
         MovementOwner owner,
         float now)
     {
-        if (owner is not (MovementOwner.EngagementHold or MovementOwner.CoverHold) ||
+        // Off by default (playtest 2026-07-24: "some AI walk in place"). The step grants
+        // locomotion for a FIXED window rather than until arrival, so a soldier who
+        // completes - or cannot complete - the 2.5 m offset keeps moveCharacter set for the
+        // remainder of it with nothing left to walk toward, and re-arms every cooldown.
+        // Cover-slot dispersion (plan 016's crowding penalty) is independent of this and
+        // stays on.
+        if (!Settings.HaltSpacingEnabled.Value ||
+            owner is not (MovementOwner.EngagementHold or MovementOwner.CoverHold) ||
             state.MovementHalted || state.Relocating ||
             now < state.HaltSpacingNextCheckAt)
         {

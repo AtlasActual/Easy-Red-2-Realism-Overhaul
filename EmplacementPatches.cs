@@ -370,13 +370,11 @@ internal static class StaticAntiTankStaffing
     {
         // A halftrack or gun truck parked inside the position is as useful as an
         // emplacement, but only while nobody owns it: anyone already aboard means
-        // the vehicle belongs to its own crew. Tanks and aircraft are never
-        // re-crewed this way; one rifleman in a tank turret is not a defensive gun.
-        if (!Settings.VehicleGunStaffingEnabled.Value || !vehicle.IsEmpty())
-            return false;
-
-        return vehicle.GetComponent<VehicleTank>() == null &&
-               vehicle.GetComponent<VehiclePlane>() == null;
+        // the vehicle belongs to its own crew. Troop capacity is the game's own
+        // marker for a transport, so tanks, assault guns, and aircraft - which
+        // report none - are never re-crewed by a lone defender.
+        return Settings.VehicleGunStaffingEnabled.Value &&
+               vehicle.IsTransportVehicle() && vehicle.IsEmpty();
     }
 
     private static List<Vehicle> CollectReportedArmor(string faction, Vector3 center)

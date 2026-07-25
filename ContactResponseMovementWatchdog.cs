@@ -40,7 +40,7 @@ internal static partial class ContactResponse
 
         if (now < state.MovementStallHoldUntil)
         {
-            StopDangerMovement(ai, soldier, SoldierPose.Crouch, Time.deltaTime);
+            StopDangerMovement(ai, soldier, Time.deltaTime);
             return;
         }
 
@@ -54,7 +54,7 @@ internal static partial class ContactResponse
             if (!eligible ||
                 !MovementArbiterCore.Grants(ApplyMovementDecision(
                     ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
-                    SoldierPose.Crouch, "stall-release")))
+                    "stall-release")))
             {
                 return;
             }
@@ -185,7 +185,7 @@ internal static partial class ContactResponse
         state.NextDecisionAt = Mathf.Max(
             state.NextDecisionAt, state.MovementStallHoldUntil);
         ResetMovementWatch(state, preserveFailures: true);
-        StopDangerMovement(ai, soldier, SoldierPose.Crouch, Time.deltaTime);
+        StopDangerMovement(ai, soldier, Time.deltaTime);
         if (refreshPath)
             RefreshPath(ai, "Stalled locomotion path refresh failed");
         AiState.Trace(
@@ -227,7 +227,7 @@ internal static partial class ContactResponse
         if (now >= state.MovementStallHoldUntil)
             return false;
 
-        StopDangerMovement(ai, soldier, SoldierPose.Crouch, deltaTime);
+        StopDangerMovement(ai, soldier, deltaTime);
         return true;
     }
 }

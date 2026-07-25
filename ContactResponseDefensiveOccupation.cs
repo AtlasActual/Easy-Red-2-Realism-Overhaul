@@ -36,10 +36,7 @@ internal static partial class ContactResponse
             // stops running the hold simply lapses instead of freezing.
             state.EngagementHoldUntil = BoundedEngagementHold(target != null, state, now);
             state.ContactCrouchOwned = true;
-            var pose = target != null
-                ? GetStationaryEngagementPose(soldier, state, targetPosition)
-                : StationaryHoldPose(soldier);
-            StopTacticalMovement(ai, soldier, pose, Time.deltaTime);
+            StopTacticalMovement(ai, soldier, Time.deltaTime, "defensive-anchor-hold");
             if (target != null)
             {
                 FaceThreatWhenStationary(ai, soldier, targetPosition);
@@ -97,7 +94,7 @@ internal static partial class ContactResponse
         // D4 (plan 015): bounded — see the comment on the stable-anchor branch above.
         state.EngagementHoldUntil = BoundedEngagementHold(target != null, state, now);
         state.ContactCrouchOwned = true;
-        StopTacticalMovement(ai, soldier, SoldierPose.Prone, Time.deltaTime);
+        StopTacticalMovement(ai, soldier, Time.deltaTime, "defensive-noslot");
         if (target != null)
         {
             FaceThreatWhenStationary(ai, soldier, targetPosition);
@@ -374,7 +371,7 @@ internal static partial class ContactResponse
             ClearCoverClearancePose(state);
             ApplyMovementDecision(
                 ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
-                SoldierPose.Crouch, "player-hold-route");
+                "player-hold-route");
             if (target != null)
                 ApplyContactMovementPose(ai, soldier, state, now);
             if (wasControllingMovement && HasCommittedDestination(soldier))
@@ -406,10 +403,7 @@ internal static partial class ContactResponse
             // TryEstablishInitialDefensivePosition's stable-anchor branch.
             state.EngagementHoldUntil = BoundedEngagementHold(target != null, state, now);
             state.ContactCrouchOwned = true;
-            var anchorPose = target != null
-                ? GetStationaryEngagementPose(soldier, state, targetPosition)
-                : StationaryHoldPose(soldier);
-            StopTacticalMovement(ai, soldier, anchorPose, Time.deltaTime);
+            StopTacticalMovement(ai, soldier, Time.deltaTime, "player-hold-anchor");
             if (target != null)
             {
                 FaceThreatWhenStationary(ai, soldier, targetPosition);
@@ -465,10 +459,7 @@ internal static partial class ContactResponse
         // TryEstablishInitialDefensivePosition's stable-anchor branch.
         state.EngagementHoldUntil = BoundedEngagementHold(target != null, state, now);
         state.ContactCrouchOwned = true;
-        var pose = target != null && IsOnUsableCover(soldier)
-            ? GetStationaryEngagementPose(soldier, state, targetPosition)
-            : SoldierPose.Prone;
-        StopTacticalMovement(ai, soldier, pose, Time.deltaTime);
+        StopTacticalMovement(ai, soldier, Time.deltaTime, "player-hold-noslot");
         if (target != null)
         {
             FaceThreatWhenStationary(ai, soldier, targetPosition);

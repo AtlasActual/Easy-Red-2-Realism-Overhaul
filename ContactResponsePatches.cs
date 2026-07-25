@@ -197,7 +197,7 @@ internal static class SoldierTacticalSprintPatch
         {
             sprint = false;
             soldier.StopFire();
-            ContactResponse.StopDangerMovement(ai, soldier, SoldierPose.Prone, deltaTime);
+            ContactResponse.StopDangerMovement(ai, soldier, deltaTime);
             return false;
         }
 
@@ -271,7 +271,6 @@ internal static class SoldierTacticalSprintPatch
             var haltOwner = ContactResponse.StopTacticalMovement(
                 ai,
                 soldier,
-                ContactResponse.StationaryHoldPose(soldier),
                 deltaTime);
             if (MovementArbiterCore.Halts(haltOwner))
                 return false;

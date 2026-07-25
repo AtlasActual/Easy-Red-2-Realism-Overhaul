@@ -101,7 +101,7 @@ internal static class SoldierFireDanger
             {
                 GroundAiDirector.ExecuteSoldierStopFire(soldier);
                 ContactResponse.StopDangerMovement(
-                    ai, soldier, SoldierPose.Prone, Time.deltaTime);
+                    ai, soldier, Time.deltaTime);
                 return;
             }
 

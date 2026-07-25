@@ -1395,7 +1395,7 @@ internal static partial class ContactResponse
         state.ContactCrouchOwned = true;
         ApplyMovementDecision(
             ai, soldier, Time.deltaTime, now, MovementOwner.CommittedMove,
-            SoldierPose.Crouch, "cover-move");
+            "cover-move");
         // The moving-fire rule is the arbiter's rank f; this dash no longer re-states it.
         ApplyArbitratedPose(
             ai, soldier, now, resolveDecisionTail: true, SoldierPose.Crouch, "cover-move");
@@ -1427,7 +1427,7 @@ internal static partial class ContactResponse
         state.SuppressionPoseOwned = suppressed;
         ApplyMovementDecision(
             ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
-            SoldierPose.Crouch, "attack-advance");
+            "attack-advance");
         soldier.isSprinting = false;
 
         if (state.SuppressionFireInhibited && now >= state.PinnedFireBlockedUntil)
@@ -1587,13 +1587,9 @@ internal static partial class ContactResponse
         // persistence timer instead of +inf.
         state.EngagementHoldUntil = state.ContactUntil;
         state.ContactCrouchOwned = true;
-        var stationaryPose = preferProne && !IsOnUsableCover(soldier)
-            ? SoldierPose.Prone
-            : GetStationaryEngagementPose(soldier, state, targetPosition);
         StopTacticalMovement(
             ai,
             soldier,
-            stationaryPose,
             Time.deltaTime,
             "respond-nocover");
         FaceThreatWhenStationary(ai, soldier, targetPosition);

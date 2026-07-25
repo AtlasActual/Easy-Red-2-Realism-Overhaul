@@ -119,7 +119,7 @@ internal static partial class ContactResponse
             sprint = false;
             ApplyResolvedMovementDecision(
                 ai, soldier, state, id, staggerOwner, deltaTime, now,
-                state.LatchedTacticalPose, "stagger", resolvePose: false);
+                "stagger", resolvePose: false);
 
             CountStaggerSkip();
             passThrough = false;
@@ -133,7 +133,7 @@ internal static partial class ContactResponse
         // (no ownership refresh, no hold selection, no cover geometry).
         ApplyResolvedMovementDecision(
             ai, soldier, state, id, staggerOwner, deltaTime, now,
-            SoldierPose.Crouch, "stagger", resolvePose: false);
+            "stagger", resolvePose: false);
         var suppression = soldier.GetSuppressionValue();
         var activeThreatMovement = HasActiveContact(id, now) ||
                                    IncomingFireAwareness.HasActiveCue(id, now);
@@ -221,7 +221,7 @@ internal static partial class ContactResponse
                 FinishRelocation(ai, soldier, state, id, now, false, false, false);
             state.EngagementHoldUntil = 0f;
             soldier.StopFire();
-            StopDangerMovement(ai, soldier, SoldierPose.Prone, Time.deltaTime);
+            StopDangerMovement(ai, soldier, Time.deltaTime);
             return;
         }
 
@@ -251,7 +251,7 @@ internal static partial class ContactResponse
             state.EngagementHoldUntil = 0f;
             ApplyMovementDecision(
                 ai, soldier, Time.deltaTime, now, MovementOwner.Free,
-                SoldierPose.Crouch, "fsm-flame-evade");
+                "fsm-flame-evade");
             soldier.StopFire();
             return;
         }
@@ -332,7 +332,7 @@ internal static partial class ContactResponse
         {
             ApplyMovementDecision(
                 ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
-                SoldierPose.Crouch, "fsm-charge");
+                "fsm-charge");
             return;
         }
 
@@ -459,7 +459,6 @@ internal static partial class ContactResponse
                 StopTacticalMovement(
                     ai,
                     soldier,
-                    GetStationaryEngagementPose(soldier, state, suppressionAimPoint),
                     Time.deltaTime,
                     "fsm-suppressive-aim");
                 return;
@@ -473,9 +472,6 @@ internal static partial class ContactResponse
                 StopTacticalMovement(
                     ai,
                     soldier,
-                    state.HasThreatPosition
-                        ? GetStationaryEngagementPose(soldier, state, state.LastThreatPosition)
-                        : SoldierPose.Crouch,
                     Time.deltaTime,
                     "fsm-observe-cover");
                 if (state.HasThreatPosition && now < state.ContactUntil)
@@ -519,9 +515,6 @@ internal static partial class ContactResponse
                 StopTacticalMovement(
                     ai,
                     soldier,
-                    now < state.ContactUntil
-                        ? StationaryHoldPose(soldier)
-                        : SoldierPose.Crouch,
                     Time.deltaTime,
                     "fsm-defensive-hold");
                 // Hold the position, not an obsolete bearing. After the immediate
@@ -541,7 +534,6 @@ internal static partial class ContactResponse
                     StopTacticalMovement(
                         ai,
                         soldier,
-                        StationaryHoldPose(soldier),
                         Time.deltaTime,
                         "fsm-contact-hold");
                     if (state.HasThreatPosition)
@@ -551,7 +543,7 @@ internal static partial class ContactResponse
                 {
                     ApplyMovementDecision(
                         ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
-                        SoldierPose.Crouch, "fsm-contact-move");
+                        "fsm-contact-move");
                     ApplyContactMovementPose(ai, soldier, state, now);
                 }
                 return;
@@ -569,7 +561,7 @@ internal static partial class ContactResponse
                 // OrderedMove releases the contact-halt flag on its way through.
                 var owner = ApplyMovementDecision(
                     ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
-                    SoldierPose.Crouch, "fsm-contact-release");
+                    "fsm-contact-release");
                 if (MovementArbiterCore.Grants(owner) && wasHoldingMovement &&
                     HasCommittedDestination(soldier))
                 {
@@ -632,7 +624,6 @@ internal static partial class ContactResponse
                 StopTacticalMovement(
                     ai,
                     soldier,
-                    GetStationaryEngagementPose(soldier, state, targetPosition),
                     Time.deltaTime,
                     "fsm-cover-hold");
                 FaceThreatWhenStationary(ai, soldier, targetPosition);
@@ -851,7 +842,7 @@ internal static partial class ContactResponse
             // PinnedHold, SafetyHalt and HazardEscape ranks outranking OrderedMove.
             var owner = ApplyMovementDecision(
                 ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
-                SoldierPose.Crouch, "contact-disable");
+                "contact-disable");
             if (owner == MovementOwner.OrderedMove && HasCommittedDestination(soldier))
                 RefreshPath(ai, "Contact path release after disabling failed");
         }
@@ -913,7 +904,7 @@ internal static partial class ContactResponse
         {
             var owner = ApplyMovementDecision(
                 ai, soldier, Time.deltaTime, Time.time, MovementOwner.OrderedMove,
-                SoldierPose.Crouch, "yield-authority");
+                "yield-authority");
             if (owner == MovementOwner.OrderedMove && HasCommittedDestination(soldier))
                 RefreshPath(ai, "Higher-authority movement path resume failed");
         }
@@ -1326,10 +1317,7 @@ internal static partial class ContactResponse
         if (!AiState.IsHidingFromTank(id, now))
             return false;
 
-        var pose = IsOnUsableCover(soldier)
-            ? StationaryHoldPose(soldier)
-            : SoldierPose.Prone;
-        StopDangerMovement(ai, soldier, pose, deltaTime);
+        StopDangerMovement(ai, soldier, deltaTime);
         return true;
     }
 
@@ -1363,7 +1351,7 @@ internal static partial class ContactResponse
         var wasHalted = !ai.moveCharacter;
         var owner = ApplyMovementDecision(
             ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
-            SoldierPose.Crouch, "tank-nocover-resume");
+            "tank-nocover-resume");
         if (wasHalted && owner == MovementOwner.OrderedMove &&
             HasCommittedDestination(soldier))
         {
@@ -1468,7 +1456,7 @@ internal static partial class ContactResponse
             soldier.StopFire();
 
         ApplyMovementDecision(
-            ai, soldier, deltaTime, now, MovementOwner.Free, SuppressionPose(soldier), "pinned");
+            ai, soldier, deltaTime, now, MovementOwner.Free, "pinned");
         if (state.HasThreatPosition)
             FaceThreatWhenStationary(ai, soldier, state.LastThreatPosition);
         return true;
@@ -1502,7 +1490,7 @@ internal static partial class ContactResponse
         {
             ApplyMovementDecision(
                 ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
-                SoldierPose.Crouch, "suppression-disabled");
+                "suppression-disabled");
         }
     }
 
@@ -1529,7 +1517,7 @@ internal static partial class ContactResponse
         {
             ApplyMovementDecision(
                 ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
-                SoldierPose.Crouch, "suppression-release");
+                "suppression-release");
         }
     }
 
@@ -1854,18 +1842,18 @@ internal static partial class ContactResponse
     // same treatment plan 014 gave them on the pose channel. They record the ownership the
     // caller is claiming and hand the frame to the single movement arbiter, which decides
     // whether that claim actually wins and performs the one moveCharacter/StopMove write.
-    // The caller's <paramref name="fallbackPose"/> is still only the pose arbiter's
-    // ownerless fallback.
+    // Plan 020 D1 removed the caller's fallbackPose: a halting site declares an OWNER, it
+    // does not get to name a pose. The pose is the arbiter's job, and letting two sites
+    // name different ones is what kept defenders flipping prone/crouch forever.
     internal static MovementOwner StopTacticalMovement(
         SoldierAI ai,
         Soldier soldier,
-        SoldierPose fallbackPose,
         float deltaTime,
         string proposalSource = "stop-tactical")
     {
         AiState.GetContactState(soldier.GetInstanceID()).MovementInhibitedByContactResponse = true;
         return ApplyMovementDecision(
-            ai, soldier, deltaTime, Time.time, MovementOwner.Free, fallbackPose, proposalSource);
+            ai, soldier, deltaTime, Time.time, MovementOwner.Free, proposalSource);
     }
 
     /// <param name="declared">The owner this halt claims when it has no state of its own
@@ -1875,12 +1863,11 @@ internal static partial class ContactResponse
     internal static MovementOwner StopDangerMovement(
         SoldierAI ai,
         Soldier soldier,
-        SoldierPose fallbackPose,
         float deltaTime,
         string proposalSource = "stop-danger",
         MovementOwner declared = MovementOwner.Free)
         => ApplyMovementDecision(
-            ai, soldier, deltaTime, Time.time, declared, fallbackPose, proposalSource);
+            ai, soldier, deltaTime, Time.time, declared, proposalSource);
 
     // Low-level soldier command executor. Tactical feature modules request these
     // mutations through GroundAiDirector so movement, pose, aim, and fire policy
@@ -1904,7 +1891,7 @@ internal static partial class ContactResponse
         // could still put a running man on his belly.
         ApplyMovementDecision(
             ai, soldier, Time.deltaTime, Time.time, MovementOwner.HazardEscape,
-            SoldierPose.Crouch, "hazard-escape");
+            "hazard-escape");
         SetTacticalPose(ai, soldier, SoldierPose.Crouch, "hazard-escape");
     }
 }
