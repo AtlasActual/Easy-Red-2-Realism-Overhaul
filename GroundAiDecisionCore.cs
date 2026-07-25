@@ -13,16 +13,17 @@ internal enum StrategicPosture
 internal enum CommandChannel
 {
     SquadOrders,
-    InfantryAssignment,
-    VehicleOrders,
-    AircraftOrders,
-    SupportRequest
+    InfantryAssignment
+}
+
+internal readonly record struct MapPoint(float X, float Z)
+{
+    internal bool IsFinite => float.IsFinite(X) && float.IsFinite(Z);
 }
 
 internal enum CommandAuthority
 {
     NativeFallback = 0,
-    CommanderIntent = 100,
     ImmediateCombat = 200,
     ProtectedFortification = 300,
     CriticalSuppression = 400,
@@ -242,170 +243,6 @@ internal sealed class CommandLeaseRegistryCore
             request.ValidUntil >= now);
 }
 
-internal readonly record struct StableDefensiveOrder(
-    int ObjectiveId,
-    MapPoint Destination,
-    float Radius);
-
-internal static class DefensiveOrderStabilityCore
-{
-    internal static bool ShouldReplace(
-        StableDefensiveOrder? current,
-        StableDefensiveOrder proposed,
-        float destinationTolerance = 10f,
-        float radiusTolerance = 4f)
-    {
-        if (current == null)
-            return true;
-
-        var existing = current.Value;
-        if (existing.ObjectiveId != proposed.ObjectiveId)
-            return true;
-
-        var deltaX = existing.Destination.X - proposed.Destination.X;
-        var deltaZ = existing.Destination.Z - proposed.Destination.Z;
-        var tolerance = Math.Max(0f, destinationTolerance);
-        return deltaX * deltaX + deltaZ * deltaZ > tolerance * tolerance ||
-               Math.Abs(existing.Radius - proposed.Radius) > Math.Max(0f, radiusTolerance);
-    }
-}
-
-internal readonly record struct StableCommanderOrder(
-    int ObjectiveId,
-    CommanderRole Role,
-    CommanderAction Action);
-
-internal static class CommanderOrderStabilityCore
-{
-    internal static bool ShouldReplace(
-        StableCommanderOrder? current,
-        StableCommanderOrder proposed,
-        bool ignoreRole = false)
-    {
-        if (current == null)
-            return true;
-
-        var existing = current.Value;
-        if (existing.ObjectiveId != proposed.ObjectiveId ||
-            !ignoreRole && existing.Role != proposed.Role)
-        {
-            return true;
-        }
-
-        // Prepare and Hold are the same stationary command phase. Planner
-        // heartbeats may refine their ideal point, but a settled squad must not be
-        // sent to a new point until the operation actually enters or leaves attack.
-        return IsAttack(existing.Action) != IsAttack(proposed.Action);
-    }
-
-    private static bool IsAttack(CommanderAction action)
-        => action == CommanderAction.Attack;
-}
-
-internal static class ObjectiveFormationCore
-{
-    private const float GoldenAngleDegrees = 137.50777f;
-
-    internal static MapPoint DefensiveSector(
-        MapPoint objective,
-        float objectiveRadius,
-        int stableSlot)
-        => OffsetOnRing(objective, objectiveRadius, stableSlot, 0.45f, 5f, 28f);
-
-    internal static MapPoint AttackEntry(
-        MapPoint objective,
-        float objectiveRadius,
-        int stableSlot)
-        => OffsetOnRing(objective, objectiveRadius, stableSlot, 0.35f, 3f, 20f);
-
-    private static MapPoint OffsetOnRing(
-        MapPoint objective,
-        float objectiveRadius,
-        int stableSlot,
-        float radiusFraction,
-        float minimumOffset,
-        float maximumOffset)
-    {
-        if (!objective.IsFinite || !float.IsFinite(objectiveRadius))
-            return objective;
-
-        var radius = Math.Max(0f, objectiveRadius);
-        var offset = Math.Clamp(radius * radiusFraction, minimumOffset,
-            Math.Min(maximumOffset, Math.Max(minimumOffset, radius * 0.65f)));
-        var angle = MathF.PI / 180f *
-                    ((Math.Max(0, stableSlot) * GoldenAngleDegrees + 21f) % 360f);
-        return new MapPoint(
-            objective.X + MathF.Cos(angle) * offset,
-            objective.Z + MathF.Sin(angle) * offset);
-    }
-}
-
-internal static class SquadCohesionCore
-{
-    internal const float CommanderMemberRadiusMeters = 30f;
-    private const float MinimumStationaryAreaRadiusMeters = 14f;
-    private const float MaximumStationaryAreaRadiusMeters = 24f;
-
-    // A squad anchored on a dense building or trench line may spread along that
-    // whole fortification. Growing the stationary area up to this ceiling makes
-    // "cohesion" mean "same building/trench," not "same 24 m disc of grass," while
-    // still keeping the compact 14 m floor for lone or sparse positions.
-    internal const float MaximumClusterCohesionRadiusMeters = 36f;
-    private const int DenseClusterCandidateCount = 12;
-
-    internal static float StationaryAreaRadius(float objectiveRadius, int squadCount)
-    {
-        if (!float.IsFinite(objectiveRadius))
-            return MinimumStationaryAreaRadiusMeters;
-
-        var usableRadius = Math.Max(0f, objectiveRadius);
-        var divisor = MathF.Sqrt(Math.Max(1, squadCount));
-        return Math.Clamp(
-            usableRadius * 0.75f / divisor,
-            MinimumStationaryAreaRadiusMeters,
-            MaximumStationaryAreaRadiusMeters);
-    }
-
-    internal static float ClusterCohesionRadius(float baseRadius, int clusterCandidateCount)
-    {
-        if (!float.IsFinite(baseRadius))
-            return MinimumStationaryAreaRadiusMeters;
-
-        var usableBase = Math.Max(MinimumStationaryAreaRadiusMeters, baseRadius);
-        // Sparse areas keep the compact fighting radius; growth is reserved for a
-        // genuine cluster the squad can actually occupy shoulder to shoulder.
-        if (clusterCandidateCount < CoverClusterCore.MinimumClusterCandidates)
-            return usableBase;
-
-        var span = DenseClusterCandidateCount -
-                   (CoverClusterCore.MinimumClusterCandidates - 1);
-        var progress = Math.Clamp(
-            (clusterCandidateCount - (CoverClusterCore.MinimumClusterCandidates - 1)) /
-            (float)span,
-            0f,
-            1f);
-        var grown = usableBase +
-                    (MaximumClusterCohesionRadiusMeters - usableBase) * progress;
-        return Math.Clamp(
-            grown,
-            MinimumStationaryAreaRadiusMeters,
-            MaximumClusterCohesionRadiusMeters);
-    }
-
-    internal static bool AllowsCover(
-        MapPoint cover,
-        MapPoint leader,
-        float maximumRadius = CommanderMemberRadiusMeters)
-    {
-        if (!cover.IsFinite || !leader.IsFinite || !float.IsFinite(maximumRadius))
-            return false;
-
-        var allowed = Math.Max(0f, maximumRadius);
-        var x = (double)cover.X - leader.X;
-        var z = (double)cover.Z - leader.Z;
-        return x * x + z * z <= (double)allowed * allowed;
-    }
-}
 
 internal enum TacticalStance
 {
@@ -414,50 +251,462 @@ internal enum TacticalStance
     Prone
 }
 
-internal static class TacticalPoseStabilityCore
+/// <summary>
+/// Who owns a soldier's pose this frame. Exactly one owner writes the pose channel,
+/// chosen by the arbiter in strict priority order, so two systems can no longer
+/// propose conflicting poses through a shared latch (the structural generator of the
+/// prone&lt;-&gt;crouch loops and blocked-upgrade stalls of plans 004/008/012/013).
+/// A numerically higher owner outranks a lower one.
+/// </summary>
+internal enum PoseOwner
+{
+    // The native favourite pose - no mod override.
+    None = 0,
+
+    // A movement halt with no tactical owner (stall, grenade-safety). Latch-only floor:
+    // it stops locomotion at a sane stance but never overrides the native favourite
+    // pose, so ownerless halts behave exactly as they did before the arbiter.
+    HaltFallback = 1,
+
+    // g: defensive / contact / tactical crouch owners (ShouldOwnCrouch) -> Crouch.
+    TacticalCrouch = 2,
+
+    // f: suppression band / recovery (SuppressionRecoveryPoseCore) off owned cover.
+    SuppressionRecovery = 3,
+
+    // e: cover-geometry evaluation on an owned cover slot (with downgrade hysteresis).
+    CoverEvaluation = 4,
+
+    // d: muzzle-clearance stand (OwnsCurrentCoverClearancePose) -> Idle.
+    CoverClearance = 5,
+
+    // c2: the MOVEMENT contract (plan 019). The committed movement decision is actually
+    // moving this soldier, so the pose is the movement pose and never Prone - a bounding
+    // man cannot also be crawling. It outranks every FIGHTING pose below it (they would
+    // otherwise put a moving soldier on his belly) and yields to every SAFETY pose above
+    // it, which is exactly where the two ladders meet: see PoseMovementContractCore.
+    MovementPose = 6,
+
+    // c: tank-hide danger prone / owned cover hide (plan 013 bounded owner).
+    TankHide = 7,
+
+    // b: pinned / on-fire / flame safety (SuppressionPose) - instant.
+    Suppression = 8,
+
+    // a: required-action safety (exposed reload / bandage prone).
+    RequiredAction = 9
+}
+
+/// <summary>
+/// The contract between the MOVEMENT ladder (<see cref="MovementOwner"/>, plan 018) and the
+/// POSE ladder (<see cref="PoseOwner"/>, plan 014). Each was internally consistent but they
+/// did not talk to each other, so a soldier could be granted a bound (CommittedMove /
+/// OrderedMove) while the pose ladder independently held him Prone from a cover evaluation
+/// or a suppression recovery. He then crawled, made no progress, the movement watchdog
+/// stalled him, and the cycle repeated - the "prone loop they eventually escape".
+///
+/// The invariant that keeps the two ladders consistent, verified rank by rank:
+/// every pose owner ABOVE <see cref="PoseOwner.MovementPose"/> that can demand Prone has a
+/// movement owner at or above the halting ranks, so whenever pose insists on Prone for
+/// SAFETY the movement ladder is already halting -
+///   RequiredAction (ExposedReloadProneOwned) -> MovementOwner.SafetyHalt,
+///   Suppression    (pinned / on fire)        -> MovementOwner.PinnedHold / SafetyHalt,
+///   TankHide       (IsHidingFromTank)        -> MovementOwner.TankHide,
+/// each of which <see cref="MovementArbiterCore.Halts"/> reports as halting. The single
+/// exception is <see cref="MovementOwner.HazardEscape"/>, the one GRANT above the halts: a
+/// man leaving a flame keeps running, so the pose ranks above this one carry the same
+/// "not while evading flame" carve-out the pinned rank always had, and the escape resolves
+/// here to the movement pose instead of to a prone safety pose.
+/// </summary>
+internal static class PoseMovementContractCore
+{
+    /// <summary>
+    /// True when the committed movement decision is actually MOVING this soldier, so the
+    /// movement channel owns his pose. A halting owner never owns it (that is the halt
+    /// case: a stationary soldier keeps his evaluated fighting pose, prone included).
+    /// <see cref="MovementOwner.Free"/> means this mod wrote nothing this frame, so it only
+    /// counts when the soldier is natively moving anyway - otherwise every soldier the mod
+    /// is not touching would be forced out of a prone-protective cover slot.
+    /// </summary>
+    internal static bool MovementOwnsPose(
+        MovementOwner committed,
+        bool halted,
+        bool nativelyMoving)
+    {
+        if (halted || MovementArbiterCore.Halts(committed))
+            return false;
+        if (MovementArbiterCore.Grants(committed))
+            return true;
+        return committed == MovementOwner.Free && nativelyMoving;
+    }
+
+    /// <summary>
+    /// The pose a moving soldier takes. Crouch, matching the pre-arbiter
+    /// ApplyTacticalMovementPose precedent and vision.md's "low posture" for a resumed
+    /// advance: the game's native crouch-walk/crouch-sprint still carries him forward,
+    /// which prone does not.
+    /// </summary>
+    internal static TacticalStance MovementStance => TacticalStance.Crouched;
+}
+
+/// <summary>
+/// Owner-aware anti-flicker latch for the single pose arbiter. Because the arbiter
+/// hands the latch exactly one (owner, pose) per frame, persistent disagreement is
+/// impossible; this core only shapes the transitions so independent native/tactical
+/// updates cannot animate a soldier between stances every frame. It replaces the
+/// pair-latch's <c>RenewHoldUntil</c> starvation rule (deleted): that rule renewed the
+/// hold forever while a lower-pose owner was active, which permanently blocked a
+/// legitimate stand (W3). MinimumHoldSeconds keeps its meaning and value.
+/// </summary>
+internal static class PoseArbiterCore
 {
     // A downward safety reaction may happen immediately. A more exposed stance is
     // deliberately slower so independent native/tactical updates cannot animate a
     // soldier between prone and crouched every frame.
     internal const float MinimumHoldSeconds = 3.5f;
 
-    internal static float RenewHoldUntil(
-        float now,
-        float holdUntil,
-        bool lowerPoseStillOwned)
-    {
-        if (!lowerPoseStillOwned || !float.IsFinite(now))
-            return holdUntil;
-
-        var renewed = now + MinimumHoldSeconds;
-        return float.IsNaN(holdUntil) || renewed > holdUntil
-            ? renewed
-            : holdUntil;
-    }
-
-    internal static bool ShouldAccept(
-        TacticalStance current,
-        TacticalStance proposed,
-        float now,
-        float holdUntil,
-        bool lowerPoseStillOwned)
-    {
-        if (!float.IsFinite(now) || !float.IsFinite(holdUntil) || current == proposed)
-            return false;
-
-        if (ProtectionRank(proposed) > ProtectionRank(current))
-            return true;
-
-        return !lowerPoseStillOwned && now >= holdUntil;
-    }
-
-    private static int ProtectionRank(TacticalStance stance)
+    internal static int ProtectionRank(TacticalStance stance)
         => stance switch
         {
             TacticalStance.Prone => 2,
             TacticalStance.Crouched => 1,
             _ => 0
         };
+
+    /// <param name="proposedMeasuredStand">The proposing owner is the cover
+    /// clearance/evaluation owner raising its OWN soldier to a stand (Idle) it just
+    /// measured - accepted immediately so the clearance system can actually clear the
+    /// muzzle it believes it owns (fixes W3).</param>
+    internal static bool ShouldAccept(
+        PoseOwner currentOwner,
+        TacticalStance currentStance,
+        PoseOwner proposedOwner,
+        TacticalStance proposedStance,
+        bool proposedMeasuredStand,
+        float now,
+        float holdUntil)
+    {
+        if (!float.IsFinite(now) || !float.IsFinite(holdUntil))
+            return false;
+
+        // The committed (owner, pose) is unchanged.
+        if (currentOwner == proposedOwner && currentStance == proposedStance)
+            return false;
+
+        // Same committed stance, only the owner label changes: no visible motion, so
+        // relabel at once (keeps the owner comparison current for the next proposal).
+        if (currentStance == proposedStance)
+            return true;
+
+        // A more protective (more covered) stance is always safe to adopt immediately;
+        // any cover-re-evaluation hysteresis has already been applied upstream.
+        if (ProtectionRank(proposedStance) > ProtectionRank(currentStance))
+            return true;
+
+        // A higher-priority owner takes over immediately (safety handoff), even to a
+        // more exposed stance (e.g. cover clearance standing to clear a muzzle).
+        if ((int)proposedOwner > (int)currentOwner)
+            return true;
+
+        // The same owner explicitly measured a stand it needs (W3).
+        if (proposedOwner == currentOwner && proposedMeasuredStand)
+            return true;
+
+        // Otherwise raising to a more exposed stance, or a lower-priority owner taking
+        // over from a released higher one: wait out the anti-flicker hold.
+        return now >= holdUntil;
+    }
+}
+
+/// <summary>
+/// The single priority ladder for the FIRE channel (plan 017), the exact mirror of
+/// <see cref="PoseOwner"/> for poses. Numerically higher wins. One resolver produces one
+/// blocker per soldier per frame and one write site applies it, so the old
+/// set-a-flag/consume-it-later restore handshake (<c>FireRestorePending</c>) - which
+/// could leave a soldier permanently mute after a transition nobody re-ran - cannot be
+/// reconstructed. <see cref="None"/> is the DEFAULT: absent a reason to withhold the
+/// trigger, the soldier may fire.
+/// </summary>
+internal enum FireBlocker
+{
+    // g: no blocker - the soldier may fire.
+    None = 0,
+
+    // f: moving without a weapon/range combination that permits moving fire.
+    Moving = 1,
+
+    // e: beyond the weapon's engagement range, or small arms against armor.
+    Range = 2,
+
+    // d: the brief shock reaction to being pinned (bounded by PinnedFireBlockedUntil).
+    PinnedShock = 3,
+
+    // c: lethal hazard - on fire or evading flame.
+    Hazard = 4,
+
+    // b: a required action owns the soldier (exposed reload / bandage).
+    RequiredAction = 5,
+
+    // a: not the mod's flag to write (dead, mounted, or not autonomous) - passthrough.
+    NativeControl = 6
+}
+
+/// <summary>
+/// Pure ordering rule for the fire channel. Every input is an existing predicate; this
+/// core only decides which one wins so the ordering is testable and lives in one place.
+/// </summary>
+internal static class FireArbiterCore
+{
+    internal static FireBlocker Resolve(
+        bool nativeControlled,
+        bool requiredAction,
+        bool hazard,
+        bool pinnedShock,
+        bool rangeInhibited,
+        bool movingWithoutMovingFire)
+    {
+        if (nativeControlled)
+            return FireBlocker.NativeControl;
+        if (requiredAction)
+            return FireBlocker.RequiredAction;
+        if (hazard)
+            return FireBlocker.Hazard;
+        if (pinnedShock)
+            return FireBlocker.PinnedShock;
+        if (rangeInhibited)
+            return FireBlocker.Range;
+        if (movingWithoutMovingFire)
+            return FireBlocker.Moving;
+        return FireBlocker.None;
+    }
+
+    internal static bool MayFire(FireBlocker blocker) => blocker == FireBlocker.None;
+}
+
+/// <summary>
+/// Who owns a soldier's LOCOMOTION this frame (plan 018) - the third and last channel to
+/// get the treatment plans 014 (pose) and 017 (fire) gave theirs. Exactly one owner writes
+/// <c>moveCharacter</c>/<c>StopMove</c> per frame, chosen in strict priority order from the
+/// existing timers and flags, so "who stopped this soldier?" is answerable from one
+/// function instead of from seven independent halt sites coordinating through four
+/// overlapping channels. A numerically higher owner outranks a lower one. Every owner
+/// either HALTS or GRANTS; <see cref="Free"/> means the mod has nothing to say this frame
+/// and native locomotion is left completely untouched.
+/// </summary>
+internal enum MovementOwner
+{
+    // Native locomotion - no mod override, nothing is written.
+    Free = 0,
+
+    // A mod-granted move along an existing order / attack route. It has no persistent
+    // flag: the site that just released its own hold declares it.
+    OrderedMove = 1,
+
+    // A committed relocation to a chosen cover slot (ContactResponseState.Relocating).
+    // Above OrderedMove so a transient contact cannot interrupt a dash already underway.
+    CommittedMove = 2,
+
+    // A reached fighting position held for its minimum hold (HoldCoverUntil, on cover).
+    CoverHold = 3,
+
+    // A contact fighting halt (MovementInhibitedByContactResponse / EngagementHoldUntil).
+    EngagementHold = 4,
+
+    // The bounded lateral dispersion step out of a stacked halt (plan 018 item 3). It
+    // outranks exactly the two fighting halts it steps out of and nothing else, and it is
+    // bounded by HaltSpacingMoveUntil so it can never become a movement mode.
+    HaltSpacing = 5,
+
+    // Infantry holding still to stay masked from armor (AiState.TankCoverHideUntil).
+    TankHide = 6,
+
+    // Pinned: suppression owns locomotion (SuppressionMovementOwned).
+    PinnedHold = 7,
+
+    // Evading an active flame - the ONE owner above the halts that GRANTS movement. A
+    // soldier inside the beaten zone of a flamethrower leaves it even while pinned, which
+    // is why the halt sites used to be individually guarded by !flameEvading.
+    HazardEscape = 8,
+
+    // Burning, a required action (reload/bandage), a grenade-safety halt, or the movement
+    // watchdog's stall recovery hold. Nothing moves through this.
+    SafetyHalt = 9
+}
+
+/// <summary>
+/// Pure ordering rule for the movement channel - the exact mirror of
+/// <see cref="FireArbiterCore"/> for fire and the <see cref="PoseOwner"/> ladder for pose.
+/// Every input is an existing predicate; this core only decides which one wins, so the
+/// ordering is testable and lives in one place. <paramref name="declared"/> is the owner a
+/// caller claims for itself (an ordered move it just released, a grenade-safety halt with
+/// no state of its own); it competes at its own rank like any other owner rather than
+/// bypassing the ladder.
+/// </summary>
+internal static class MovementArbiterCore
+{
+    internal static MovementOwner Resolve(
+        MovementOwner declared,
+        bool safetyHalt,
+        bool hazardEscape,
+        bool pinnedHold,
+        bool tankHide,
+        bool haltSpacing,
+        bool engagementHold,
+        bool coverHold,
+        bool committedMove)
+    {
+        var resolved = MovementOwner.Free;
+        if (committedMove)
+            resolved = MovementOwner.CommittedMove;
+        if (coverHold)
+            resolved = MovementOwner.CoverHold;
+        if (engagementHold)
+            resolved = MovementOwner.EngagementHold;
+        if (haltSpacing)
+            resolved = MovementOwner.HaltSpacing;
+        if (tankHide)
+            resolved = MovementOwner.TankHide;
+        if (pinnedHold)
+            resolved = MovementOwner.PinnedHold;
+        if (hazardEscape)
+            resolved = MovementOwner.HazardEscape;
+        if (safetyHalt)
+            resolved = MovementOwner.SafetyHalt;
+        return (int)declared > (int)resolved ? declared : resolved;
+    }
+
+    internal static bool Halts(MovementOwner owner)
+        => owner is MovementOwner.SafetyHalt or MovementOwner.PinnedHold or
+                    MovementOwner.TankHide or MovementOwner.EngagementHold or
+                    MovementOwner.CoverHold;
+
+    internal static bool Grants(MovementOwner owner)
+        => owner is MovementOwner.HazardEscape or MovementOwner.HaltSpacing or
+                    MovementOwner.CommittedMove or MovementOwner.OrderedMove;
+}
+
+/// <summary>
+/// Halt spacing (plan 018 item 3, deferred here by plan 016). No halt path used to check
+/// the distance to an already-halted squadmate, so a squad walking one path stacked at the
+/// first LOS-opening doorway or crest. Consolidating locomotion into one write site makes
+/// ONE check possible: before a fighting halt freezes a soldier on top of a halted
+/// neighbour, he takes one short lateral step off the threat axis first. Sideways, because
+/// stepping across the line of fire is what actually clears the doorway without walking
+/// him toward the enemy. If the step is unreachable the soldier halts anyway - this is one
+/// bounded step on the rising edge of a halt, never a loop and never a formation manager.
+/// </summary>
+internal static class HaltSpacingCore
+{
+    // Roughly two body widths plus a rifle: closer than this and two men share a doorway.
+    internal const float MinimumSpacingMeters = 2.5f;
+    internal const float LateralStepMeters = 2.5f;
+
+    // The step is granted for a bounded window and re-checked only after a long cooldown,
+    // so a soldier can never oscillate between stepping and halting.
+    internal const float StepWindowSeconds = 1.25f;
+    internal const float RecheckCooldownSeconds = 6f;
+
+    /// <summary>
+    /// Returns the horizontal step that opens the gap, or false when the pair is already
+    /// adequately spaced (the caller then halts normally).
+    /// </summary>
+    internal static bool TryResolveStep(
+        MapPoint self,
+        MapPoint neighbour,
+        MapPoint threat,
+        bool hasThreat,
+        out MapPoint step)
+    {
+        step = default;
+        if (!self.IsFinite || !neighbour.IsFinite)
+            return false;
+
+        var awayX = self.X - neighbour.X;
+        var awayZ = self.Z - neighbour.Z;
+        var awaySqr = awayX * awayX + awayZ * awayZ;
+        if (awaySqr > MinimumSpacingMeters * MinimumSpacingMeters)
+            return false;
+
+        var dirX = 0f;
+        var dirZ = 0f;
+        if (hasThreat && threat.IsFinite)
+        {
+            var threatX = threat.X - self.X;
+            var threatZ = threat.Z - self.Z;
+            var threatLength = MathF.Sqrt(threatX * threatX + threatZ * threatZ);
+            if (threatLength > 0.01f)
+            {
+                dirX = -threatZ / threatLength;
+                dirZ = threatX / threatLength;
+            }
+        }
+
+        if (dirX == 0f && dirZ == 0f)
+        {
+            // No usable threat axis: step straight away from the neighbour instead.
+            var awayLength = MathF.Sqrt(awaySqr);
+            if (awayLength > 0.01f)
+            {
+                dirX = awayX / awayLength;
+                dirZ = awayZ / awayLength;
+            }
+            else
+            {
+                dirX = 1f;
+            }
+        }
+        else if (dirX * awayX + dirZ * awayZ < 0f)
+        {
+            // Take the side of the lateral axis that increases the gap.
+            dirX = -dirX;
+            dirZ = -dirZ;
+        }
+
+        step = new MapPoint(dirX * LateralStepMeters, dirZ * LateralStepMeters);
+        return true;
+    }
+}
+
+/// <summary>
+/// Weapon roles for the moving-fire rule. vision.md is explicit: ordinary rifles and
+/// machine guns do not fire while moving; only appropriate submachine guns do, at close
+/// range. The rifle band therefore exists only as an opt-in configuration (default 0 =
+/// off) so the shipped default keeps the vision rule.
+/// </summary>
+internal enum MovingFireWeapon
+{
+    Rifle,
+    SubmachineGun,
+    MachineGun,
+    Launcher
+}
+
+internal static class MovingFireCore
+{
+    internal static bool Allows(
+        bool restrictionEnabled,
+        MovingFireWeapon weapon,
+        bool hasVisibleTarget,
+        float targetDistance,
+        float submachineGunMaxDistance,
+        float rifleMaxDistance)
+    {
+        if (!restrictionEnabled)
+            return true;
+
+        // Machine guns and launchers halt and brace; they have no moving-fire band.
+        var maximumDistance = weapon switch
+        {
+            MovingFireWeapon.SubmachineGun => submachineGunMaxDistance,
+            MovingFireWeapon.Rifle => rifleMaxDistance,
+            _ => 0f
+        };
+
+        if (!(maximumDistance > 0f) || !hasVisibleTarget || !float.IsFinite(targetDistance))
+            return false;
+
+        return targetDistance <= maximumDistance;
+    }
 }
 
 /// <summary>
@@ -555,9 +804,7 @@ internal readonly record struct SoldierTacticalSnapshot(
     bool Autonomous = false,
     bool HasPlayerHoldOrder = false,
     bool HasProtectedAssignment = false,
-    bool TankThreat = false,
-    bool HasCommanderIntent = false,
-    MapPoint CommanderIntentDestination = default);
+    bool TankThreat = false);
 
 /// <summary>
 /// Identifies which system submitted a tactical proposal. Member order IS the
@@ -577,7 +824,6 @@ internal enum ProposalSource
     CoverHold,
     Contact,
     TankFear,
-    Commander,
     Native
 }
 
@@ -778,13 +1024,14 @@ internal static class CombatMovementPolicyCore
         bool hasAttackRoute,
         bool coveringFireEstablished,
         bool maximumHaltReached,
+        bool maximumOnCoverHaltReached,
         bool underDirectFire,
         bool pinned,
         bool onUsableCover,
         float coverHoldUntil,
         float now)
     {
-        if (!hasAttackRoute || underDirectFire || pinned ||
+        if (!hasAttackRoute || pinned ||
             float.IsNaN(now) || float.IsInfinity(now) ||
             float.IsNaN(coverHoldUntil))
         {
@@ -796,14 +1043,103 @@ internal static class CombatMovementPolicyCore
             if (now < coverHoldUntil)
                 return false;
 
-            // A deadline may unstick an exposed assault, but it is never enough by
-            // itself to pull a soldier out of a useful fighting position. Leaving
-            // real cover requires coordinated covering fire.
-            return coveringFireEstablished;
+            // Direct fire is a strong reason to stay, not a veto with no escape
+            // (plan 015 / D1): once the longer on-cover halt cap expires it
+            // authorizes the bound even under sustained fire, so an enemy firing
+            // more often than the direct-fire cue's lifetime can no longer freeze
+            // a covered squad forever.
+            if (underDirectFire)
+                return maximumOnCoverHaltReached;
+
+            return coveringFireEstablished || maximumOnCoverHaltReached;
         }
 
+        // In the open, direct fire no longer vetoes the bound: lying in a beaten
+        // zone with no cover is worse than bounding to the next position, so the
+        // maximum-halt escape must still be able to fire here.
         return coveringFireEstablished || maximumHaltReached;
     }
+
+    /// <summary>
+    /// D3 (plan 015): the mover's own preconditions for a coordinated attack
+    /// advance no longer require the mover to have fired himself — a soldier
+    /// whose cover slot has no firing lane was otherwise permanently ineligible.
+    /// </summary>
+    internal static bool MoverQualifiesForAttackAdvance(
+        IntPtr targetToken,
+        int moverSquadId,
+        IntPtr moverAttackContactToken)
+        => targetToken != IntPtr.Zero && moverSquadId != 0 &&
+           moverAttackContactToken == targetToken;
+
+    /// <summary>
+    /// D2 (plan 015): a squadmate's fresh stationary shot at ANY confirmed enemy
+    /// counts as covering fire — it no longer has to match the mover's own target
+    /// token, which broke down whenever squadmates engaged different visible
+    /// enemies.
+    /// </summary>
+    internal static bool IsCoveringFireEstablished(
+        int moverSquadId,
+        int candidateSquadId,
+        IntPtr candidateLastShotTargetToken,
+        bool candidateShotWasStationary,
+        bool candidateRelocating,
+        bool candidatePinned,
+        bool candidateSuppressionMovementOwned,
+        float candidateLastShotAt,
+        float now,
+        float freshnessSeconds)
+        => candidateSquadId == moverSquadId &&
+           candidateLastShotTargetToken != IntPtr.Zero &&
+           candidateShotWasStationary && !candidateRelocating &&
+           !candidatePinned && !candidateSuppressionMovementOwned &&
+           now - candidateLastShotAt <= freshnessSeconds;
+}
+
+internal readonly record struct PinnedReleaseDecision(bool Released, bool GrantsImmunity);
+
+internal static class PinnedReleaseCore
+{
+    /// <summary>
+    /// Decides when a suppression-based pin releases. The normal rule (today's
+    /// behavior) requires the minimum-hold timer to expire and suppression to
+    /// fall to the release threshold. A bounded time cap additionally forces a
+    /// release regardless of suppression so an attacker under sustained fire in
+    /// the open is not pinned forever; that release path alone grants a short
+    /// re-pin immunity window so the same incoming fire cannot instantly re-pin
+    /// the soldier before it can act on the release.
+    /// </summary>
+    internal static PinnedReleaseDecision EvaluatePinnedRelease(
+        float pinnedSince,
+        float pinnedUntil,
+        int suppression,
+        int releaseSuppressionThreshold,
+        float maximumPinnedSeconds,
+        float now)
+    {
+        if (float.IsNaN(now) || float.IsInfinity(now) || float.IsNaN(pinnedSince))
+            return new PinnedReleaseDecision(false, false);
+
+        if (now - pinnedSince >= maximumPinnedSeconds)
+            return new PinnedReleaseDecision(true, true);
+
+        if (now >= pinnedUntil && suppression <= releaseSuppressionThreshold)
+            return new PinnedReleaseDecision(true, false);
+
+        return new PinnedReleaseDecision(false, false);
+    }
+
+    /// <summary>
+    /// Decides whether fresh suppression should (re-)engage a pin. A soldier still
+    /// inside its post-time-cap-release immunity window is not re-pinned regardless
+    /// of suppression; once immunity lapses, ordinary suppression pins normally.
+    /// </summary>
+    internal static bool ShouldEngagePin(
+        int suppression,
+        int proneSuppressionThreshold,
+        float immunityUntil,
+        float now)
+        => suppression >= proneSuppressionThreshold && now >= immunityUntil;
 }
 
 internal static class ExternalMovementPolicyCore
@@ -932,14 +1268,6 @@ internal static class ProposalGenerationCore
                 ProposalSource.TankFear, snapshot.ThreatPosition, "armor threat"));
         }
 
-        if (snapshot.HasCommanderIntent)
-        {
-            destination.Add(new TacticalProposal(
-                TacticalChannel.Movement, TacticalAction.Move, CommandAuthority.CommanderIntent,
-                ProposalSource.Commander, snapshot.CommanderIntentDestination,
-                "accepted squad intent"));
-        }
-
         if (snapshot.Suppressed)
         {
             destination.Add(new TacticalProposal(
@@ -1035,268 +1363,10 @@ internal static class DefensivePositionOwnershipCore
     }
 }
 
-internal static class StrategicPostureCore
-{
-    internal static StrategicPosture FromObjectiveOwnership(bool factionOwnsObjective)
-        => factionOwnsObjective ? StrategicPosture.Defend : StrategicPosture.Attack;
-
-    internal static StrategicPosture Resolve(
-        bool ownershipKnown,
-        bool factionOwnsObjective,
-        StrategicPosture? previousPosture,
-        StrategicPosture ambiguousFallback)
-    {
-        if (ownershipKnown)
-            return FromObjectiveOwnership(factionOwnsObjective);
-
-        // A contested objective may temporarily report no secured owner. Treating
-        // that transient state as enemy ownership makes both sides assault it and
-        // tears down every defensive position. Retain the last valid posture.
-        return previousPosture ?? ambiguousFallback;
-    }
-}
-
-internal readonly record struct ObjectiveCandidate(int Id, float Score, bool FriendlySecured);
-
-internal static class ObjectiveSelectionCore
-{
-    internal const float FriendlySecuredPenaltyMeters = 140f;
-
-    // Returns the chosen candidate Id, or null when candidates is empty.
-    internal static int? Select(
-        IReadOnlyList<ObjectiveCandidate> candidates,
-        bool attackerSide,
-        int? currentObjectiveId)
-    {
-        if (candidates.Count == 0)
-            return null;
-
-        if (!attackerSide)
-            return SelectByScore(candidates);
-
-        var unsecured = candidates.Where(candidate => !candidate.FriendlySecured).ToArray();
-        if (unsecured.Length == 0)
-            return SelectByScore(candidates);
-
-        // Flicker guard: once the side has committed to an unsecured objective, a
-        // captured objective that transiently reads "unsecured" while contested
-        // cannot pull the side back off it.
-        if (currentObjectiveId is { } currentId &&
-            unsecured.Any(candidate => candidate.Id == currentId))
-            return currentId;
-
-        return SelectByScore(unsecured);
-    }
-
-    private static int? SelectByScore(IReadOnlyList<ObjectiveCandidate> candidates)
-    {
-        int? bestId = null;
-        var bestScore = float.MaxValue;
-        var bestTieId = int.MaxValue;
-
-        foreach (var candidate in candidates)
-        {
-            var effectiveScore = candidate.Score +
-                (candidate.FriendlySecured ? FriendlySecuredPenaltyMeters : 0f);
-            if (effectiveScore < bestScore - 0.01f ||
-                MathF.Abs(effectiveScore - bestScore) <= 0.01f && candidate.Id < bestTieId)
-            {
-                bestId = candidate.Id;
-                bestScore = effectiveScore;
-                bestTieId = candidate.Id;
-            }
-        }
-
-        return bestId;
-    }
-}
-
 internal static class GroundAuthorityCore
 {
     internal static bool CanMutate(bool multiplayerActive, bool isHost)
         => !multiplayerActive || isHost;
-}
-
-internal enum ArmorRoleAssignment
-{
-    AssaultSupport,
-    FlankSupport,
-    Reserve
-}
-
-internal readonly record struct ArmorTankState(
-    int Id,
-    float HullFraction,
-    float Suppression,
-    float EffectivePower);
-
-/// <summary>
-/// Persisted allocation state carried between planning ticks. Roles are frozen
-/// (sticky) unless <see cref="ArmorRoleAllocationCore"/> detects one of its
-/// explicit rebuild triggers — never as a side effect of a continuously varying
-/// suppression or power reading.
-/// </summary>
-internal sealed record ArmorRoleAllocationState(
-    IReadOnlyDictionary<int, ArmorRoleAssignment> Roles,
-    IReadOnlyCollection<int> ReserveForCause,
-    bool MainAxisUsable,
-    bool FlankAxisUsable,
-    int DesiredReserveCount)
-{
-    internal static readonly ArmorRoleAllocationState Empty = new(
-        new Dictionary<int, ArmorRoleAssignment>(),
-        Array.Empty<int>(),
-        false,
-        false,
-        0);
-}
-
-/// <summary>
-/// Pure armor role allocator. Roles rebuild only when the tank roster changes,
-/// a tank's damage/suppression reserve eligibility flips, axis usability
-/// changes, or the reserve top-up count changes — no term in that trigger
-/// varies continuously with suppression or EffectivePower, so a transient
-/// suppression spike cannot rotate tanks through Reserve or swap their axis.
-/// </summary>
-internal static class ArmorRoleAllocationCore
-{
-    internal const float ReserveHullEntryThreshold = 0.45f;
-    internal const float ReserveSuppressionEntryThreshold = 0.65f;
-    internal const float ReserveHullExitThreshold = 0.55f;
-    internal const float ReserveSuppressionExitThreshold = 0.45f;
-    internal const float ReserveFraction = 0.20f;
-    internal const int MinimumTanksForReserveTopUp = 3;
-
-    internal static ArmorRoleAllocationState Allocate(
-        IReadOnlyList<ArmorTankState>? tanks,
-        ArmorRoleAllocationState previous,
-        bool mainAxisUsable,
-        bool flankAxisUsable)
-    {
-        tanks ??= Array.Empty<ArmorTankState>();
-        if (tanks.Count == 0)
-            return ArmorRoleAllocationState.Empty;
-
-        var previousReserveForCause = previous.ReserveForCause ?? Array.Empty<int>();
-        var causeReserveIds = new HashSet<int>();
-        var tankSetChanged = tanks.Count != previous.Roles.Count;
-        var eligibilityFlipped = false;
-        foreach (var tank in tanks)
-        {
-            var wasCauseReserve = previousReserveForCause.Contains(tank.Id);
-            var stillCauseReserve = wasCauseReserve
-                ? !(tank.HullFraction >= ReserveHullExitThreshold &&
-                    tank.Suppression <= ReserveSuppressionExitThreshold)
-                : tank.HullFraction < ReserveHullEntryThreshold ||
-                  tank.Suppression > ReserveSuppressionEntryThreshold;
-
-            if (stillCauseReserve)
-                causeReserveIds.Add(tank.Id);
-            if (stillCauseReserve != wasCauseReserve)
-                eligibilityFlipped = true;
-            if (!previous.Roles.ContainsKey(tank.Id))
-                tankSetChanged = true;
-        }
-
-        var desiredReserveCount = tanks.Count >= MinimumTanksForReserveTopUp
-            ? (int)Math.Ceiling(tanks.Count * ReserveFraction)
-            : 0;
-        var axisUsabilityChanged = mainAxisUsable != previous.MainAxisUsable ||
-                                    flankAxisUsable != previous.FlankAxisUsable;
-        var reserveTopUpChanged = desiredReserveCount != previous.DesiredReserveCount;
-        var needsRebuild = previous.Roles.Count == 0 || tankSetChanged || eligibilityFlipped ||
-                           axisUsabilityChanged || reserveTopUpChanged;
-
-        if (!needsRebuild)
-        {
-            return previous with
-            {
-                ReserveForCause = causeReserveIds,
-                MainAxisUsable = mainAxisUsable,
-                FlankAxisUsable = flankAxisUsable,
-                DesiredReserveCount = desiredReserveCount
-            };
-        }
-
-        var roles = new Dictionary<int, ArmorRoleAssignment>();
-        var available = new List<ArmorTankState>();
-        foreach (var tank in tanks.OrderBy(tank => tank.Id))
-        {
-            if (causeReserveIds.Contains(tank.Id))
-                roles[tank.Id] = ArmorRoleAssignment.Reserve;
-            else
-                available.Add(tank);
-        }
-
-        var additionalReserves = Math.Max(0, desiredReserveCount - causeReserveIds.Count);
-        foreach (var tank in available
-                     .OrderBy(tank => tank.EffectivePower)
-                     .ThenBy(tank => tank.Id)
-                     .Take(additionalReserves)
-                     .ToArray())
-        {
-            roles[tank.Id] = ArmorRoleAssignment.Reserve;
-            available.Remove(tank);
-        }
-
-        if (!mainAxisUsable && !flankAxisUsable)
-        {
-            foreach (var tank in available)
-                roles[tank.Id] = ArmorRoleAssignment.Reserve;
-        }
-        else
-        {
-            var committedIndex = 0;
-            foreach (var tank in available.OrderBy(tank => tank.Id))
-            {
-                var useFlank = flankAxisUsable && (!mainAxisUsable || committedIndex % 2 == 1);
-                roles[tank.Id] = useFlank
-                    ? ArmorRoleAssignment.FlankSupport
-                    : ArmorRoleAssignment.AssaultSupport;
-                committedIndex++;
-            }
-        }
-
-        return new ArmorRoleAllocationState(
-            roles, causeReserveIds, mainAxisUsable, flankAxisUsable, desiredReserveCount);
-    }
-}
-
-internal static class AttackerPlannerCore
-{
-    internal static CommanderPlan Plan(CommanderPlanInput input)
-        => CommanderPlannerCore.Plan(input with { OffensiveOperation = true });
-}
-
-internal static class DefenderPlannerCore
-{
-    internal static CommanderPlan Plan(CommanderPlanInput input)
-    {
-        var plan = CommanderPlannerCore.Plan(input with { OffensiveOperation = false });
-        var positions = (input.Squads ?? Array.Empty<CommanderSquadSnapshot>())
-            .GroupBy(squad => squad.Id)
-            .ToDictionary(group => group.Key, group => group.First().Position);
-        var directives = plan.Directives
-            .Select(directive => directive with
-            {
-                Action = CommanderAction.Hold,
-                AxisId = null,
-                Destination = positions.TryGetValue(directive.SquadId, out var position)
-                    ? position
-                    : input.ObjectivePosition
-            })
-            .ToArray();
-
-        // Defenders occupy persistent objective sectors. Attack axes belong only
-        // to the attacker planner and must never leak into defensive directives.
-        return plan with
-        {
-            MainAxisId = null,
-            FlankAxisId = null,
-            AttackAuthorized = false,
-            Directives = directives
-        };
-    }
 }
 
 internal static class StaticWeaponAssignmentCore
@@ -1350,6 +1420,10 @@ internal sealed record DefenderAllocationPlan(
 
 internal static class DefenderAllocationCore
 {
+    // Was CommanderPlannerCore.ReserveFraction; inlined once the commander planner
+    // that owned that constant was removed.
+    internal const float ReserveFraction = 0.20f;
+
     internal static DefenderAllocationPlan Allocate(
         IReadOnlyList<DefenderSquadCandidate>? squads,
         IReadOnlyList<DefenderCrewCandidate>? crews,
@@ -1363,7 +1437,7 @@ internal static class DefenderAllocationCore
             .Select(group => group.OrderByDescending(squad => squad.EffectiveStrength).First())
             .ToArray();
         var reserveCount = availableSquads.Length >= 2
-            ? Math.Max(1, (int)Math.Ceiling(availableSquads.Length * CommanderPlannerCore.ReserveFraction))
+            ? Math.Max(1, (int)Math.Ceiling(availableSquads.Length * ReserveFraction))
             : 0;
         var reserve = availableSquads
             .OrderByDescending(squad => squad.PlannedReserve)
@@ -1580,21 +1654,29 @@ internal static class FortifiedPositionCore
     }
 }
 
-internal sealed class SupportRequestBrokerCore
+/// <summary>
+/// Was defined alongside the commander planner; relocated here (the pure-core
+/// home for the surviving tactical/defensive logic) because
+/// <see cref="ContactResponseCoverSearch"/>, <see cref="ContactResponseDefensiveOccupation"/>,
+/// and <c>EmplacementPatches</c> still consult it for native defend-order areas.
+/// </summary>
+internal static class DefensivePositioningCore
 {
-    private readonly HashSet<(int ObjectiveRevision, int SideId, int RequestId)> _accepted = new();
-
-    internal bool TryAccept(int objectiveRevision, int sideId, int requestId)
+    internal static bool IsInsideArea(
+        MapPoint position,
+        MapPoint center,
+        float radius,
+        float tolerance = 0f)
     {
-        if (objectiveRevision < 0 || sideId == 0 || requestId == 0)
+        if (!position.IsFinite || !center.IsFinite || !float.IsFinite(radius) ||
+            !float.IsFinite(tolerance))
+        {
             return false;
-        return _accepted.Add((objectiveRevision, sideId, requestId));
-    }
+        }
 
-    internal void AdvanceRevision(int objectiveRevision)
-    {
-        _accepted.RemoveWhere(entry => entry.ObjectiveRevision < objectiveRevision);
+        var allowed = Math.Max(0f, radius) + Math.Max(0f, tolerance);
+        var dx = (double)position.X - center.X;
+        var dz = (double)position.Z - center.Z;
+        return dx * dx + dz * dz <= (double)allowed * allowed;
     }
-
-    internal void Clear() => _accepted.Clear();
 }

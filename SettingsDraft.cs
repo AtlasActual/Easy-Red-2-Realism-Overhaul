@@ -9,6 +9,10 @@ internal sealed class SettingsDraft
     private readonly Dictionary<string, string> _baseline = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
 
+    // Null = no staged change to the DisabledSwitchSnapshot config entry this session.
+    // Non-null (including empty string) = a value to write on the next successful Apply.
+    private string? _pendingSnapshot;
+
     internal SettingsDraft()
     {
         foreach (var setting in SettingsCatalog.All)
@@ -19,7 +23,9 @@ internal sealed class SettingsDraft
         }
     }
 
-    internal bool IsDirty => _values.Any(pair => !_baseline.TryGetValue(pair.Key, out var baseline) || baseline != pair.Value);
+    internal bool IsDirty =>
+        _values.Any(pair => !_baseline.TryGetValue(pair.Key, out var baseline) || baseline != pair.Value) ||
+        (_pendingSnapshot != null && _pendingSnapshot != Settings.DisabledSwitchSnapshot.Value);
 
     internal string Get(MenuSetting setting) => _values[setting.Id];
 
@@ -42,10 +48,27 @@ internal sealed class SettingsDraft
     /// <summary>
     /// Sets every boolean system switch together without disturbing numeric tuning,
     /// input preferences, or the always-available F10 settings-menu shortcut.
+    /// Disabling stages a snapshot of the switches that were off beforehand so
+    /// <see cref="EnableAllSwitches"/> can restore the user's curated mix later.
     /// </summary>
     internal int SetAllSwitches(bool enabled)
     {
         var value = SettingsCatalog.FormatValue(enabled);
+        var falseValue = SettingsCatalog.FormatValue(false);
+
+        List<string>? offIdsBeforeFlatten = null;
+        if (!enabled)
+        {
+            offIdsBeforeFlatten = new List<string>();
+            foreach (var setting in SettingsCatalog.All)
+            {
+                if (setting.Entry.SettingType != typeof(bool) || !SettingsCatalog.IsSystemSwitch(setting))
+                    continue;
+                if (_values[setting.Id] == falseValue)
+                    offIdsBeforeFlatten.Add(setting.Id);
+            }
+        }
+
         var changed = 0;
         foreach (var setting in SettingsCatalog.All)
         {
@@ -57,8 +80,53 @@ internal sealed class SettingsDraft
             _values[setting.Id] = value;
         }
 
+        // Only remember a new mix when it actually changed something; if everything
+        // was already off, keep whatever snapshot (staged or persisted) already exists.
+        if (!enabled && changed > 0)
+            _pendingSnapshot = SerializeSnapshot(offIdsBeforeFlatten!);
+
         return changed;
     }
+
+    /// <summary>
+    /// Restores system switches from the staged-or-persisted DISABLE ALL snapshot,
+    /// leaving the switches that were off at snapshot time off and turning every
+    /// other system switch on. Falls back to enabling everything when no snapshot
+    /// exists. <paramref name="restored"/> reports whether a snapshot was used.
+    /// </summary>
+    internal int EnableAllSwitches(out bool restored)
+    {
+        var effectiveSnapshot = _pendingSnapshot ?? Settings.DisabledSwitchSnapshot.Value;
+        if (string.IsNullOrEmpty(effectiveSnapshot))
+        {
+            restored = false;
+            return SetAllSwitches(true);
+        }
+
+        var offIds = ParseSnapshot(effectiveSnapshot);
+        var trueValue = SettingsCatalog.FormatValue(true);
+        var falseValue = SettingsCatalog.FormatValue(false);
+        var changed = 0;
+        foreach (var setting in SettingsCatalog.All)
+        {
+            if (setting.Entry.SettingType != typeof(bool) || !SettingsCatalog.IsSystemSwitch(setting))
+                continue;
+
+            var target = offIds.Contains(setting.Id) ? falseValue : trueValue;
+            if (_values[setting.Id] != target)
+                changed++;
+            _values[setting.Id] = target;
+        }
+
+        _pendingSnapshot = string.Empty;
+        restored = true;
+        return changed;
+    }
+
+    private static string SerializeSnapshot(IEnumerable<string> offIds) => string.Join("\u001e", offIds);
+
+    private static HashSet<string> ParseSnapshot(string snapshot) =>
+        new(snapshot.Split('\u001e'), StringComparer.Ordinal);
 
     internal bool TryGetNormalizedValues(out IReadOnlyDictionary<string, string> values, out string error)
     {
@@ -98,6 +166,7 @@ internal sealed class SettingsDraft
 
         var config = Settings.ConfigFile;
         var oldValues = SettingsCatalog.All.ToDictionary(setting => setting.Id, setting => setting.Entry.GetSerializedValue());
+        var oldSnapshotValue = Settings.DisabledSwitchSnapshot.GetSerializedValue();
         var saveOnSet = config.SaveOnConfigSet;
 
         try
@@ -110,11 +179,15 @@ internal sealed class SettingsDraft
                 _values[setting.Id] = normalized;
             }
 
+            if (_pendingSnapshot != null)
+                Settings.DisabledSwitchSnapshot.SetSerializedValue(_pendingSnapshot);
+
             if (SettingsSyncController.ShouldPersistAppliedSettings)
                 config.Save();
 
             foreach (var setting in SettingsCatalog.All)
                 _baseline[setting.Id] = _values[setting.Id];
+            _pendingSnapshot = null;
 
             SettingsSyncController.NotifySettingsChanged();
             error = string.Empty;
@@ -124,6 +197,7 @@ internal sealed class SettingsDraft
         {
             foreach (var setting in SettingsCatalog.All)
                 setting.Entry.SetSerializedValue(oldValues[setting.Id]);
+            Settings.DisabledSwitchSnapshot.SetSerializedValue(oldSnapshotValue);
             error = "The settings could not be applied: " + ex.Message;
             return false;
         }

@@ -15,19 +15,17 @@ internal enum AiDebugCategory
     Danger = 1 << 4,
     Command = 1 << 5,
     Vehicle = 1 << 6,
-    Aircraft = 1 << 7,
     Support = 1 << 8,
     Events = 1 << 9,
     Performance = 1 << 10,
     All = Identity | Perception | Navigation | Combat | Danger | Command |
-          Vehicle | Aircraft | Support | Events | Performance
+          Vehicle | Support | Events | Performance
 }
 
 internal enum AiDebugProfileKind
 {
     Soldier,
     Vehicle,
-    Aircraft,
     Battle
 }
 
@@ -167,8 +165,6 @@ internal static class AiDebugTelemetry
     private static AiDebugCategory InferCategory(string message)
     {
         var text = message.ToLowerInvariant();
-        if (text.Contains("aircraft") || text.Contains("plane") || text.Contains("bomb"))
-            return AiDebugCategory.Aircraft;
         if (text.Contains("artillery") || text.Contains("smoke") || text.Contains("support"))
             return AiDebugCategory.Support;
         if (text.Contains("vehicle") || text.Contains("tank tactic") || text.Contains("transport"))
@@ -194,7 +190,7 @@ internal static class AiDebugTelemetry
     private static int ExtractEntityId(string message)
     {
         var text = message.AsSpan();
-        foreach (var marker in new[] { "soldier ", "vehicle ", "aircraft ", "plane " })
+        foreach (var marker in new[] { "soldier ", "vehicle " })
         {
             var markerIndex = message.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
             if (markerIndex < 0)
@@ -241,17 +237,6 @@ internal static class AiDebugVehicleProfilerPatch
     [HarmonyPostfix, HarmonyPriority(Priority.Last)]
     private static void Postfix(long __state)
         => AiDebugTelemetry.EndProfile(AiDebugProfileKind.Vehicle, __state);
-}
-
-[HarmonyPatch(typeof(AIPlane), "Update")]
-internal static class AiDebugAircraftProfilerPatch
-{
-    [HarmonyPrefix, HarmonyPriority(Priority.First)]
-    private static void Prefix(out long __state) => __state = AiDebugTelemetry.BeginProfile();
-
-    [HarmonyPostfix, HarmonyPriority(Priority.Last)]
-    private static void Postfix(long __state)
-        => AiDebugTelemetry.EndProfile(AiDebugProfileKind.Aircraft, __state);
 }
 
 [HarmonyPatch(typeof(BattleManager), "Update")]

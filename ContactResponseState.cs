@@ -15,19 +15,41 @@ internal sealed class ContactResponseState
     internal IntPtr RelocateDestinationPointer;
     internal Vector3 RelocateDestinationPosition;
     internal bool RelocationPausedBySuppression;
-    internal bool RelocationPausedByCloseFire;
     internal float NextRelocationAllowedAt;
     internal IntPtr ReservedCoverId;
     internal Vector3 ReservedCoverPosition;
     internal IntPtr FailedCoverId;
     internal float FailedCoverUntil;
     internal int ConsecutiveCoverSearchFailures;
+    // Tank-fear no-cover wait bound (TankCoverWaitCore): consecutive conclusive urgent
+    // tank-cover search misses and when the last one occurred, so a soldier with no
+    // reachable tank-masked cover resumes his orders instead of freezing prone forever.
+    internal int ConsecutiveTankCoverFailures;
+    internal float LastTankCoverFailureAt;
+    // Output of the fire arbiter (plan 017), not an input: ApplyFireDecision recomputes it
+    // every frame so the debug overlay and the suppressive-fire scheduler can read why the
+    // trigger is withheld. Nothing latches it.
     internal bool FireInhibitedByMovement;
     internal bool FireInhibitedByRange;
     internal bool FireInhibitedByArmoredTarget;
-    internal bool FireRestorePending;
+    // Last blocker the fire arbiter committed, so the verbose trace fires on the decision
+    // FLIP instead of every frame. Replaces the deleted FireRestorePending handshake flag.
+    internal FireBlocker LastFireBlocker;
     internal bool ContactResponseActive;
     internal bool MovementInhibitedByContactResponse;
+    // Outputs of the movement arbiter (plan 018), not inputs. ApplyMovementDecision is the
+    // only writer: MovementHalted is "the single write site stopped this soldier on its
+    // last apply" (it drives the halt-spacing rising edge, the close-contact relocation
+    // resume that RelocationPausedByCloseFire used to encode, and any future reader that
+    // needs the fact rather than one particular halt's flag), and LastMovementOwner exists
+    // so the verbose trace fires on the ownership FLIP instead of every frame.
+    internal bool MovementHalted;
+    internal MovementOwner LastMovementOwner;
+    // Halt spacing (plan 018 item 3): the bounded window during which the lateral
+    // dispersion step outranks the fighting halt it steps out of, and the long cooldown
+    // that guarantees the check runs at most once per halt episode.
+    internal float HaltSpacingMoveUntil;
+    internal float HaltSpacingNextCheckAt;
     internal bool SuppressionMovementOwned;
     internal bool SuppressionPoseOwned;
     internal bool SuppressionFireInhibited;
@@ -43,6 +65,8 @@ internal sealed class ContactResponseState
     internal bool Pinned;
     internal float PinnedUntil;
     internal float PinnedFireBlockedUntil;
+    internal float PinnedSince;
+    internal float PinnedImmunityUntil;
     internal float HoldCoverUntil;
     internal float ManeuverCoverMinimumHoldUntil;
     internal float ManeuverCoverReleaseUntil;
@@ -65,7 +89,6 @@ internal sealed class ContactResponseState
     internal int SquadId;
     internal IntPtr AttackContactToken;
     internal float AttackContactLastSeenAt;
-    internal bool HasFiredAtAttackContact;
     internal bool AttackConditionsWereFavorable;
     internal float AttackHaltStartedAt;
     internal bool AttackProgressForced;
@@ -82,16 +105,21 @@ internal sealed class ContactResponseState
     internal float PostureThreatPendingSince;
     internal bool HasLatchedTacticalPose;
     internal SoldierPose LatchedTacticalPose;
+    // Which owner currently holds the latched pose (single pose arbiter, plan 014). The
+    // owner-aware latch compares this against each frame's arbitrated owner to decide
+    // whether a transition is an immediate safety handoff or an anti-flicker-held change.
+    internal PoseOwner LatchedPoseOwner;
     internal float TacticalPoseHoldUntil;
     internal float CoverPostureDowngradeSince;
-    // GetFavouriteFightingPose stagger cache (round-robin K=3): the last decision-frame
-    // outcome of the non-safety pose resolution — whether the mod overrode the native
-    // favourite pose and with which pose — reused on this soldier's non-decision frames.
-    // HasFightingPoseCache stays false until the first full resolution so a first result
-    // is never deferred. The pinned/flame safety pose is recomputed every frame, above.
-    internal bool HasFightingPoseCache;
-    internal bool FightingPoseOverrode;
-    internal SoldierPose FightingPoseCached;
+    // Pose arbiter stagger cache (round-robin K=3): the last decision-frame outcome of
+    // the interop-heavy DECISION tail (owner ranks d-i) - the owner it resolved and the
+    // pose - reused on this soldier's non-decision frames by the maintain/favourite/
+    // write-through fast paths. HasArbiterCache stays false until the first full
+    // resolution so a first result is never deferred. The safety owners (required action,
+    // pinned/fire, tank-hide) are recomputed every frame above the cache.
+    internal bool HasArbiterCache;
+    internal PoseOwner ArbiterCachedOwner;
+    internal SoldierPose ArbiterCachedPose;
     internal InfantryCoverState CoverState;
     internal float NextUrgentCoverDecisionAt;
     internal bool MovementWatchActive;
@@ -132,10 +160,21 @@ internal static class InfantryCoverPolicy
     internal const int DefensiveDetailedCandidateLimit = 20;
     internal const int DefensiveNearestDetailedCandidateCount = 3;
     internal const float OccupancyRadiusMeters = 1.75f;
+    // SCORING-ONLY dispersion radius (plan 016): the range within which another
+    // soldier's cover reservation counts as a crowding neighbour in Score(). It is
+    // deliberately NOT a filter distance — every hard reservation/occupancy check
+    // keeps using the small OccupancyRadiusMeters above, because a 5 m exclusion
+    // would routinely leave a squad with zero eligible cover in a trench or building
+    // and strand soldiers in the open (plan 016 review).
+    internal const float CoverDispersionSpacingMeters = 5f;
     internal const float DecisionIntervalSeconds = 12f;
     internal const float MoveProgressWindowSeconds = 6f;
     internal const float RelocationCooldownSeconds = 15f;
+    // D5 (plan 015): the fighting-position minimum hold is split so an attacker
+    // with a live attack route rearms it for only a short assault tempo, while a
+    // soldier with no attack route (a defender) keeps the long hold.
     internal const float MinimumManeuverCoverHoldSeconds = 18f;
+    internal const float MinimumAttackCoverHoldSeconds = 7f;
     internal const float StandingCoverPenalty = 225f;
     internal const float DefensiveAnchorLeashMeters = 4f;
 }

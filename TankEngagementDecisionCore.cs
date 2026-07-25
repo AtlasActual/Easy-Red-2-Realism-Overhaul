@@ -112,9 +112,9 @@ internal static class TankEngagementDecisionCore
 }
 
 /// <summary>
-/// Pure predicates for the vehicle stall watchdog. A tank en route to a commander
-/// destination that makes no real progress is either nudged with one straight
-/// reverse or, after repeated failures, released so the commander can reassign it.
+/// Pure predicates for the vehicle stall watchdog. A tank en route to its native
+/// destination that makes no real progress is nudged with one straight reverse;
+/// repeated failures stop the recovery attempts instead of forcing progress.
 /// </summary>
 internal static class TankStallWatchdogCore
 {

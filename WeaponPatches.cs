@@ -114,25 +114,50 @@ internal static class HandheldWeaponClassifier
             if (gun == null)
                 return false;
 
-            // SMGs are close-assault weapons intended for controllable fire while
-            // moving. A machine gunner instead halts and braces the heavier weapon.
-            if (!IsSubmachineGun(gun))
-                return false;
-
             var target = TargetAcquisition.GetUsableAiTarget(ai) ??
                          TargetAcquisition.GetUsableSoldierTarget(soldier);
-            if (!TargetAcquisition.TryGetTargetSnapshot(target, out _, out var targetPosition))
-                return false;
+            var hasTarget = TargetAcquisition.TryGetTargetSnapshot(
+                target, out _, out var targetPosition);
+            var distance = 0f;
+            if (hasTarget)
+            {
+                var offset = targetPosition - soldier.transform.position;
+                offset.y = 0f;
+                distance = offset.magnitude;
+            }
 
-            var offset = targetPosition - soldier.transform.position;
-            offset.y = 0f;
-            return offset.sqrMagnitude <= Settings.AutomaticMovingFireMaxDistance.Value *
-                Settings.AutomaticMovingFireMaxDistance.Value;
+            var rifleBand = Settings.RifleMovingFireMaxDistance.Value;
+            return MovingFireCore.Allows(
+                true,
+                ClassifyForMovingFire(gun, rifleBand),
+                hasTarget,
+                distance,
+                Settings.AutomaticMovingFireMaxDistance.Value,
+                rifleBand);
         }
         catch
         {
             return false;
         }
+    }
+
+    // SMGs are close-assault weapons intended for controllable fire while moving. A
+    // machine gunner or launcher operator instead halts and braces the heavier weapon.
+    // Rifles have their own opt-in band - see MovingFireCore.
+    private static MovingFireWeapon ClassifyForMovingFire(GenericGun gun, float rifleBandMeters)
+    {
+        if (IsSubmachineGun(gun))
+            return MovingFireWeapon.SubmachineGun;
+
+        // With no rifle band configured (the vision.md default) every non-SMG halts, so
+        // the interop-heavy machine-gun/launcher distinction is not worth computing on
+        // the per-frame moving-fire path.
+        if (!(rifleBandMeters > 0f))
+            return MovingFireWeapon.MachineGun;
+
+        if (IsAntiTankLauncher(gun))
+            return MovingFireWeapon.Launcher;
+        return IsMachineGun(gun, true) ? MovingFireWeapon.MachineGun : MovingFireWeapon.Rifle;
     }
 
     internal static void EnforceEngagementRange(Soldier soldier, SoldierAI ai)
@@ -163,10 +188,10 @@ internal static class HandheldWeaponClassifier
                 return;
             }
 
+            // The flag is the arbiter's rank e input; ApplyFireDecision writes the
+            // permission and clears targetInWeaponRange.
             state.FireInhibitedByRange = true;
-            state.FireRestorePending = true;
-            GroundAiDirector.ExecuteSoldierFireInhibition(
-                ai, soldier, clearWeaponRange: true);
+            GroundAiDirector.ExecuteSoldierStopFire(soldier);
         }
         catch
         {
@@ -211,7 +236,6 @@ internal static class HandheldWeaponClassifier
         if (!state.FireInhibitedByArmoredTarget)
             ai.targetInWeaponRange = true;
         state.FireInhibitedByRange = false;
-        ContactResponse.RestoreFireAfterOwnedInhibition(ai, soldier);
     }
 
     private static bool TryGetMaximumEngagementDistance(
@@ -286,9 +310,7 @@ internal static class InfantryAntiArmorFireDiscipline
 
         var newlyInhibited = !state.FireInhibitedByArmoredTarget;
         state.FireInhibitedByArmoredTarget = true;
-        state.FireRestorePending = true;
-        GroundAiDirector.ExecuteSoldierFireInhibition(
-            ai, soldier, clearWeaponRange: true);
+        GroundAiDirector.ExecuteSoldierStopFire(soldier);
         if (newlyInhibited)
             AiState.Trace($"Anti-armor discipline: soldier {soldier.GetInstanceID()} withholding ineffective small-arms fire");
     }
@@ -342,6 +364,5 @@ internal static class InfantryAntiArmorFireDiscipline
         state.FireInhibitedByArmoredTarget = false;
         if (!state.FireInhibitedByRange)
             ai.targetInWeaponRange = true;
-        ContactResponse.RestoreFireAfterOwnedInhibition(ai, soldier);
     }
 }

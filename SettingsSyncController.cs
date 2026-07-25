@@ -118,9 +118,7 @@ internal sealed class SettingsSyncController : MonoBehaviour
             return;
 
         var properties = new Hashtable();
-        Il2CppSystem.String key = RoomPropertyKey;
-        Il2CppSystem.String value = payload;
-        properties[key] = value;
+        properties[MakeIl2CppString(RoomPropertyKey)] = MakeIl2CppString(payload);
 
         if (room.SetCustomProperties(properties))
         {
@@ -132,16 +130,17 @@ internal sealed class SettingsSyncController : MonoBehaviour
     [HideFromIl2Cpp]
     private void ReadHostSettings(Photon.Realtime.Room room)
     {
-        Il2CppSystem.String key = RoomPropertyKey;
-        var raw = room.CustomProperties?[key];
-        var payloadValue = raw?.TryCast<Il2CppSystem.String>();
-        if (payloadValue == null)
+        var raw = room.CustomProperties?[MakeIl2CppString(RoomPropertyKey)];
+        // Il2CppSystem.String has no registered IL2CPP class pointer, so casting
+        // to it throws "not an Il2Cpp reference type". Read the value through the
+        // object's native ToString instead.
+        var payload = raw == null ? null : raw.ToString();
+        if (string.IsNullOrEmpty(payload))
         {
             StatusLabel = "Client - waiting for host settings";
             return;
         }
 
-        var payload = (string)payloadValue;
         if (payload == _appliedPayload)
         {
             _clientOverrideActive = true;
@@ -228,6 +227,10 @@ internal sealed class SettingsSyncController : MonoBehaviour
             config.SaveOnConfigSet = saveOnSet;
         }
     }
+
+    [HideFromIl2Cpp]
+    private static Il2CppSystem.Object MakeIl2CppString(string value)
+        => new(IL2CPP.ManagedStringToIl2Cpp(value));
 
     [HideFromIl2Cpp]
     private static string BuildPayload()

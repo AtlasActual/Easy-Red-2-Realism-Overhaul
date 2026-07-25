@@ -11,6 +11,11 @@ internal static class TargetConfirmationCore
     // target was not being watched in between; the streak restarts.
     internal const float ContinuityBreakSeconds = 5f;
 
+    // A candidate seen this recently survives a single stale negative native
+    // scan; a fresh positive raycast (e.g. the fast close-range tick) beats one
+    // staggered negative sample instead of losing its whole observation streak.
+    internal const float RecentPositiveObservationGraceSeconds = 0.5f;
+
     // Native visibility samples arrive roughly once a second or faster; crediting
     // more than this per sample would count unobserved time as observation.
     internal const float MaxSampleCreditSeconds = 1.5f;

@@ -143,10 +143,10 @@ internal static class ModTimeProbe
 /// <summary>
 /// Diagnostic frame-time probe for hunting intermittent stutters. Whenever a frame
 /// takes far longer than the recent average, one log line records what coincided
-/// with it: managed GC collections, a commander planning tick, a detailed cover
-/// search, a casualty-suppression batch, the current soldier count, and how much
-/// of the frame the mod's own patches accounted for. A spike with none of those
-/// markers points at native/game-side work instead of the mod.
+/// with it: managed GC collections, a detailed cover search, a casualty-suppression
+/// batch, the current soldier count, and how much of the frame the mod's own
+/// patches accounted for. A spike with none of those markers points at
+/// native/game-side work instead of the mod.
 /// Diagnostic-only; never changes AI decisions or synchronized gameplay.
 /// </summary>
 internal static class StutterProbe
@@ -155,9 +155,12 @@ internal static class StutterProbe
     private const float SpikeFactor = 2.5f;
     private const float LogCooldownSeconds = 1f;
 
+    private const float CacheCensusIntervalSeconds = 30f;
+
     private static float _lastFrameAt = -1f;
     private static float _smoothedFrameSeconds = 1f / 60f;
     private static float _nextLogAllowedAt;
+    private static float _nextCacheCensusAt;
     private static int _lastSoldierCount = -1;
     private static long _lastIl2CppUsedBytes = -1;
     private static readonly int[] LastGcCounts = new int[3];
@@ -179,6 +182,23 @@ internal static class StutterProbe
         }
 
         return sb.Length == 0 ? "none" : sb.ToString();
+    }
+
+    private static void LogCacheCensus()
+    {
+        var il2cppUsed = IL2CPP.il2cpp_gc_get_used_size();
+        Plugin.LogSource.LogInfo(
+            "Cache census: il2cppHeap " + (il2cppUsed / 1048576f).ToString("F1") + "MB; " +
+            "managedHeap " + (GC.GetTotalMemory(false) / 1048576f).ToString("F1") + "MB; " +
+            "gcMode " + System.Runtime.GCSettings.LatencyMode + "; caches: " +
+            "audioFilters=" + DistantSoundShaper.FilterCount +
+            ",audioReverb=" + DistantSoundShaper.ReverbFilterCount +
+            ",audioNext=" + DistantSoundShaper.NextUpdateCount +
+            ",vehTrack=" + VehicleAudioBalance.TrackSourceCount +
+            ",vehEngine=" + VehicleAudioBalance.EngineSourceCount +
+            ",cannon=" + TankCannonAudioGain.SourceCount +
+            ",flames=" + AiState.Flames.Count +
+            ",contactStates=" + AiState.ContactStates.Count);
     }
 
     internal static void Update()
@@ -208,6 +228,16 @@ internal static class StutterProbe
 
         var frameSeconds = now - _lastFrameAt;
         _lastFrameAt = now;
+
+        // Independent of spikes: a coarse-cadence census of the collections most
+        // likely to grow the IL2CPP heap, so a fixed post-fix plateau is visible in
+        // the field even when no frame spikes. Counts are O(1) reads; the line is
+        // built at most once per CacheCensusIntervalSeconds.
+        if (now >= _nextCacheCensusAt)
+        {
+            _nextCacheCensusAt = now + CacheCensusIntervalSeconds;
+            LogCacheCensus();
+        }
 
         var gc0 = GC.CollectionCount(0);
         var gc1 = GC.CollectionCount(1);
@@ -263,9 +293,6 @@ internal static class StutterProbe
         // The measured duration covers the previous frame's work, so markers
         // stamped on this frame or the one before both count as coincident.
         var frame = Time.frameCount;
-        var commanderTag = frame - CommanderMvp.LastPlanFrame <= 1
-            ? CommanderMvp.LastPlanSideName
-            : "no";
         var coverSearchCoincided = frame - ContactResponse.LastCoverSearchFrame <= 1;
         var casualtyBatch = frame - CasualtySuppression.LastFlushFrame <= 1
             ? CasualtySuppression.LastFlushCount
@@ -276,9 +303,6 @@ internal static class StutterProbe
         var postureEvals = frame - ContactResponse.LastPostureEvalFrame <= 1
             ? ContactResponse.LastPostureEvalCount
             : 0;
-        var ordersIssued = frame - CommanderMvp.LastOrderExecutionFrame <= 1
-            ? CommanderMvp.LastOrderExecutionCount
-            : 0;
         var staggerSkips = frame - ContactResponse.LastStaggerSkipFrame <= 1
             ? ContactResponse.LastStaggerSkipCount
             : 0;
@@ -286,9 +310,9 @@ internal static class StutterProbe
         Plugin.LogSource.LogInfo(
             $"Stutter probe: frame {frameSeconds * 1000f:F0}ms (recent avg {_smoothedFrameSeconds * 1000f:F1}ms); " +
             $"GC {gcDelta0}/{gcDelta1}/{gcDelta2}; il2cppHeap {il2cppUsed / 1048576f:F1}MB (delta {il2cppDelta / 1048576f:+0.0;-0.0;0}MB); " +
-            $"commanderPlan={commanderTag}; coverSearch={coverSearchCoincided}; " +
+            $"coverSearch={coverSearchCoincided}; " +
             $"casualtyBatch={casualtyBatch}; explosions={explosions}; " +
-            $"postureEvals={postureEvals}; ordersIssued={ordersIssued}; " +
+            $"postureEvals={postureEvals}; " +
             $"geomRuns={coverGeometryRuns}; staggerSkips={staggerSkips}; " +
             $"soldiers={soldiers} (delta {soldiersDelta:+#;-#;0}); " +
             $"modMs={modMs:F1} (sites: {BuildSiteBreakdown(SiteMsScratch)}; " +

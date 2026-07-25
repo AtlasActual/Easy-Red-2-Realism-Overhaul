@@ -48,13 +48,18 @@ internal static partial class ContactResponse
         {
             state.MovementStallHoldUntil = 0f;
             ResetMovementWatch(state, preserveFailures: true);
-            if (eligible)
+            // Only resume the progress watch if the arbiter actually released him: a
+            // soldier still owned by a higher hold would otherwise be monitored while
+            // legitimately stationary and re-arm the stall he just served.
+            if (!eligible ||
+                !MovementArbiterCore.Grants(ApplyMovementDecision(
+                    ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
+                    SoldierPose.Crouch, "stall-release")))
             {
-                ai.moveCharacter = true;
-                monitor = true;
-            }
-            else
                 return;
+            }
+
+            monitor = true;
         }
 
         Vector3 destination;

@@ -99,7 +99,7 @@ internal static class SoldierFireDanger
         {
             if (soldier.IsOnFire)
             {
-                GroundAiDirector.ExecuteSoldierFireInhibition(ai, soldier);
+                GroundAiDirector.ExecuteSoldierStopFire(soldier);
                 ContactResponse.StopDangerMovement(
                     ai, soldier, SoldierPose.Prone, Time.deltaTime);
                 return;
@@ -129,6 +129,10 @@ internal static class SoldierFireDanger
     {
         NextCheck.Clear();
         ActiveHazards.Clear();
+        // Flame wrappers are stale-swept lazily inside TrySense, but that only runs
+        // while danger reactions are active; clear on battle/phase reset so no Flame
+        // wrapper survives a teardown. Driven from GroundAiDirector.ClearRuntimeState.
+        AiState.Flames.Clear();
     }
 
     private readonly record struct HazardStamp(Vector3 Escape, float ValidUntil);

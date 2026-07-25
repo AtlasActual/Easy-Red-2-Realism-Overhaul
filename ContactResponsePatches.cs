@@ -46,6 +46,9 @@ internal static class ExclusiveCoverAssignmentPatch
             if (!TryGetUsableCoverPosition(cover, out var coverPosition))
                 return false;
 
+            // Same small HARD radius as the mod's own search (plan 016 review): this
+            // prefix silently rejects a native cover assignment, so a wide exclusion
+            // here would strand soldiers wherever they stand.
             if (AiState.CoverReservedByOther(
                     coverId,
                     coverPosition,
@@ -201,7 +204,7 @@ internal static class SoldierTacticalSprintPatch
         // The low-node-count movement path must honor the same committed reload
         // ownership as MoveOptimized; otherwise it can raise the soldier back to
         // a fighting crouch between reload frames.
-        if (ExposedReloadPosture.TryMaintain(ai, soldier, now, deltaTime))
+        if (ExposedReloadPosture.TryMaintain(soldier, now))
         {
             sprint = false;
             return false;
@@ -255,45 +258,30 @@ internal static class SoldierTacticalSprintPatch
         var activeThreatMovement = (ContactResponse.HasActiveContact(id, now) ||
                                     IncomingFireAwareness.HasActiveCue(id, now)) &&
                                    !hazardEvading;
-        if (ContactResponse.ShouldHoldDefensivePosition(soldier, now) && !hazardEvading)
+        // The three stationary holds are owner DECLARATIONS (plan 018): each hands the
+        // frame to the movement arbiter and only gates native locomotion when the arbiter
+        // actually halted the soldier. A higher owner (flame escape) or the bounded
+        // halt-spacing step falls through to the moving tail instead, which is why these
+        // no longer carry their own "!hazardEvading" guards.
+        if (ContactResponse.ShouldHoldDefensivePosition(soldier, now) ||
+            ContactResponse.ShouldHoldEngagement(id, now) ||
+            (ContactResponse.ShouldHoldCover(id, now) && soldier.IsOnCover() && !actualCharge))
         {
             sprint = false;
-            ContactResponse.StopTacticalMovement(
+            var haltOwner = ContactResponse.StopTacticalMovement(
                 ai,
                 soldier,
                 ContactResponse.StationaryHoldPose(soldier),
                 deltaTime);
-            return false;
-        }
-
-        if (ContactResponse.ShouldHoldEngagement(id, now) && !hazardEvading)
-        {
-            sprint = false;
-            ContactResponse.StopTacticalMovement(
-                ai,
-                soldier,
-                ContactResponse.StationaryHoldPose(soldier),
-                deltaTime);
-            return false;
-        }
-
-        if (ContactResponse.ShouldHoldCover(id, now) && soldier.IsOnCover() &&
-            !actualCharge && !hazardEvading)
-        {
-            sprint = false;
-            ContactResponse.StopTacticalMovement(
-                ai,
-                soldier,
-                ContactResponse.StationaryHoldPose(soldier),
-                deltaTime);
-            return false;
+            if (MovementArbiterCore.Halts(haltOwner))
+                return false;
         }
 
         var suppression = soldier.GetSuppressionValue();
         ApplyTacticalMovementPose(ai, soldier, now, suppression, activeThreatMovement);
 
         if (updateFireInhibitionOnPass)
-            UpdateMovingFireInhibition(ai, soldier);
+            ContactResponse.ApplyFireDecision(ai, soldier, now, authoritative: false);
         ContactResponse.ReleaseStationaryThreatFacingForMovement(ai, soldier);
         KnownTargetSuppressiveFire.InterruptForMovement(ai, soldier);
 
@@ -313,10 +301,11 @@ internal static class SoldierTacticalSprintPatch
             if (!AiOwnership.IsAutonomous(soldier) || soldier.IsOnVehicle())
                 return;
 
+            var now = Time.time;
             ContactResponse.MaintainOwnedPose(
-                __instance, soldier, Time.time,
+                __instance, soldier, now,
                 ContactResponse.RunsDecisionThisFrame(soldier.GetInstanceID()));
-            UpdateMovingFireInhibition(__instance, soldier);
+            ContactResponse.ApplyFireDecision(__instance, soldier, now, authoritative: false);
         }
         finally
         {
@@ -332,10 +321,15 @@ internal static class SoldierTacticalSprintPatch
         bool activeThreatMovement)
     {
         var id = soldier.GetInstanceID();
+        // Moving pose write: runs on both decision frames (the prefix tail) and the
+        // per-frame moving write-through, so it uses the round-robin stagger cadence for
+        // the arbiter's interop-heavy decision tail.
+        var resolveDecisionTail = ContactResponse.RunsDecisionThisFrame(id);
         if (ContactResponse.IsPinned(id) && !AiState.IsFlameEvading(id, now))
         {
-            ContactResponse.EnsureTacticalPose(
-                ai, soldier, ContactResponse.SuppressionPose(soldier), "move-pinned");
+            ContactResponse.ApplyArbitratedPose(
+                ai, soldier, now, resolveDecisionTail,
+                ContactResponse.SuppressionPose(soldier), "move-pinned");
         }
         else
         {
@@ -352,48 +346,12 @@ internal static class SoldierTacticalSprintPatch
                  suppression >= Settings.CrouchSuppression.Value) ||
                 activeThreatMovement || ContactResponse.ShouldOwnCrouch(id, now))
             {
-                ContactResponse.EnsureTacticalPose(ai, soldier, SoldierPose.Crouch, "move-crouch");
+                ContactResponse.ApplyArbitratedPose(
+                    ai, soldier, now, resolveDecisionTail, SoldierPose.Crouch, "move-crouch");
             }
         }
     }
 
-    internal static void UpdateMovingFireInhibition(SoldierAI ai, Soldier soldier)
-    {
-        var id = soldier.GetInstanceID();
-        var state = AiState.GetContactState(id);
-
-        // A contact-owned hard stop is already cancelling locomotion this frame.
-        // Residual velocity must not immediately relatch the rifle fire gate after
-        // the close-engagement response granted permission to shoot.
-        if (state.MovementInhibitedByContactResponse && !state.SuppressionMovementOwned)
-        {
-            if (state.FireInhibitedByMovement)
-            {
-                state.FireInhibitedByMovement = false;
-                ContactResponse.RestoreFireAfterOwnedInhibition(ai, soldier);
-            }
-            return;
-        }
-
-        // Player-led squad members keep moveCharacter set while following their
-        // leader, even when they have halted to engage. Use actual locomotion so
-        // that follow intent cannot permanently suppress an otherwise valid shot.
-        if (!soldier.IsMoving() || HandheldWeaponClassifier.AllowsMovingFire(soldier, ai))
-        {
-            if (state.FireInhibitedByMovement)
-            {
-                state.FireInhibitedByMovement = false;
-                ContactResponse.RestoreFireAfterOwnedInhibition(ai, soldier);
-            }
-            return;
-        }
-
-        state.FireInhibitedByMovement = true;
-        state.FireRestorePending = true;
-        ai.allowFireAtEnemy = false;
-        ai.aimingEnemy = false;
-        soldier.StopFire();
-    }
 }
 
 [HarmonyPatch(typeof(SoldierAI), nameof(SoldierAI.MoveFPSOptimized))]
@@ -428,9 +386,10 @@ internal static class SoldierTacticalFpsMovePatch
             if (!AiOwnership.IsAutonomous(soldier) || soldier.IsOnVehicle())
                 return;
 
-            SoldierTacticalSprintPatch.UpdateMovingFireInhibition(__instance, soldier);
+            var now = Time.time;
+            ContactResponse.ApplyFireDecision(__instance, soldier, now, authoritative: false);
             ContactResponse.MaintainOwnedPose(
-                __instance, soldier, Time.time,
+                __instance, soldier, now,
                 ContactResponse.RunsDecisionThisFrame(soldier.GetInstanceID()));
         }
         finally
@@ -458,28 +417,20 @@ internal static class SoldierPinnedPosePatch
 
             var id = soldier.GetInstanceID();
             var now = Time.time;
-            if (ContactResponse.IsPinned(id) && !AiState.IsFlameEvading(id, now))
-            {
-                // SAFETY: the pinned/flame pose is recomputed every frame, never staggered.
-                __result = ContactResponse.ResolveTacticalPoseProposal(
-                    soldier,
-                    ContactResponse.SuppressionPose(soldier),
-                    now,
-                    "fav-pinned");
-                return;
-            }
 
-            // Non-decision frame of the round-robin stagger: reuse the cached non-safety
-            // resolution (StationaryHoldPose cover geometry, ShouldOwnCoverPosture, the
-            // crouch owner) instead of recomputing it. A soldier with no cached outcome
-            // yet falls through to the full resolution below.
-            if (!ContactResponse.RunsDecisionThisFrame(id) &&
-                ContactResponse.TryReuseFightingPose(id, ref __result))
+            // The native favourite pose must agree with the single arbiter, or native
+            // SetPose fights the mod's owned pose every tick (the Pose drift war). Resolve
+            // the same arbiter MaintainOwnedPose uses and, whenever a mod owner is active,
+            // return its pose so the two channels agree. The safety owners are recomputed
+            // every frame inside the arbiter; the interop-heavy decision tail follows the
+            // round-robin stagger cadence.
+            var state = AiState.GetContactState(id);
+            var pose = ContactResponse.ResolvePose(
+                soldier, state, now, ContactResponse.RunsDecisionThisFrame(id), out var owner);
+            if (owner != PoseOwner.None)
             {
-                return;
+                __result = ContactResponse.CommitArbitratedPose(soldier, state, owner, pose, now, null);
             }
-
-            ContactResponse.ResolveFightingPose(soldier, id, now, ref __result);
         }
         finally
         {

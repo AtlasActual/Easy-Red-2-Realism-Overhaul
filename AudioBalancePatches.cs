@@ -225,6 +225,59 @@ internal static class VehicleAudioBalance
             states.Remove(id);
     }
 
+    internal static int TrackSourceCount => TrackSources.Count;
+    internal static int EngineSourceCount => EngineSources.Count;
+
+    // Drops entries whose AudioSource wrapper points at a destroyed native object.
+    // Both dictionaries are keyed by AudioSource instance id, and vehicles respawn
+    // constantly, so without this sweep every destroyed engine/track source stays
+    // pinned via its wrapper's GCHandle for the whole session (RefreshSources only
+    // runs on an audio SettingChanged event, not on vehicle death).
+    internal static void SweepStaleSources()
+    {
+        SweepDeadSources(TrackSources);
+        SweepDeadSources(EngineSources);
+    }
+
+    internal static void ClearSources()
+    {
+        TrackSources.Clear();
+        EngineSources.Clear();
+    }
+
+    private static void SweepDeadSources(Dictionary<int, SourceState> states)
+    {
+        DeadSources.Clear();
+        foreach (var pair in states)
+        {
+            if (!IsSourceAlive(pair.Value.Source))
+                DeadSources.Add(pair.Key);
+        }
+
+        foreach (var id in DeadSources)
+            states.Remove(id);
+    }
+
+    private static bool IsSourceAlive(AudioSource source)
+    {
+        try
+        {
+            return source != null;
+        }
+        catch (NullReferenceException)
+        {
+            return false;
+        }
+        catch (Il2CppInterop.Runtime.Il2CppException)
+        {
+            return false;
+        }
+        catch (Il2CppInterop.Runtime.ObjectCollectedException)
+        {
+            return false;
+        }
+    }
+
     private static void SetVolume(
         AudioSource source,
         float nativeVolume,
@@ -329,6 +382,45 @@ internal static class TankCannonAudioGain
         if (Sources.TryGetValue(source.GetInstanceID(), out var state))
             state.SupplementVolume = 0f;
     }
+
+    internal static int SourceCount => Sources.Count;
+
+    // Sources is keyed by TurretGun AudioSource instance id and is never pruned by
+    // the hot path (Disable only zeroes the supplement gain). Tank guns respawn with
+    // each destroyed vehicle, so drop entries whose native source is gone. The
+    // supplement GameObject is a child of state.Source's transform and Unity destroys
+    // it with the parent, so removing the entry releases both wrappers.
+    internal static void SweepStaleSources()
+    {
+        StaleCannonIds.Clear();
+        foreach (var pair in Sources)
+        {
+            var alive = false;
+            try
+            {
+                alive = pair.Value.Source != null;
+            }
+            catch (NullReferenceException)
+            {
+            }
+            catch (Il2CppInterop.Runtime.Il2CppException)
+            {
+            }
+            catch (Il2CppInterop.Runtime.ObjectCollectedException)
+            {
+            }
+
+            if (!alive)
+                StaleCannonIds.Add(pair.Key);
+        }
+
+        foreach (var id in StaleCannonIds)
+            Sources.Remove(id);
+    }
+
+    internal static void ClearSources() => Sources.Clear();
+
+    private static readonly List<int> StaleCannonIds = new();
 
     internal static void PlaySupplement(AudioSource? source)
     {
@@ -627,4 +719,141 @@ internal static class DistantSoundShaper
         if (ReverbFilters.TryGetValue(sourceId, out var reverb) && reverb != null)
             reverb.enabled = false;
     }
+
+    internal static int FilterCount => Filters.Count;
+    internal static int ReverbFilterCount => ReverbFilters.Count;
+    internal static int NextUpdateCount => NextUpdates.Count;
+
+    // NextUpdates stores only a throttle timestamp (last apply + interval) per source
+    // id; an entry not refreshed for this long belongs to a despawned source.
+    private const float StaleNextUpdateSeconds = 30f;
+    private static readonly List<int> StaleAudioIds = new();
+
+    // Filters/ReverbFilters attach mod-created AudioLowPassFilter/AudioReverbFilter
+    // components to per-source (per-weapon, per-vehicle, per-explosion) GameObjects and
+    // key them by the source instance id. Nothing removed them when the source
+    // despawned, so every audio source ever heard near the listener pinned a filter
+    // wrapper for the whole session. Sweep the ones whose native component is gone.
+    internal static void SweepStaleSources(float now)
+    {
+        SweepDeadFilters();
+        SweepDeadReverbFilters();
+
+        StaleAudioIds.Clear();
+        foreach (var pair in NextUpdates)
+        {
+            if (now - pair.Value > StaleNextUpdateSeconds)
+                StaleAudioIds.Add(pair.Key);
+        }
+
+        foreach (var id in StaleAudioIds)
+            NextUpdates.Remove(id);
+    }
+
+    internal static void ClearSources()
+    {
+        Filters.Clear();
+        ReverbFilters.Clear();
+        NextUpdates.Clear();
+    }
+
+    private static void SweepDeadFilters()
+    {
+        StaleAudioIds.Clear();
+        foreach (var pair in Filters)
+        {
+            // pair.Value's static type is AudioLowPassFilter, so == uses Unity's
+            // destroyed-object overload (a generic helper would not).
+            var dead = true;
+            try
+            {
+                dead = pair.Value == null;
+            }
+            catch (NullReferenceException)
+            {
+            }
+            catch (Il2CppInterop.Runtime.Il2CppException)
+            {
+            }
+            catch (Il2CppInterop.Runtime.ObjectCollectedException)
+            {
+            }
+
+            if (dead)
+                StaleAudioIds.Add(pair.Key);
+        }
+
+        foreach (var id in StaleAudioIds)
+            Filters.Remove(id);
+    }
+
+    private static void SweepDeadReverbFilters()
+    {
+        StaleAudioIds.Clear();
+        foreach (var pair in ReverbFilters)
+        {
+            var dead = true;
+            try
+            {
+                dead = pair.Value == null;
+            }
+            catch (NullReferenceException)
+            {
+            }
+            catch (Il2CppInterop.Runtime.Il2CppException)
+            {
+            }
+            catch (Il2CppInterop.Runtime.ObjectCollectedException)
+            {
+            }
+
+            if (dead)
+                StaleAudioIds.Add(pair.Key);
+        }
+
+        foreach (var id in StaleAudioIds)
+            ReverbFilters.Remove(id);
+    }
+}
+
+/// <summary>
+/// Bounds native-heap growth from the audio-source-keyed caches in this file. Each is
+/// keyed by an AudioSource/gun/vehicle instance id that respawns constantly (dead
+/// soldiers, destroyed vehicles), and several store managed wrappers (AudioSource,
+/// AudioLowPassFilter, AudioReverbFilter) that pin the native object via GCHandle.
+/// Without pruning they accumulate one pinned wrapper per entity ever heard, driving
+/// the monotonic IL2CPP heap growth. A periodic liveness sweep (driven every frame by
+/// AtmosphericParticlePersistenceController, gated to a coarse cadence) drops entries
+/// whose wrapper was destroyed; battle reset clears everything.
+/// </summary>
+internal static class AudioSourceCacheMaintenance
+{
+    private const float SweepIntervalSeconds = 10f;
+    private static float _nextSweepAt;
+
+    internal static void Update(float now)
+    {
+        if (now < _nextSweepAt)
+            return;
+        _nextSweepAt = now + SweepIntervalSeconds;
+
+        VehicleAudioBalance.SweepStaleSources();
+        TankCannonAudioGain.SweepStaleSources();
+        DistantSoundShaper.SweepStaleSources(now);
+    }
+
+    internal static void ResetBattle()
+    {
+        _nextSweepAt = 0f;
+        VehicleAudioBalance.ClearSources();
+        TankCannonAudioGain.ClearSources();
+        DistantSoundShaper.ClearSources();
+    }
+}
+
+[HarmonyPatch(typeof(BattleManager), "Start")]
+internal static class AudioCacheBattleResetPatch
+{
+    [HarmonyPrefix]
+    private static void Prefix() => AudioSourceCacheMaintenance.ResetBattle();
 }

@@ -12,18 +12,24 @@ internal static partial class ContactResponse
 
     private const float AttackContactContinuitySeconds = 5f;
 
-    private const float EstablishedFireFreshSeconds = 10f;
-
-    private const float CoveringFireFreshSeconds = 3f;
+    // D2 (plan 015): widened from 3s so squadmates engaging a different visible
+    // enemy still count as covering fire instead of only the mover's own target.
+    private const float CoveringFireFreshSeconds = 7f;
 
     private const float UrgentCoverReassessmentSeconds = 4f;
+
+    // D1 (plan 015): the on-cover halt cap is a multiple of the off-cover one so
+    // real cover is still strongly preferred, but a soldier pinned in place by
+    // sustained direct fire is guaranteed to eventually bound instead of waiting
+    // forever for covering fire that may never come.
+    private const float OnCoverAttackHaltMultiplier = 2.5f;
 
     internal const float TacticalCrouchPersistenceSeconds = 1.5f;
 
     private static int _coverAssignmentExecutorSoldierId;
 
     // Round-robin decision stagger. The TacticalMove pipeline
-    // (SharedTacticalMovePrefix + the MaintainOwnedPose/UpdateMovingFireInhibition
+    // (SharedTacticalMovePrefix + the MaintainOwnedPose/ApplyFireDecision
     // postfix) runs for every owned soldier EVERY frame; its interop-heavy per-soldier
     // DECISION work (which stationary hold owns the soldier, and the cover/suppression
     // pose RESOLUTION) is spread so each soldier re-decides on one of every
@@ -78,10 +84,9 @@ internal static partial class ContactResponse
     /// the pose. Returns true and sets <paramref name="passThrough"/> (the value the
     /// prefix must return to gate native movement) when the cached decision can be
     /// re-asserted; returns false to fall back to a full decision (no latched pose yet).
-    /// The discriminator is <see cref="ContactResponseState.MovementInhibitedByContactResponse"/>:
-    /// it is set true only by StopTacticalMovement and cleared to false on every path
-    /// that grants locomotion (relocation, attack advance, hazard, yield), so it is the
-    /// authoritative "this soldier is currently held" flag shared with the FSM.
+    /// The discriminator is the movement arbiter itself (plan 018): the ladder resolves
+    /// from the same timers and flags on this cheap path as on a full decision frame, so
+    /// the write-through can never disagree with the decision it is replaying.
     /// </summary>
     internal static bool TryWriteThroughTacticalMove(
         SoldierAI ai,
@@ -95,7 +100,8 @@ internal static partial class ContactResponse
         var state = AiState.GetContactState(id);
         var now = Time.time;
 
-        if (state.MovementInhibitedByContactResponse)
+        var staggerOwner = ResolveMovementOwner(soldier, state, id, now, MovementOwner.Free);
+        if (MovementArbiterCore.Halts(staggerOwner))
         {
             // A stationary hold is in force. Never re-assert an unlatched pose — route
             // an as-yet-undecided soldier to the full decision instead.
@@ -105,32 +111,36 @@ internal static partial class ContactResponse
                 return false;
             }
 
-            // Re-assert the stop and the latched pose exactly as StopTacticalMovement
-            // does. Stationary threat facing is intentionally NOT re-asserted here: the
+            // Re-assert the stop and the latched pose through the one write site.
+            // Stationary threat facing is intentionally NOT re-asserted here: the
             // per-frame prefix never did (the FSM owns it, and its moveLookingTarget flag
             // persists between updates), so replaying it would add rotation the baseline
             // never performed.
             sprint = false;
-            ai.moveCharacter = false;
-            EnsureTacticalPose(ai, soldier, state.LatchedTacticalPose, "stagger-hold");
-            soldier.isSprinting = false;
-            soldier.StopMove(state.LatchedTacticalPose, deltaTime);
+            ApplyResolvedMovementDecision(
+                ai, soldier, state, id, staggerOwner, deltaTime, now,
+                state.LatchedTacticalPose, "stagger", resolvePose: false);
 
             CountStaggerSkip();
             passThrough = false;
             return true;
         }
 
-        // The last decision granted locomotion. Re-assert the moving-fire gate and the
-        // owned movement crouch exactly as the pass-through tail does — this is cheap
-        // write-through (no ownership refresh, no hold selection, no cover geometry).
+        // The last decision granted locomotion. Re-assert it through the same single write
+        // site (a granting owner releases the brake; Free writes nothing and simply records
+        // that this mod is not holding him), then the moving-fire gate and the owned
+        // movement crouch exactly as the pass-through tail does — all cheap write-through
+        // (no ownership refresh, no hold selection, no cover geometry).
+        ApplyResolvedMovementDecision(
+            ai, soldier, state, id, staggerOwner, deltaTime, now,
+            SoldierPose.Crouch, "stagger", resolvePose: false);
         var suppression = soldier.GetSuppressionValue();
         var activeThreatMovement = HasActiveContact(id, now) ||
                                    IncomingFireAwareness.HasActiveCue(id, now);
         SoldierTacticalSprintPatch.ApplyTacticalMovementPose(
             ai, soldier, now, suppression, activeThreatMovement);
         if (updateFireInhibitionOnPass)
-            SoldierTacticalSprintPatch.UpdateMovingFireInhibition(ai, soldier);
+            ApplyFireDecision(ai, soldier, now, authoritative: false);
         ReleaseStationaryThreatFacingForMovement(ai, soldier);
         KnownTargetSuppressiveFire.InterruptForMovement(ai, soldier);
 
@@ -167,7 +177,7 @@ internal static partial class ContactResponse
             target = null;
         }
         var now = Time.time;
-        state.SquadId = ContactKnowledge.GetSquadId(soldier);
+        state.SquadId = SquadIdentity.GetSquadId(soldier);
         var hasAttackRoute = TryGetAttackWaypoint(soldier, out _) &&
                              HasCommittedDestination(soldier);
         var targetInsideAttackHalt = target != null &&
@@ -180,8 +190,8 @@ internal static partial class ContactResponse
             id, now, out var directFirePosition);
         var attackUnderPressure = target != null || state.Pinned ||
                                   IncomingFireAwareness.HasActiveCue(id, now);
-        var maximumAttackHaltReached = UpdateAttackProgressClock(
-            state, hasAttackRoute, attackUnderPressure, now);
+        var (maximumAttackHaltReached, maximumOnCoverAttackHaltReached) =
+            UpdateAttackProgressClock(state, hasAttackRoute, attackUnderPressure, now);
         if (state.LastOutgoingShotWasStationary &&
             (soldier.IsMoving(0.2f) || state.Relocating || state.Pinned ||
              state.SuppressionMovementOwned))
@@ -210,9 +220,6 @@ internal static partial class ContactResponse
             if (state.Relocating)
                 FinishRelocation(ai, soldier, state, id, now, false, false, false);
             state.EngagementHoldUntil = 0f;
-            state.FireRestorePending = true;
-            ai.allowFireAtEnemy = false;
-            ai.aimingEnemy = false;
             soldier.StopFire();
             StopDangerMovement(ai, soldier, SoldierPose.Prone, Time.deltaTime);
             return;
@@ -229,9 +236,6 @@ internal static partial class ContactResponse
                 now - state.AttackContactLastSeenAt > AttackContactContinuitySeconds)
             {
                 state.AttackContactToken = observedTargetToken;
-                state.HasFiredAtAttackContact =
-                    state.LastOutgoingShotTargetToken == observedTargetToken &&
-                    now - state.LastOutgoingShotAt <= EstablishedFireFreshSeconds;
             }
             state.AttackContactLastSeenAt = now;
         }
@@ -245,11 +249,9 @@ internal static partial class ContactResponse
             if (state.Relocating)
                 FinishRelocation(ai, soldier, state, id, now, false, false, false);
             state.EngagementHoldUntil = 0f;
-            state.FireRestorePending = true;
-            ai.allowFireAtEnemy = false;
-            ai.aimingEnemy = false;
-            ai.moveCharacter = true;
-            state.MovementInhibitedByContactResponse = false;
+            ApplyMovementDecision(
+                ai, soldier, Time.deltaTime, now, MovementOwner.Free,
+                SoldierPose.Crouch, "fsm-flame-evade");
             soldier.StopFire();
             return;
         }
@@ -316,10 +318,7 @@ internal static partial class ContactResponse
         if (closeThreatRequiresStationaryFire)
         {
             if (state.Relocating)
-            {
-                state.RelocationPausedByCloseFire = true;
                 PauseRelocation(state, id, now, false);
-            }
             RespondWithoutNewCover(
                 ai,
                 soldier,
@@ -331,13 +330,18 @@ internal static partial class ContactResponse
 
         if (actualCharge)
         {
-            ai.moveCharacter = true;
+            ApplyMovementDecision(
+                ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
+                SoldierPose.Crouch, "fsm-charge");
             return;
         }
 
-        if (state.Relocating && state.RelocationPausedByCloseFire)
+        // The close-contact pause above is no longer a separate coordination flag: the
+        // arbiter's own MovementHalted output says a hold stopped this soldier while he
+        // was relocating, and granting movement below clears it, so this resume runs
+        // exactly once per pause exactly as RelocationPausedByCloseFire did.
+        if (state.Relocating && state.MovementHalted)
         {
-            state.RelocationPausedByCloseFire = false;
             state.RelocateLastProgressAt = now;
             state.RelocateUntil = now + InfantryCoverPolicy.MoveProgressWindowSeconds;
             RefreshPath(ai, "Close-contact cover path resume failed");
@@ -447,7 +451,10 @@ internal static partial class ContactResponse
             state.AttackConditionsWereFavorable = false;
             if (KnownTargetSuppressiveFire.TryGetOwnedAimPoint(id, now, out var suppressionAimPoint))
             {
-                state.EngagementHoldUntil = float.PositiveInfinity;
+                // D4 (plan 015): no live Spottable target here, so the hold is
+                // bounded to the ordinary decision cadence instead of +inf; a
+                // lapsed hold simply re-decides next tick rather than freezing.
+                state.EngagementHoldUntil = now + InfantryCoverPolicy.DecisionIntervalSeconds;
                 state.ContactCrouchOwned = true;
                 StopTacticalMovement(
                     ai,
@@ -476,17 +483,27 @@ internal static partial class ContactResponse
                 return;
             }
 
+            var onUsableCoverWithoutVisibleTarget = IsOnUsableCover(soldier);
             var forcedAttackProgressWithoutVisibleTarget = CombatMovementPolicyCore.ShouldAuthorizeAttackBound(
                 hasAttackRoute,
                 coveringFireEstablished: false,
                 maximumAttackHaltReached,
+                maximumOnCoverAttackHaltReached,
                 underDirectFire,
                 state.Pinned,
-                onUsableCover: IsOnUsableCover(soldier),
+                onUsableCover: onUsableCoverWithoutVisibleTarget,
                 state.ManeuverCoverMinimumHoldUntil,
                 now);
             if (forcedAttackProgressWithoutVisibleTarget)
             {
+                // Rising edge only. ContinueAttackObjectiveMovement below latches
+                // AttackProgressForced, so this diagnostic cannot repeat (and cannot
+                // allocate its message) on every decision frame the cap stays true.
+                if (!state.AttackProgressForced)
+                {
+                    TraceOnCoverHaltCapBound(
+                        id, onUsableCoverWithoutVisibleTarget, coveringFireEstablished: false);
+                }
                 var suppressedAdvance = Settings.DangerReactionsEnabled.Value &&
                                         soldier.GetSuppressionValue() >= Settings.CrouchSuppression.Value;
                 ContinueAttackObjectiveMovement(
@@ -532,8 +549,9 @@ internal static partial class ContactResponse
                 }
                 else
                 {
-                    ai.moveCharacter = true;
-                    state.MovementInhibitedByContactResponse = false;
+                    ApplyMovementDecision(
+                        ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
+                        SoldierPose.Crouch, "fsm-contact-move");
                     ApplyContactMovementPose(ai, soldier, state, now);
                 }
                 return;
@@ -546,11 +564,17 @@ internal static partial class ContactResponse
                 state.HoldCoverUntil = 0f;
             if (!isOnCover || now >= state.HoldCoverUntil)
             {
-                if (!state.SuppressionMovementOwned)
-                    ai.moveCharacter = true;
-                state.MovementInhibitedByContactResponse = false;
-                if (wasHoldingMovement && HasCommittedDestination(soldier))
+                // The old "if (!SuppressionMovementOwned)" guard is the PinnedHold rank
+                // outranking OrderedMove; the arbiter enforces it now, and the declared
+                // OrderedMove releases the contact-halt flag on its way through.
+                var owner = ApplyMovementDecision(
+                    ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
+                    SoldierPose.Crouch, "fsm-contact-release");
+                if (MovementArbiterCore.Grants(owner) && wasHoldingMovement &&
+                    HasCommittedDestination(soldier))
+                {
                     RefreshPath(ai, "Contact path release failed");
+                }
             }
             return;
         }
@@ -566,14 +590,15 @@ internal static partial class ContactResponse
             hasAttackRoute,
             coordinatedAttackAdvance,
             maximumAttackHaltReached,
+            maximumOnCoverAttackHaltReached,
             underDirectFire,
             state.Pinned,
             onUsableNativeCover,
             state.ManeuverCoverMinimumHoldUntil,
             now);
-        var forcedAttackProgress = authorizedAttackAdvance &&
-                                   maximumAttackHaltReached &&
-                                   !coordinatedAttackAdvance;
+        // Authorized without coordinated covering fire can only mean the halt cap
+        // (off-cover or the longer on-cover one) was the deciding factor.
+        var forcedAttackProgress = authorizedAttackAdvance && !coordinatedAttackAdvance;
         var favorableJustEstablished = authorizedAttackAdvance &&
                                        !state.AttackConditionsWereFavorable;
         if (!authorizedAttackAdvance)
@@ -598,7 +623,7 @@ internal static partial class ContactResponse
                     state.ReservedCoverId,
                     state.ReservedCoverPosition,
                     id,
-                    now + 2f);
+                    now + InfantryCoverPolicy.DecisionIntervalSeconds);
             if (!authorizedAttackAdvance)
             {
                 SetCoverState(state, InfantryCoverState.Holding, id,
@@ -611,8 +636,6 @@ internal static partial class ContactResponse
                     Time.deltaTime,
                     "fsm-cover-hold");
                 FaceThreatWhenStationary(ai, soldier, targetPosition);
-                if (target != null)
-                    GrantFirePermissionIfReady(ai, soldier);
                 return;
             }
         }
@@ -660,6 +683,12 @@ internal static partial class ContactResponse
         }
 
         state.AttackConditionsWereFavorable = authorizedAttackAdvance;
+        // Traced here, where the authorization is actually acted on (the search for
+        // the next bound position), not on every decision frame it stays true: this
+        // branch is throttled by NextRelocationAllowedAt / NextDecisionAt, so the
+        // diagnostic marks the event instead of flooding the trace ring.
+        if (authorizedAttackAdvance)
+            TraceOnCoverHaltCapBound(id, onUsableNativeCover, coordinatedAttackAdvance);
         state.NextDecisionAt = now + InfantryCoverPolicy.DecisionIntervalSeconds;
         if (coverDecision.SelectionMode == CoverSelectionMode.Urgent)
             state.NextUrgentCoverDecisionAt = now + UrgentCoverReassessmentSeconds;
@@ -795,13 +824,14 @@ internal static partial class ContactResponse
         state.RelocateDestinationPointer = IntPtr.Zero;
         state.RelocateDestinationPosition = default;
         state.RelocationPausedBySuppression = false;
-        state.RelocationPausedByCloseFire = false;
         state.NextRelocationAllowedAt = 0f;
         state.ReservedCoverId = IntPtr.Zero;
         state.ReservedCoverPosition = default;
         state.FailedCoverId = IntPtr.Zero;
         state.FailedCoverUntil = 0f;
         state.ConsecutiveCoverSearchFailures = 0;
+        state.ConsecutiveTankCoverFailures = 0;
+        state.LastTankCoverFailureAt = 0f;
         state.EngagementHoldUntil = 0f;
         state.ContactUntil = 0f;
         state.ContactCrouchOwned = false;
@@ -814,32 +844,28 @@ internal static partial class ContactResponse
         state.HasThreatPosition = false;
         AiState.ReleaseCoverReservation(id);
 
-        var hazardOwnsMovement = Settings.DangerReactionsEnabled.Value &&
-                                 (soldier.IsOnFire || AiState.IsFlameEvading(id, now));
-        if (wasControllingMovement && !state.SuppressionMovementOwned && !hazardOwnsMovement)
+        state.MovementInhibitedByContactResponse = false;
+        if (wasControllingMovement)
         {
-            ai.moveCharacter = true;
-            state.MovementInhibitedByContactResponse = false;
-            if (HasCommittedDestination(soldier))
+            // The suppression/hazard exclusions this used to spell out are simply the
+            // PinnedHold, SafetyHalt and HazardEscape ranks outranking OrderedMove.
+            var owner = ApplyMovementDecision(
+                ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
+                SoldierPose.Crouch, "contact-disable");
+            if (owner == MovementOwner.OrderedMove && HasCommittedDestination(soldier))
                 RefreshPath(ai, "Contact path release after disabling failed");
         }
-        else
-        {
-            state.MovementInhibitedByContactResponse = false;
-        }
 
-        // Contact response can own a persistent false fire gate during relocation.
-        // Suppression and hazard owners remain independent when this setting changes.
+        // No fire restore handshake is needed: the arbiter recomputes the gate from the
+        // surviving owners on the director's next tail call.
         state.ContactResponseActive = false;
-        state.FireRestorePending = true;
-        RestoreFireAfterOwnedInhibition(ai, soldier);
     }
 
     /// <summary>
     /// Releases only the locomotion state owned by contact response when the
-    /// director grants movement to a player/script order, a commander order, or a
-    /// protected fortification assignment. Suppression and fire-safety ownership
-    /// remain intact and can continue to react locally.
+    /// director grants movement to a player/script order or a protected
+    /// fortification assignment. Suppression and fire-safety ownership remain
+    /// intact and can continue to react locally.
     /// </summary>
     internal static void YieldMovementToHigherAuthority(
         SoldierAI ai,
@@ -877,13 +903,18 @@ internal static partial class ContactResponse
         state.MovementInhibitedByContactResponse = false;
         state.ContactCrouchOwned = false;
         state.EngagementHoldUntil = 0f;
+        // A player/script order outranks this mod's fighting-position hold, and the
+        // movement ladder has no external-authority rank to express that with - so the
+        // hold is released here, where the decision was already made. The maneuver ANCHOR
+        // is deliberately kept (above) so the soldier can return to the slot afterwards.
+        state.HoldCoverUntil = 0f;
         ClearCoverClearancePose(state);
-        if (wasControllingMovement && !state.SuppressionMovementOwned &&
-            !(Settings.DangerReactionsEnabled.Value &&
-              (soldier.IsOnFire || AiState.IsFlameEvading(soldierId, Time.time))))
+        if (wasControllingMovement)
         {
-            ai.moveCharacter = true;
-            if (HasCommittedDestination(soldier))
+            var owner = ApplyMovementDecision(
+                ai, soldier, Time.deltaTime, Time.time, MovementOwner.OrderedMove,
+                SoldierPose.Crouch, "yield-authority");
+            if (owner == MovementOwner.OrderedMove && HasCommittedDestination(soldier))
                 RefreshPath(ai, "Higher-authority movement path resume failed");
         }
     }
@@ -893,9 +924,6 @@ internal static partial class ContactResponse
         var id = soldier.GetInstanceID();
         var state = AiState.GetContactState(id);
         ReleaseStationaryThreatFacing(ai, state);
-        var releasedInfantryFireGate = state.FireInhibitedByMovement || state.FireInhibitedByRange ||
-                                         state.FireInhibitedByArmoredTarget ||
-                                         state.SuppressionFireInhibited;
         if (state.FireInhibitedByRange || state.FireInhibitedByArmoredTarget)
             ai.targetInWeaponRange = true;
         state.FireInhibitedByMovement = false;
@@ -908,6 +936,8 @@ internal static partial class ContactResponse
         state.Pinned = false;
         state.PinnedUntil = 0f;
         state.PinnedFireBlockedUntil = 0f;
+        state.PinnedSince = 0f;
+        state.PinnedImmunityUntil = 0f;
         ResetCoverPostureEvaluation(state);
         ResetTacticalPoseLatch(state);
 
@@ -915,12 +945,13 @@ internal static partial class ContactResponse
         state.NextUrgentCoverDecisionAt = 0f;
         state.CoverState = InfantryCoverState.Holding;
         state.RelocationPausedBySuppression = false;
-        state.RelocationPausedByCloseFire = false;
         state.RelocateDestinationPointer = IntPtr.Zero;
         state.RelocateDestinationPosition = default;
         state.ReservedCoverId = IntPtr.Zero;
         state.ReservedCoverPosition = default;
         state.ConsecutiveCoverSearchFailures = 0;
+        state.ConsecutiveTankCoverFailures = 0;
+        state.LastTankCoverFailureAt = 0f;
         state.ContactResponseActive = false;
         state.MovementInhibitedByContactResponse = false;
         state.ContactCrouchOwned = false;
@@ -929,11 +960,8 @@ internal static partial class ContactResponse
         ResetManeuverCoverHold(state);
         ResetDefensiveOwnershipState(state);
         ResetAttackFireEvidence(state);
+        state.LastFireBlocker = FireBlocker.NativeControl;
         AiState.ReleaseCoverReservation(id);
-
-        if (releasedInfantryFireGate)
-            state.FireRestorePending = true;
-        RestoreFireAfterOwnedInhibition(ai, soldier);
     }
 
     internal static bool IsRelocating(int soldierId)
@@ -979,16 +1007,11 @@ internal static partial class ContactResponse
             }
 
             var state = AiState.GetContactState(soldierId);
-            state.SquadId = ContactKnowledge.GetSquadId(shooter);
+            state.SquadId = SquadIdentity.GetSquadId(shooter);
             state.LastOutgoingShotTargetToken = targetToken;
             state.LastOutgoingShotAt = now;
             state.LastOutgoingShotWasStationary =
                 !shooter.IsMoving(0.2f) && !state.Relocating;
-            if (state.AttackContactToken == targetToken &&
-                now - state.AttackContactLastSeenAt <= AttackContactContinuitySeconds)
-            {
-                state.HasFiredAtAttackContact = true;
-            }
         }
         catch (Exception ex)
         {
@@ -1008,18 +1031,18 @@ internal static partial class ContactResponse
         IntPtr targetToken,
         float now)
     {
-        if (targetToken == IntPtr.Zero || state.SquadId == 0 ||
-            state.AttackContactToken != targetToken ||
-            !state.HasFiredAtAttackContact ||
-            state.LastOutgoingShotTargetToken != targetToken ||
-            now - state.LastOutgoingShotAt > EstablishedFireFreshSeconds)
+        // D3 (plan 015): the mover no longer has to have fired himself — a
+        // soldier whose cover slot has no firing lane was otherwise permanently
+        // ineligible to advance.
+        if (!CombatMovementPolicyCore.MoverQualifiesForAttackAdvance(
+                targetToken, state.SquadId, state.AttackContactToken))
         {
             return false;
         }
 
-        // Only reached when this soldier is an attacker that has established fire on the
-        // contact; the O(all ContactStates) covering-fire scan below is timed separately
-        // so the probe can tell it apart from the ballistic geometry cost.
+        // Only reached when this soldier is an attacker on a live contact; the
+        // O(all ContactStates) covering-fire scan below is timed separately so
+        // the probe can tell it apart from the ballistic geometry cost.
         var __t = ModTimeProbe.Begin();
         try
         {
@@ -1029,16 +1052,16 @@ internal static partial class ContactResponse
                     continue;
 
                 var covering = pair.Value;
-                if (covering.SquadId != state.SquadId ||
-                    covering.LastOutgoingShotTargetToken != targetToken ||
-                    now - covering.LastOutgoingShotAt > CoveringFireFreshSeconds ||
-                    !covering.LastOutgoingShotWasStationary || covering.Relocating ||
-                    covering.Pinned || covering.SuppressionMovementOwned)
+                // D2 (plan 015): any squadmate's fresh stationary shot at a
+                // confirmed enemy counts, not just one at this mover's own token.
+                if (CombatMovementPolicyCore.IsCoveringFireEstablished(
+                        state.SquadId, covering.SquadId, covering.LastOutgoingShotTargetToken,
+                        covering.LastOutgoingShotWasStationary, covering.Relocating,
+                        covering.Pinned, covering.SuppressionMovementOwned,
+                        covering.LastOutgoingShotAt, now, CoveringFireFreshSeconds))
                 {
-                    continue;
+                    return true;
                 }
-
-                return true;
             }
 
             return false;
@@ -1049,7 +1072,13 @@ internal static partial class ContactResponse
         }
     }
 
-    private static bool UpdateAttackProgressClock(
+    /// <summary>
+    /// Maintains the attack-halt clock and reports both the ordinary off-cover
+    /// deadline and the longer on-cover deadline (D1, plan 015) against the same
+    /// clock, so <see cref="ShouldAuthorizeAttackBound"/> can guarantee liveness
+    /// on cover without shortening the off-cover cap.
+    /// </summary>
+    private static (bool MaximumHaltReached, bool MaximumOnCoverHaltReached) UpdateAttackProgressClock(
         ContactResponseState state,
         bool hasAttackRoute,
         bool underPressure,
@@ -1059,7 +1088,7 @@ internal static partial class ContactResponse
         {
             state.AttackHaltStartedAt = 0f;
             state.AttackProgressForced = false;
-            return false;
+            return (false, false);
         }
 
         if (underPressure)
@@ -1071,23 +1100,48 @@ internal static partial class ContactResponse
         {
             state.AttackHaltStartedAt = 0f;
             state.AttackProgressForced = false;
-            return false;
+            return (false, false);
         }
 
-        return InfantryCoverDecisionCore.ShouldForceAttackProgress(
+        var maximumHaltReached = InfantryCoverDecisionCore.ShouldForceAttackProgress(
             hasAttackOrder: true,
             hasDestination: true,
             state.AttackHaltStartedAt,
             now,
             Settings.MaximumAttackCombatHaltSeconds.Value);
+        var maximumOnCoverHaltReached = InfantryCoverDecisionCore.ShouldForceAttackProgress(
+            hasAttackOrder: true,
+            hasDestination: true,
+            state.AttackHaltStartedAt,
+            now,
+            Settings.MaximumAttackCombatHaltSeconds.Value * OnCoverAttackHaltMultiplier);
+        return (maximumHaltReached, maximumOnCoverHaltReached);
     }
+
+    private static void TraceOnCoverHaltCapBound(
+        int soldierId, bool onUsableCover, bool coveringFireEstablished)
+    {
+        if (onUsableCover && !coveringFireEstablished)
+        {
+            AiState.Trace(
+                $"Attack bound: soldier {soldierId} left cover on the extended halt cap without covering fire");
+        }
+    }
+
+    /// <summary>
+    /// D4 (plan 015): a bounded stand-in for +inf. A live contact owns the hold
+    /// until it lapses on its own persistence timer; otherwise the hold is capped
+    /// to the ordinary decision cadence so a soldier always re-decides instead of
+    /// freezing.
+    /// </summary>
+    private static float BoundedEngagementHold(bool hasLiveContact, ContactResponseState state, float now)
+        => hasLiveContact ? state.ContactUntil : now + InfantryCoverPolicy.DecisionIntervalSeconds;
 
     private static void ResetAttackFireEvidence(ContactResponseState state)
     {
         state.SquadId = 0;
         state.AttackContactToken = IntPtr.Zero;
         state.AttackContactLastSeenAt = 0f;
-        state.HasFiredAtAttackContact = false;
         state.AttackConditionsWereFavorable = false;
         state.AttackHaltStartedAt = 0f;
         state.AttackProgressForced = false;
@@ -1154,7 +1208,7 @@ internal static partial class ContactResponse
         var canClaimReachedCover = !stableCover && !IsActualCharge(soldier) &&
                                    onUsableCover && currentCoverId != IntPtr.Zero &&
                                    state.ManeuverCoverAnchorId != currentCoverId &&
-                                   (IsCommanderAttacker(soldier) ||
+                                   (IsAttackingSquadSoldier(soldier) ||
                                     TryGetAttackWaypoint(soldier, out _));
 
         return new ContactMovementSensor(
@@ -1239,6 +1293,7 @@ internal static partial class ContactResponse
         }
         if (cover == null)
         {
+            RecordTankCoverSearchFailure(state, now);
             SetCoverState(state, InfantryCoverState.WaitingForSafeMove, soldierId,
                 "no tank-masked cover is reachable");
             return false;
@@ -1246,11 +1301,15 @@ internal static partial class ContactResponse
 
         if (!BeginRelocation(ai, soldier, state, cover, soldierId, now))
         {
+            RecordTankCoverSearchFailure(state, now);
             SetCoverState(state, InfantryCoverState.WaitingForSafeMove, soldierId,
                 "tank-masked cover could not be assigned");
             return false;
         }
 
+        // A reachable cover route is the "new candidate cover" that re-arms the wait.
+        state.ConsecutiveTankCoverFailures = 0;
+        state.LastTankCoverFailureAt = 0f;
         AiState.TankCoverHideUntil.Remove(soldierId);
         SetCoverState(state, InfantryCoverState.Moving, soldierId,
             "committed to tank-masked cover");
@@ -1271,6 +1330,46 @@ internal static partial class ContactResponse
             ? StationaryHoldPose(soldier)
             : SoldierPose.Prone;
         StopDangerMovement(ai, soldier, pose, deltaTime);
+        return true;
+    }
+
+    private static void RecordTankCoverSearchFailure(ContactResponseState state, float now)
+    {
+        state.ConsecutiveTankCoverFailures = TankCoverWaitCore.RecordFailure(
+            state.ConsecutiveTankCoverFailures, state.LastTankCoverFailureAt, now);
+        state.LastTankCoverFailureAt = now;
+    }
+
+    /// <summary>
+    /// After the urgent tank-cover search has conclusively failed, a soldier with no
+    /// reachable tank-masked cover stops being movement-inhibited by tank fear and
+    /// resumes his orders instead of lying prone in the open forever. Returns true when
+    /// the wait has been abandoned (caller must not re-halt); the streak self-re-arms
+    /// through <see cref="TankCoverWaitCore"/> when a search finds cover or the tank
+    /// threat materially changes.
+    /// </summary>
+    internal static bool TryResumeFromUnreachableTankCover(
+        SoldierAI ai,
+        Soldier soldier,
+        float now)
+    {
+        var state = AiState.GetContactState(soldier.GetInstanceID());
+        if (!TankCoverWaitCore.ShouldResumeOrders(state.ConsecutiveTankCoverFailures))
+            return false;
+
+        // Restore locomotion once and re-request the path native movement was halted
+        // from. Idempotent across the 0.75s tank scans: once moveCharacter is back true
+        // the soldier is already executing his order, so no repeated path refresh.
+        var wasHalted = !ai.moveCharacter;
+        var owner = ApplyMovementDecision(
+            ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
+            SoldierPose.Crouch, "tank-nocover-resume");
+        if (wasHalted && owner == MovementOwner.OrderedMove &&
+            HasCommittedDestination(soldier))
+        {
+            RefreshPath(ai, "Tank-fear no-cover resume path refresh failed");
+        }
+
         return true;
     }
 
@@ -1323,7 +1422,8 @@ internal static partial class ContactResponse
         {
             state.SuppressionPoseOwned = true;
             state.SuppressionCrouchUntil = now + TacticalCrouchPersistenceSeconds;
-            EnsureTacticalPose(ai, soldier, SuppressionRecoveryPose(soldier), "suppr-band");
+            ApplyArbitratedPose(
+                ai, soldier, now, resolveDecisionTail: true, SuppressionRecoveryPose(soldier), "suppr-band");
             return;
         }
 
@@ -1332,7 +1432,8 @@ internal static partial class ContactResponse
 
         if (now < state.SuppressionCrouchUntil)
         {
-            EnsureTacticalPose(ai, soldier, SuppressionRecoveryPose(soldier), "suppr-window");
+            ApplyArbitratedPose(
+                ai, soldier, now, resolveDecisionTail: true, SuppressionRecoveryPose(soldier), "suppr-window");
             return;
         }
 
@@ -1356,30 +1457,18 @@ internal static partial class ContactResponse
 
         state.SuppressionMovementOwned = true;
         state.SuppressionPoseOwned = true;
-        ai.moveCharacter = false;
-        soldier.isSprinting = false;
 
         // The first reaction to a hard burst is shock: get down and stop exposing
         // yourself. Once that brief reaction passes, the soldier remains stationary
         // but is allowed to aim and return fire instead of becoming inert forever.
-        if (now < state.PinnedFireBlockedUntil)
-        {
-            state.SuppressionFireInhibited = true;
-            state.FireRestorePending = true;
-            ai.allowFireAtEnemy = false;
-            ai.aimingEnemy = false;
+        // The arbiter reads PinnedFireBlockedUntil directly and owns the flag; this only
+        // maintains the descriptive state other systems read.
+        state.SuppressionFireInhibited = now < state.PinnedFireBlockedUntil;
+        if (state.SuppressionFireInhibited)
             soldier.StopFire();
-        }
-        else if (state.SuppressionFireInhibited)
-        {
-            state.SuppressionFireInhibited = false;
-            state.FireRestorePending = true;
-            RestoreFireAfterOwnedInhibition(ai, soldier);
-        }
 
-        var pose = SuppressionPose(soldier);
-        EnsureTacticalPose(ai, soldier, pose, "pinned");
-        soldier.StopMove(pose, deltaTime);
+        ApplyMovementDecision(
+            ai, soldier, deltaTime, now, MovementOwner.Free, SuppressionPose(soldier), "pinned");
         if (state.HasThreatPosition)
             FaceThreatWhenStationary(ai, soldier, state.LastThreatPosition);
         return true;
@@ -1393,12 +1482,13 @@ internal static partial class ContactResponse
         float now)
     {
         var ownedMovement = state.SuppressionMovementOwned;
-        var ownedFire = state.SuppressionFireInhibited;
         var pausedRelocation = state.RelocationPausedBySuppression;
 
         state.Pinned = false;
         state.PinnedUntil = 0f;
         state.PinnedFireBlockedUntil = 0f;
+        state.PinnedSince = 0f;
+        state.PinnedImmunityUntil = 0f;
         state.SuppressionMovementOwned = false;
         state.SuppressionPoseOwned = false;
         state.SuppressionCrouchUntil = 0f;
@@ -1406,14 +1496,13 @@ internal static partial class ContactResponse
         state.RelocationPausedBySuppression = false;
 
         if (pausedRelocation && state.Relocating)
-            ResumePausedRelocation(ai, state, soldierId, now, "Suppression-disabled cover path resume failed");
+            ResumePausedRelocation(ai, soldier, state, soldierId, now, "Suppression-disabled cover path resume failed");
 
-        if (ownedMovement && !ContactOrHazardOwnsMovement(soldier, state, soldierId, now))
-            ai.moveCharacter = true;
-        if (ownedFire)
+        if (ownedMovement)
         {
-            state.FireRestorePending = true;
-            RestoreFireAfterOwnedInhibition(ai, soldier);
+            ApplyMovementDecision(
+                ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
+                SoldierPose.Crouch, "suppression-disabled");
         }
     }
 
@@ -1425,7 +1514,6 @@ internal static partial class ContactResponse
         float now)
     {
         var ownedMovement = state.SuppressionMovementOwned;
-        var ownedFire = state.SuppressionFireInhibited;
         state.SuppressionMovementOwned = false;
         state.SuppressionFireInhibited = false;
         state.PinnedFireBlockedUntil = 0f;
@@ -1434,15 +1522,14 @@ internal static partial class ContactResponse
         {
             state.RelocationPausedBySuppression = false;
             if (state.Relocating)
-                ResumePausedRelocation(ai, state, soldierId, now, "Suppression cover path resume failed");
+                ResumePausedRelocation(ai, soldier, state, soldierId, now, "Suppression cover path resume failed");
         }
 
-        if (ownedMovement && !ContactOrHazardOwnsMovement(soldier, state, soldierId, now))
-            ai.moveCharacter = true;
-        if (ownedFire)
+        if (ownedMovement)
         {
-            state.FireRestorePending = true;
-            RestoreFireAfterOwnedInhibition(ai, soldier);
+            ApplyMovementDecision(
+                ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
+                SoldierPose.Crouch, "suppression-release");
         }
     }
 
@@ -1469,6 +1556,7 @@ internal static partial class ContactResponse
 
     private static void ResumePausedRelocation(
         SoldierAI ai,
+        Soldier soldier,
         ContactResponseState state,
         int soldierId,
         float now,
@@ -1482,20 +1570,16 @@ internal static partial class ContactResponse
                 state.RelocateDestinationPosition,
                 soldierId,
                 state.RelocateUntil + 2f);
-        if (!state.RelocationPausedByCloseFire)
+        // Only re-path a soldier nothing is currently holding. This replaces the
+        // RelocationPausedByCloseFire read: "a close-contact halt still owns him" is one
+        // case of the arbiter reporting a halting owner, and asking the ladder is both
+        // cheaper to reason about and impossible to leave stale.
+        if (!MovementArbiterCore.Halts(
+                ResolveMovementOwner(soldier, state, soldierId, now, MovementOwner.Free)))
+        {
             RefreshPath(ai, warning);
+        }
     }
-
-    private static bool ContactOrHazardOwnsMovement(
-        Soldier soldier,
-        ContactResponseState state,
-        int soldierId,
-        float now)
-        => (Settings.DangerReactionsEnabled.Value &&
-            (soldier.IsOnFire || AiState.IsFlameEvading(soldierId, now))) ||
-           (Settings.ContactResponseEnabled.Value &&
-            (state.MovementInhibitedByContactResponse || now < state.EngagementHoldUntil ||
-             (soldier.IsOnCover() && now < state.HoldCoverUntil)));
 
     private static bool TryGetAttackWaypoint(Soldier soldier, out Vector3 waypoint)
     {
@@ -1572,44 +1656,146 @@ internal static partial class ContactResponse
         }
     }
 
-    internal static void RestoreFireAfterOwnedInhibition(SoldierAI ai, Soldier soldier)
+    /// <summary>
+    /// THE per-soldier fire arbiter (plan 017). Computes the single reason the trigger is
+    /// withheld this frame, in strict priority order, from existing predicates - the one
+    /// place the fire channel is decided. It replaces the old many-writers /
+    /// <c>FireRestorePending</c> restore handshake, whose failure mode was a soldier left
+    /// permanently mute because no site re-ran the consume step after a transition.
+    /// </summary>
+    internal static FireBlocker ComputeFireDecision(
+        SoldierAI ai,
+        Soldier soldier,
+        ContactResponseState state,
+        float now)
     {
         var id = soldier.GetInstanceID();
-        var state = AiState.GetContactState(id);
-        if (!state.FireRestorePending)
-            return;
 
-        if (state.FireInhibitedByMovement || state.FireInhibitedByRange ||
-            state.FireInhibitedByArmoredTarget ||
-            state.ExposedReloadProneOwned ||
-            state.SuppressionFireInhibited ||
-            MountedGunnerSuppression.IsFireInhibited(id) ||
-            (Settings.DangerReactionsEnabled.Value &&
-             (soldier.IsOnFire || AiState.IsFlameEvading(id, Time.time))))
-        {
-            return;
-        }
+        // a. Not ours to write: a mounted gunner's fire is owned by the separate mounted
+        // suppression channel, and a dead or externally driven soldier keeps native fire.
+        if (!soldier.IsAlive || !AiOwnership.IsAutonomous(soldier) || soldier.IsOnVehicle())
+            return FireBlocker.NativeControl;
 
-        if (Settings.ContactResponseEnabled.Value && state.ContactResponseActive && state.Relocating)
-        {
-            return;
-        }
+        var dangerReactions = Settings.DangerReactionsEnabled.Value;
+        var blocker = FireArbiterCore.Resolve(
+            false,
+            // b. A required action owns the soldier until it completes.
+            state.ExposedReloadProneOwned,
+            // c. Lethal hazard.
+            dangerReactions && (soldier.IsOnFire || AiState.IsFlameEvading(id, now)),
+            // d. Bounded shock reaction to being pinned.
+            IsPinned(id) && now < state.PinnedFireBlockedUntil,
+            // e. Out of engagement range, or small arms against armor.
+            state.FireInhibitedByRange || state.FireInhibitedByArmoredTarget,
+            // f. Evaluated below: it is the LOWEST-priority blocker and the only
+            // interop-expensive one, so anything above already decided the frame.
+            false);
+        if (blocker != FireBlocker.None)
+            return blocker;
 
-        // This is a permission flag, not a request to shoot. Releasing it without
-        // a current target is necessary so a later native acquisition is not
-        // blocked by a stale false value owned by this mod.
-        ai.allowFireAtEnemy = true;
-        state.FireRestorePending = false;
+        return IsMovingWithoutMovingFire(ai, soldier, state)
+            ? FireBlocker.Moving
+            : FireBlocker.None;
     }
 
-    private static void GrantFirePermissionIfReady(SoldierAI ai, Soldier soldier)
+    private static bool IsMovingWithoutMovingFire(
+        SoldierAI ai,
+        Soldier soldier,
+        ContactResponseState state)
     {
-        var state = AiState.GetContactState(soldier.GetInstanceID());
-        if (state.ExposedReloadProneOwned || soldier.IsReloading)
+        // A contact-owned hard stop is already cancelling locomotion this frame. Residual
+        // velocity must not withhold the trigger from a soldier who has halted to engage.
+        if (state.MovementInhibitedByContactResponse && !state.SuppressionMovementOwned)
+            return false;
+
+        // Player-led squad members keep moveCharacter set while following their leader even
+        // when they have halted to engage, so use actual locomotion.
+        return soldier.IsMoving() && !HandheldWeaponClassifier.AllowsMovingFire(soldier, ai);
+    }
+
+    /// <summary>
+    /// THE single write site for <c>allowFireAtEnemy</c> on the foot-soldier path. Resolves
+    /// the arbiter and applies it; no other site writes the flag for a soldier on foot.
+    /// Because the decision is recomputed rather than latched, a soldier whose blocker
+    /// clears regains permission on the very next frame with no handshake to miss.
+    /// <paramref name="authoritative"/> marks the director's per-soldier tick, which
+    /// re-asserts permission at the same cadence the deleted grant sites used; the
+    /// per-frame movement passes only act on a change so they never overwrite the native
+    /// flag on frames where this mod has nothing to say.
+    /// </summary>
+    internal static void ApplyFireDecision(
+        SoldierAI ai,
+        Soldier soldier,
+        float now,
+        bool authoritative)
+    {
+        if (ai == null || soldier == null || !MultiplayerAuthority.CanMutateGameplay())
             return;
 
-        ai.allowFireAtEnemy = true;
+        var state = AiState.GetContactState(soldier.GetInstanceID());
+        var blocker = ComputeFireDecision(ai, soldier, state, now);
+        var changed = blocker != state.LastFireBlocker;
+        TraceFireDecision(soldier, state, blocker, changed, now);
+        state.FireInhibitedByMovement = blocker == FireBlocker.Moving;
+        if (blocker == FireBlocker.NativeControl)
+            return;
+
+        if (FireArbiterCore.MayFire(blocker))
+        {
+            // This is a permission flag, not a request to shoot. Releasing it without a
+            // current target is necessary so a later native acquisition is not blocked by
+            // a stale false value owned by this mod.
+            if (authoritative || changed)
+                ai.allowFireAtEnemy = true;
+            return;
+        }
+
+        ai.allowFireAtEnemy = false;
+
+        // The soldier keeps tracking the threat while the arbiter withholds the trigger
+        // (plan 017 item 5) - that is what lets him shoot the instant he halts instead of
+        // re-acquiring. Only a lethal hazard or the pinned shock breaks his aim.
+        if (blocker is FireBlocker.Hazard or FireBlocker.PinnedShock)
+            ai.aimingEnemy = false;
+        if (blocker == FireBlocker.Range)
+            ai.targetInWeaponRange = false;
+        soldier.StopFire();
     }
+
+    private static void TraceFireDecision(
+        Soldier soldier,
+        ContactResponseState state,
+        FireBlocker blocker,
+        bool changed,
+        float now)
+    {
+        if (!changed)
+            return;
+
+        var previous = state.LastFireBlocker;
+        state.LastFireBlocker = blocker;
+        if (!Settings.VerboseLogging.Value)
+            return;
+
+        AiState.Trace(
+            $"Fire decision: soldier {soldier.GetInstanceID()} " +
+            $"{FireBlockerTag(previous)}->{FireBlockerTag(blocker)} " +
+            $"moving={(soldier.IsMoving() ? 1 : 0)} " +
+            $"relocating={(state.Relocating ? 1 : 0)} " +
+            $"pinnedShockRemain={Mathf.Max(0f, state.PinnedFireBlockedUntil - now):0.0}s");
+    }
+
+    private static string FireBlockerTag(FireBlocker blocker)
+        => blocker switch
+        {
+            FireBlocker.RequiredAction => "required-action",
+            FireBlocker.Hazard => "hazard",
+            FireBlocker.PinnedShock => "pinned-shock",
+            FireBlocker.Range => "range",
+            FireBlocker.Moving => "moving",
+            FireBlocker.NativeControl => "native",
+            _ => "may-fire"
+        };
 
     private static void UpdatePinnedState(ContactResponseState state, int suppression, float now)
     {
@@ -1618,71 +1804,88 @@ internal static partial class ContactResponse
             state.Pinned = false;
             state.PinnedUntil = 0f;
             state.PinnedFireBlockedUntil = 0f;
+            state.PinnedSince = 0f;
+            state.PinnedImmunityUntil = 0f;
             return;
         }
 
-        if (suppression >= Settings.ProneSuppression.Value)
+        // While already pinned, a bounded time cap can force a release even under
+        // suppression still above the normal release threshold; check it before
+        // the ordinary high-suppression re-affirmation below so the cap actually
+        // fires instead of being pre-empted every frame by the suppression branch.
+        if (state.Pinned)
         {
-            if (!state.Pinned)
-                state.PinnedFireBlockedUntil = now + PinnedShockSeconds;
+            var release = PinnedReleaseCore.EvaluatePinnedRelease(
+                state.PinnedSince,
+                state.PinnedUntil,
+                suppression,
+                Settings.ProneReleaseSuppression.Value,
+                Settings.MaximumPinnedSeconds.Value,
+                now);
+            if (release.Released)
+            {
+                state.Pinned = false;
+                state.PinnedFireBlockedUntil = 0f;
+                state.PinnedImmunityUntil = release.GrantsImmunity
+                    ? now + Settings.PinnedImmunitySeconds.Value
+                    : 0f;
+                return;
+            }
+
+            if (suppression >= Settings.ProneSuppression.Value)
+                state.PinnedUntil = Mathf.Max(state.PinnedUntil, now + Settings.PinnedMinimumSeconds.Value);
+            return;
+        }
+
+        // A time-cap release grants a short re-pin immunity window: the same
+        // incoming fire that forced the release must not instantly re-pin the
+        // soldier before it can act on it.
+        if (PinnedReleaseCore.ShouldEngagePin(
+                suppression, Settings.ProneSuppression.Value, state.PinnedImmunityUntil, now))
+        {
+            state.PinnedFireBlockedUntil = now + PinnedShockSeconds;
             state.Pinned = true;
+            state.PinnedSince = now;
             state.PinnedUntil = Mathf.Max(state.PinnedUntil, now + Settings.PinnedMinimumSeconds.Value);
-            return;
-        }
-
-        if (state.Pinned && now >= state.PinnedUntil && suppression <= Settings.ProneReleaseSuppression.Value)
-        {
-            state.Pinned = false;
-            state.PinnedFireBlockedUntil = 0f;
         }
     }
 
-    internal static void StopTacticalMovement(
+    // Halt helpers are OWNER DECLARATIONS now, not independent writers (plan 018) - the
+    // same treatment plan 014 gave them on the pose channel. They record the ownership the
+    // caller is claiming and hand the frame to the single movement arbiter, which decides
+    // whether that claim actually wins and performs the one moveCharacter/StopMove write.
+    // The caller's <paramref name="fallbackPose"/> is still only the pose arbiter's
+    // ownerless fallback.
+    internal static MovementOwner StopTacticalMovement(
         SoldierAI ai,
         Soldier soldier,
-        SoldierPose pose,
+        SoldierPose fallbackPose,
         float deltaTime,
         string proposalSource = "stop-tactical")
     {
         AiState.GetContactState(soldier.GetInstanceID()).MovementInhibitedByContactResponse = true;
-        ai.moveCharacter = false;
-        EnsureTacticalPose(ai, soldier, pose, proposalSource);
-        soldier.isSprinting = false;
-        soldier.StopMove(pose, deltaTime);
+        return ApplyMovementDecision(
+            ai, soldier, deltaTime, Time.time, MovementOwner.Free, fallbackPose, proposalSource);
     }
 
-    internal static void StopDangerMovement(
+    /// <param name="declared">The owner this halt claims when it has no state of its own
+    /// to resolve from (a grenade-safety or required-action halt). Halts whose ownership
+    /// IS state - tank hide, the stall watchdog, burning - leave it Free and let the
+    /// arbiter read their timers, so their rank is not silently promoted.</param>
+    internal static MovementOwner StopDangerMovement(
         SoldierAI ai,
         Soldier soldier,
-        SoldierPose pose,
+        SoldierPose fallbackPose,
         float deltaTime,
-        string proposalSource = "stop-danger")
-    {
-        ai.moveCharacter = false;
-        EnsureTacticalPose(ai, soldier, pose, proposalSource);
-        soldier.isSprinting = false;
-        soldier.StopMove(pose, deltaTime);
-    }
+        string proposalSource = "stop-danger",
+        MovementOwner declared = MovementOwner.Free)
+        => ApplyMovementDecision(
+            ai, soldier, deltaTime, Time.time, declared, fallbackPose, proposalSource);
 
     // Low-level soldier command executor. Tactical feature modules request these
     // mutations through GroundAiDirector so movement, pose, aim, and fire policy
-    // cannot independently fight over the same native state.
-    internal static void ExecuteFireInhibition(
-        SoldierAI? ai,
-        Soldier soldier,
-        bool clearWeaponRange)
-    {
-        if (ai != null)
-        {
-            ai.allowFireAtEnemy = false;
-            ai.aimingEnemy = false;
-            if (clearWeaponRange)
-                ai.targetInWeaponRange = false;
-        }
-
-        soldier.StopFire();
-    }
-
+    // cannot independently fight over the same native state. Fire PERMISSION is not
+    // among them any more: only ApplyFireDecision writes allowFireAtEnemy.
     internal static void ExecuteStopFire(Soldier soldier)
         => soldier.StopFire();
 
@@ -1695,7 +1898,13 @@ internal static partial class ContactResponse
         Vector3 escape)
     {
         ai.MoveDirectlyToward(escape, 1.5f);
+        // The movement decision is committed FIRST (plan 019): the pose ladder now reads the
+        // committed movement owner, so resolving the pose before the escape was granted
+        // would arbitrate this frame against the PREVIOUS decision - the one stale case that
+        // could still put a running man on his belly.
+        ApplyMovementDecision(
+            ai, soldier, Time.deltaTime, Time.time, MovementOwner.HazardEscape,
+            SoldierPose.Crouch, "hazard-escape");
         SetTacticalPose(ai, soldier, SoldierPose.Crouch, "hazard-escape");
-        ai.moveCharacter = true;
     }
 }

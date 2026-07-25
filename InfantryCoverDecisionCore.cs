@@ -48,7 +48,12 @@ internal readonly record struct CoverScoreInput(
     float ExposedRouteMeters,
     float ExposedRouteFraction,
     float PrimaryProtectionFraction = 1f,
-    bool PreferProtectionOverFiringLine = false);
+    bool PreferProtectionOverFiringLine = false,
+    // Count of other soldiers' active cover reservations within the dispersion
+    // radius of this candidate (plan 016). A light tie-breaking term only - it must
+    // never outweigh a genuine protection difference, so its weight in Score() stays
+    // well below the smallest meaningful protectionPenalty swing.
+    int NearbyReservationCount = 0);
 
 internal readonly record struct CoverPostureInput(
     int ProtectedSamples,
@@ -268,6 +273,12 @@ internal static class InfantryCoverDecisionCore
             : Math.Clamp(input.PrimaryProtectionFraction, 0f, 1f);
         var protectionPenalty = (1f - protectionFraction) *
                                 (input.PreferProtectionOverFiringLine ? 1600f : 700f);
+        // Crowding is a tie-breaker (plan 016), not a survival factor: 25 per
+        // squadmate already reserved nearby is small next to any real protection
+        // difference (a 0.05 protection swing alone moves protectionPenalty by
+        // 35-80), so it nudges the 2nd-9th soldier off an equally good slot without
+        // ever pulling anyone off genuinely better cover.
+        var crowdingPenalty = Math.Max(0, input.NearbyReservationCount) * 25f;
         var firePenalty = input.AssignedPoseCanFire
             ? 0f
             : input.StandingCanFire
@@ -296,7 +307,8 @@ internal static class InfantryCoverDecisionCore
                    input.UnprotectedSecondaryThreats * 400f +
                    input.ExposedRouteMeters * 4f +
                    protectionPenalty * 1.25f +
-                   firePenalty;
+                   firePenalty +
+                   crowdingPenalty;
         }
 
         if (mode == CoverSelectionMode.Urgent)
@@ -308,7 +320,8 @@ internal static class InfantryCoverDecisionCore
                    input.UnprotectedSecondaryThreats * 200f +
                    input.ExposedRouteMeters * 18f +
                    protectionPenalty * 0.5f +
-                   firePenalty;
+                   firePenalty +
+                   crowdingPenalty;
         }
 
         return (input.PreferProtectionOverFiringLine
@@ -318,7 +331,8 @@ internal static class InfantryCoverDecisionCore
                input.UnprotectedSecondaryThreats * 350f +
                input.ExposedRouteMeters * 35f +
                protectionPenalty +
-               firePenalty;
+               firePenalty +
+               crowdingPenalty;
     }
 
     internal static bool CoverPositionsConflict(
@@ -655,6 +669,42 @@ internal static class CoverSearchBackoffCore
             return Math.Max(baseIntervalSeconds, SecondFailureDelaySeconds);
         return Math.Max(baseIntervalSeconds, SustainedFailureDelaySeconds);
     }
+}
+
+/// <summary>
+/// Bounds the tank-fear "no reachable cover" wait. A soldier who conclusively cannot
+/// reach tank-masked cover must resume his orders instead of freezing prone in the
+/// open indefinitely. The streak counts only conclusive urgent-search misses; a gap
+/// wider than one search cycle between misses means the soldier stopped open-field
+/// waiting (reached cover, the tank left, the order changed), so the next miss starts
+/// a fresh streak. That self-reset re-arms the hide automatically on a materially new
+/// situation, and a successful cover commit re-arms it explicitly — no external reset
+/// plumbing, so the whole decision stays pure and testable.
+/// </summary>
+internal static class TankCoverWaitCore
+{
+    // Two conclusive urgent-search misses (~one full urgent reassessment cycle of
+    // prone waiting) is enough to establish that no tank-masked cover is reachable.
+    internal const int MaxConsecutiveFailuresBeforeResume = 2;
+
+    // A gap wider than this between misses means the soldier was not continuously
+    // open-field waiting; the next miss starts a fresh streak. Must exceed the urgent
+    // reassessment interval so consecutive real searches keep accumulating.
+    internal const float FailureStreakResetSeconds = 6f;
+
+    internal static int RecordFailure(int previousFailures, float lastFailureAt, float now)
+    {
+        if (previousFailures <= 0 || lastFailureAt <= 0f ||
+            !float.IsFinite(lastFailureAt) || now - lastFailureAt > FailureStreakResetSeconds)
+        {
+            return 1;
+        }
+
+        return previousFailures + 1;
+    }
+
+    internal static bool ShouldResumeOrders(int consecutiveFailures)
+        => consecutiveFailures >= MaxConsecutiveFailuresBeforeResume;
 }
 
 internal static class PlayerHoldPositionCore

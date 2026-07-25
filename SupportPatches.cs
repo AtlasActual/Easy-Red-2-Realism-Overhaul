@@ -202,6 +202,15 @@ internal static class AtmosphericParticlePersistencePatch
 
     private static PersistentEffect Classify(StopParticleDelayed component)
     {
+        // This setting exists to make ordnance leave haze hanging over the battlefield.
+        // An emitter carried by a projectile is a different thing entirely: stretching a
+        // rocket's exhaust to six times its native duration leaves the trail smearing
+        // through the air long after the warhead has gone. The game's projectiles are
+        // plain Il2CppSystem.Objects rather than components, so there is nothing to walk
+        // the hierarchy for - the name is the only signal available here.
+        if (HierarchyNameMatches(component, NameLooksLikeProjectileTrail))
+            return PersistentEffect.None;
+
         // Dust takes precedence over the generic "cloud" smoke identifier so a
         // child named, for example, "Dust Cloud" uses the explosion-dust setting.
         if (HierarchyNameMatches(component, NameLooksLikeDust))
@@ -257,6 +266,20 @@ internal static class AtmosphericParticlePersistencePatch
         return !string.IsNullOrEmpty(name) &&
                (name.IndexOf("smoke", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 name.IndexOf("cloud", StringComparison.OrdinalIgnoreCase) >= 0);
+    }
+
+    private static bool NameLooksLikeProjectileTrail(string? name)
+    {
+        if (string.IsNullOrEmpty(name))
+            return false;
+
+        return name.IndexOf("trail", StringComparison.OrdinalIgnoreCase) >= 0 ||
+               name.IndexOf("rocket", StringComparison.OrdinalIgnoreCase) >= 0 ||
+               name.IndexOf("missile", StringComparison.OrdinalIgnoreCase) >= 0 ||
+               name.IndexOf("tracer", StringComparison.OrdinalIgnoreCase) >= 0 ||
+               name.IndexOf("exhaust", StringComparison.OrdinalIgnoreCase) >= 0 ||
+               name.IndexOf("propell", StringComparison.OrdinalIgnoreCase) >= 0 ||
+               name.IndexOf("bullet", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 }
 
@@ -494,6 +517,7 @@ internal sealed class AtmosphericParticlePersistenceController : MonoBehaviour
     {
         DistantSoundShaper.UpdateTrackedExplosions();
         AtmosphericParticleEmissionPersistence.Update();
+        AudioSourceCacheMaintenance.Update(Time.unscaledTime);
     }
 }
 
@@ -561,11 +585,6 @@ internal static class SquadRadioSupport
     internal static void Update(Squad squad, float now)
     {
         if (!Settings.SmokeSupportEnabled.Value || !MultiplayerAuthority.CanMutateGameplay())
-            return;
-
-        // Commander-owned squads use a deliberate, operation-level smoke screen.
-        // Keep the legacy per-opportunity random request for every other squad.
-        if (CommanderMvp.ControlsSquadSupport(squad))
             return;
 
         try

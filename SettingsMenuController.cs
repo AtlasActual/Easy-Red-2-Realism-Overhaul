@@ -286,17 +286,19 @@ internal sealed class SettingsMenuController : MonoBehaviour
         GUI.enabled = wasEnabled && !SettingsSyncController.AreSettingsReadOnly && _draft != null;
         if (DrawButton(enableAllRect, "ENABLE ALL SYSTEMS", SuccessDarkColor, SuccessColor, BorderColor, _buttonStyle!))
         {
-            var changed = _draft!.SetAllSwitches(true);
+            var changed = _draft!.EnableAllSwitches(out var restored);
             _message = changed == 0
-                ? "All system switches are already enabled."
-                : $"Enabled {changed} system switches. Apply to save.";
+                ? (restored ? "Your saved system-switch mix is already active." : "All system switches are already enabled.")
+                : restored
+                    ? $"Restored your saved system-switch settings ({changed} changed). Apply to save. Click again to enable everything."
+                    : $"Enabled {changed} system switches. Apply to save.";
         }
         if (DrawButton(disableAllRect, "DISABLE ALL SYSTEMS", RaisedColor, DangerColor, BorderColor, _buttonStyle!))
         {
             var changed = _draft!.SetAllSwitches(false);
             _message = changed == 0
                 ? "All system switches are already disabled."
-                : $"Disabled {changed} system switches. Apply to save.";
+                : $"Disabled {changed} system switches. Your current mix will be restored by ENABLE ALL. Apply to save.";
         }
         if (DrawButton(resetCategoryRect, "RESET CATEGORY", RaisedColor, HoverColor, BorderColor, _buttonStyle!))
         {
@@ -1114,7 +1116,10 @@ internal sealed class SettingsMenuController : MonoBehaviour
             if (keyCode == KeyCode.None || (int)keyCode >= (int)KeyCode.JoystickButton0 || !Input.GetKeyDown(keyCode))
                 continue;
 
-            var setting = SettingsCatalog.All.FirstOrDefault(candidate => candidate.Id == _capturingKeybindId);
+            // Capture into a local so the lambda lands in a display class instead of
+            // this IL2CPP-registered type (avoids an Il2CppInterop unsupported-parameter warning).
+            var capturingId = _capturingKeybindId;
+            var setting = SettingsCatalog.All.FirstOrDefault(candidate => candidate.Id == capturingId);
             if (setting == null)
             {
                 _capturingKeybindId = null;

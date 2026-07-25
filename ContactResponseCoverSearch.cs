@@ -44,6 +44,72 @@ internal static class CoverOccupancy
             ModTimeProbe.EndSub(ModSubSite.Occupancy, __t);
         }
     }
+
+    /// <summary>
+    /// Nearest already-halted friendly within <paramref name="radius"/> (plan 018 item 3).
+    /// Only an ALREADY-HALTED neighbour makes a doorway stack - two men walking the same
+    /// path are not crowding anything yet - so the movement arbiter's own MovementHalted
+    /// output is the filter. Same bounded overlap query as the occupancy check above, and
+    /// it runs only on the rising edge of a fighting halt behind a long cooldown.
+    /// </summary>
+    internal static bool TryFindHaltedNeighbour(
+        Vector3 position,
+        Soldier soldier,
+        float radius,
+        out Vector3 neighbourPosition)
+    {
+        neighbourPosition = default;
+        var __t = ModTimeProbe.Begin();
+        try
+        {
+            var nearby = _nearbyColliders ??= new Collider[24];
+            var count = Physics.OverlapSphereNonAlloc(
+                position,
+                radius,
+                nearby,
+                Physics.AllLayers,
+                QueryTriggerInteraction.Ignore);
+            var nearestSqr = radius * radius;
+            var found = false;
+            for (var index = 0; index < count; index++)
+            {
+                var collider = nearby[index];
+                if (collider == null)
+                    continue;
+
+                var other = collider.GetComponentInParent<Soldier>();
+                if (other == null || other.GetInstanceID() == soldier.GetInstanceID() ||
+                    !other.IsAlive || other.IsOnVehicle() ||
+                    !other.gameObject.activeInHierarchy ||
+                    !string.Equals(other.faction, soldier.faction, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (!AiState.ContactStates.TryGetValue(
+                        other.GetInstanceID(), out var otherState) ||
+                    !otherState.MovementHalted)
+                {
+                    continue;
+                }
+
+                var otherPosition = other.transform.position;
+                var distanceSqr = (otherPosition - position).sqrMagnitude;
+                if (distanceSqr > nearestSqr)
+                    continue;
+
+                nearestSqr = distanceSqr;
+                neighbourPosition = otherPosition;
+                found = true;
+            }
+
+            return found;
+        }
+        finally
+        {
+            ModTimeProbe.EndSub(ModSubSite.Occupancy, __t);
+        }
+    }
 }
 
 internal static partial class ContactResponse
@@ -500,7 +566,8 @@ internal static partial class ContactResponse
             ClaimCoverClearancePose(soldier, state);
             var ai = soldier.aiController;
             if (ai != null)
-                EnsureTacticalPose(ai, soldier, SoldierPose.Idle, "blocked-shot-stand");
+                ApplyArbitratedPose(
+                    ai, soldier, Time.time, resolveDecisionTail: true, SoldierPose.Idle, "blocked-shot-stand");
         }
 
         // Withhold the obstructed round. Once the standing animation clears a low
@@ -558,8 +625,6 @@ internal static partial class ContactResponse
                                     TryGetAttackWaypoint(soldier, out attackWaypoint);
         var enforceDefensiveArea = TryGetDefensiveArea(
             soldier, out var defensiveCenter, out var defensiveRadius);
-        var enforceSquadCohesion = GroundAiDirector.TryGetCommanderCohesionAnchor(
-            soldier.joinedSquad, out var cohesionCenter, out var cohesionRadius);
         if (enforceDefensiveArea)
         {
             searchRadius = Mathf.Max(
@@ -576,8 +641,6 @@ internal static partial class ContactResponse
         var knownThreats = new List<Vector3>(MaximumCoverThreats) { targetPosition };
         if (directFirePosition.HasValue)
             AppendDistinctThreat(knownThreats, directFirePosition.Value);
-        ContactKnowledge.AppendRecentGroundThreatPositions(
-            soldier, now, knownThreats, MaximumCoverThreats);
 
         var candidates = CoverManager.GetCovers(
             position,
@@ -620,6 +683,12 @@ internal static partial class ContactResponse
 
                 if (!ExclusiveCoverAssignmentPatch.TryGetUsableCoverPosition(candidate, out var coverPosition))
                     continue;
+                // HARD filter: small on purpose (plan 016 review). Its only job is
+                // "two soldiers must not claim the same physical slot". Dispersion is
+                // delivered by the soft crowding penalty in the scoring loop below,
+                // which can never make a candidate ineligible — a wide exclusion here
+                // would strand soldiers in the open whenever a trench or building has
+                // its slots a couple of metres apart.
                 if (AiState.CoverReservedByOther(
                         candidateId,
                         coverPosition,
@@ -634,14 +703,6 @@ internal static partial class ContactResponse
                         new MapPoint(coverPosition.x, coverPosition.z),
                         new MapPoint(defensiveCenter.x, defensiveCenter.z),
                         defensiveRadius))
-                {
-                    continue;
-                }
-                if (enforceSquadCohesion &&
-                    !SquadCohesionCore.AllowsCover(
-                        new MapPoint(coverPosition.x, coverPosition.z),
-                        new MapPoint(cohesionCenter.x, cohesionCenter.z),
-                        cohesionRadius))
                 {
                     continue;
                 }
@@ -751,6 +812,15 @@ internal static partial class ContactResponse
                     : selectedPosture;
                 var primaryProtectionFraction =
                     InfantryCoverDecisionCore.ProtectionFraction(protectionPosture);
+                // Crowding term (plan 016): count other soldiers' active reservations
+                // within dispersion range of this candidate, reusing the reservation
+                // map already consulted above - no extra physics or allocation inside
+                // this budgeted detailed loop.
+                var nearbyReservations = AiState.CountNearbyReservations(
+                    coverPosition,
+                    soldier.GetInstanceID(),
+                    now,
+                    InfantryCoverPolicy.CoverDispersionSpacingMeters);
                 var scoreInput = new CoverScoreInput(
                     distanceSqr,
                     posePenalty,
@@ -761,7 +831,8 @@ internal static partial class ContactResponse
                     Mathf.Sqrt(distanceSqr) * exposedRouteFraction,
                     exposedRouteFraction,
                     primaryProtectionFraction,
-                    PreferProtectionOverFiringLine: defensiveOccupation);
+                    PreferProtectionOverFiringLine: defensiveOccupation,
+                    NearbyReservationCount: nearbyReservations);
                 var score = InfantryCoverDecisionCore.Score(selectionMode, scoreInput);
                 if (!InfantryCoverDecisionCore.IsRouteAcceptable(selectionMode, scoreInput))
                 {
@@ -1228,7 +1299,6 @@ internal static partial class ContactResponse
         state.ConsecutiveCoverSearchFailures = 0;
         state.LastOutgoingShotWasStationary = false;
         state.RelocationPausedBySuppression = false;
-        state.RelocationPausedByCloseFire = false;
         state.EngagementHoldUntil = 0f;
         state.RelocateUntil = relocateUntil;
         state.RelocateLastDistance = soldier.DestinationDistance;
@@ -1316,20 +1386,19 @@ internal static partial class ContactResponse
         }
 
         state.EngagementHoldUntil = 0f;
+        // Leaving a position ends the hold on it. Stated here rather than only in
+        // ReleaseManeuverCoverForAuthorizedMove (which keeps an anchored defender's hold)
+        // because CoverHold outranks CommittedMove: a stale hold would otherwise halt the
+        // dash it was just released for. FinishRelocation re-arms the hold on arrival, and
+        // UpdateDefensiveCoverHold re-asserts an anchor's own hold on its next tick.
+        state.HoldCoverUntil = 0f;
         state.ContactCrouchOwned = true;
-        var canFireWhileMoving = HandheldWeaponClassifier.AllowsMovingFire(soldier, ai);
-        if (!canFireWhileMoving)
-        {
-            state.FireRestorePending = true;
-            ai.allowFireAtEnemy = false;
-            ai.aimingEnemy = false;
-            soldier.StopFire();
-        }
-        ai.moveCharacter = true;
-        state.MovementInhibitedByContactResponse = false;
-        EnsureTacticalPose(ai, soldier, SoldierPose.Crouch, "cover-move");
-        if (canFireWhileMoving && GetActionableTarget(ai, soldier) != null)
-            GrantFirePermissionIfReady(ai, soldier);
+        ApplyMovementDecision(
+            ai, soldier, Time.deltaTime, now, MovementOwner.CommittedMove,
+            SoldierPose.Crouch, "cover-move");
+        // The moving-fire rule is the arbiter's rank f; this dash no longer re-states it.
+        ApplyArbitratedPose(
+            ai, soldier, now, resolveDecisionTail: true, SoldierPose.Crouch, "cover-move");
     }
 
     private static void ContinueAttackObjectiveMovement(
@@ -1354,22 +1423,21 @@ internal static partial class ContactResponse
         state.EngagementHoldUntil = 0f;
         state.SuppressionMovementOwned = false;
         state.RelocationPausedBySuppression = false;
-        state.MovementInhibitedByContactResponse = false;
         state.ContactCrouchOwned = true;
         state.SuppressionPoseOwned = suppressed;
-        ai.moveCharacter = true;
+        ApplyMovementDecision(
+            ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
+            SoldierPose.Crouch, "attack-advance");
         soldier.isSprinting = false;
 
         if (state.SuppressionFireInhibited && now >= state.PinnedFireBlockedUntil)
-        {
             state.SuppressionFireInhibited = false;
-            state.FireRestorePending = true;
-            RestoreFireAfterOwnedInhibition(ai, soldier);
-        }
 
-        EnsureTacticalPose(
+        ApplyArbitratedPose(
             ai,
             soldier,
+            now,
+            resolveDecisionTail: true,
             state.Pinned ||
             (Settings.DangerReactionsEnabled.Value &&
              soldier.GetSuppressionValue() >= Settings.ProneSuppression.Value)
@@ -1386,12 +1454,11 @@ internal static partial class ContactResponse
         }
     }
 
-    private static bool IsCommanderAttacker(Soldier soldier)
+    private static bool IsAttackingSquadSoldier(Soldier soldier)
     {
         try
         {
-            var squad = soldier.joinedSquad;
-            return squad != null && GroundAiDirector.OwnsSquad(squad) &&
+            return soldier.joinedSquad != null &&
                    GroundAiDirector.IsAttackingFaction(soldier.faction);
         }
         catch (NullReferenceException)
@@ -1436,7 +1503,6 @@ internal static partial class ContactResponse
         if (!state.Relocating)
             return;
 
-        state.FireRestorePending = true;
         if (!completedMove && markFailedCover)
             MarkFailedCover(state, state.ReservedCoverId, now);
         else if (completedMove && state.FailedCoverId == state.ReservedCoverId)
@@ -1449,7 +1515,6 @@ internal static partial class ContactResponse
             soldierId,
             completedMove ? "selected cover reached" : "cover move ended before arrival");
         state.RelocationPausedBySuppression = false;
-        state.RelocationPausedByCloseFire = false;
         state.RelocateLastDistance = 0f;
         state.RelocateLastProgressAt = 0f;
         state.RelocateLastProgressPosition = default;
@@ -1458,10 +1523,9 @@ internal static partial class ContactResponse
         state.RelocateDestinationPosition = default;
         if (completedMove)
         {
+            var hasAttackRoute = TryGetAttackWaypoint(soldier, out _);
             state.AttackProgressForced = false;
-            state.AttackHaltStartedAt = TryGetAttackWaypoint(soldier, out _)
-                ? Mathf.Max(now, 0.0001f)
-                : 0f;
+            state.AttackHaltStartedAt = hasAttackRoute ? Mathf.Max(now, 0.0001f) : 0f;
             if (state.ReservedCoverId != IntPtr.Zero)
             {
                 state.ManeuverCoverAnchorId = state.ReservedCoverId;
@@ -1475,8 +1539,12 @@ internal static partial class ContactResponse
                 {
                     // Attackers still wait for covering fire before the next bound —
                     // that gate is enforced by ShouldAuthorizeAttackBound after this
-                    // hold expires, not by an unreachable +inf timer (plan 012).
-                    state.HoldCoverUntil = now + InfantryCoverPolicy.MinimumManeuverCoverHoldSeconds;
+                    // hold expires, not by an unreachable +inf timer (plan 012). D5
+                    // (plan 015): an attacker rearms this on a short assault tempo;
+                    // a soldier with no attack route keeps the long defender hold.
+                    state.HoldCoverUntil = now + (hasAttackRoute
+                        ? InfantryCoverPolicy.MinimumAttackCoverHoldSeconds
+                        : InfantryCoverPolicy.MinimumManeuverCoverHoldSeconds);
                 }
             }
         }
@@ -1492,7 +1560,7 @@ internal static partial class ContactResponse
                 state.ReservedCoverId,
                 occupiedCoverPosition,
                 soldierId,
-                now + 2f);
+                now + InfantryCoverPolicy.DecisionIntervalSeconds);
         }
         else
         {
@@ -1514,7 +1582,10 @@ internal static partial class ContactResponse
         // native objective route. Moving fire remains available during a committed
         // cover dash or an explicitly authorized attack bound; without either, the
         // soldier stops, reduces his silhouette, observes, and returns fire.
-        state.EngagementHoldUntil = float.PositiveInfinity;
+        // D4 (plan 015): every caller of this method only runs while target != null
+        // in UpdateInternal, so the hold is bounded to the contact's own
+        // persistence timer instead of +inf.
+        state.EngagementHoldUntil = state.ContactUntil;
         state.ContactCrouchOwned = true;
         var stationaryPose = preferProne && !IsOnUsableCover(soldier)
             ? SoldierPose.Prone
@@ -1526,7 +1597,5 @@ internal static partial class ContactResponse
             Time.deltaTime,
             "respond-nocover");
         FaceThreatWhenStationary(ai, soldier, targetPosition);
-        if (GetActionableTarget(ai, soldier) != null)
-            GrantFirePermissionIfReady(ai, soldier);
     }
 }

@@ -806,15 +806,27 @@ internal static class BulletPenetration
         return budget > 0.001f;
     }
 
+    private static bool Detonates(BulletData bulletData) =>
+        ProjectilePenetrationEligibilityCore.Detonates(
+            bulletData.behaviour == BulletBehaviour.ExplodeOnImpact,
+            bulletData.explosion_radius);
+
     private static bool TryClassifyProjectile(BulletData bulletData, out bool armorPiercing)
     {
         armorPiercing = false;
         try
         {
+            // Anything that detonates on contact is left entirely to the base game:
+            // a rocket or HEAT warhead functions against the first thing it touches, so
+            // carrying it through a fence and re-spawning it beyond the exit face would
+            // both misplace the blast and duplicate its trail. IsHe() alone does not
+            // cover this - it matches HE, APHE and Rocket but not HEAT.
+            if (Detonates(bulletData))
+                return false;
+
             // Small-arms bullets and large solid shot can share the AP shell enum.
             // Keep ordinary small arms energy-scaled, but give genuinely penetrative
-            // or large-caliber solid AP shot the prop-clearing budget. Explosive
-            // HEAT/APHE projectiles retain their native impact/detonation behavior.
+            // or large-caliber solid AP shot the prop-clearing budget.
             var solidApShot = bulletData.shellType == ShellType.AP;
             armorPiercing = solidApShot &&
                 (bulletData.IsAPullet() || bulletData.IsHighCaliber() || bulletData.IsVeryHighCaliber());

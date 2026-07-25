@@ -27,10 +27,18 @@ internal static class MountedGunnerSuppression
         }
 
         var soldier = ai.GetSoldier();
-        if (soldier == null || !soldier.IsAlive || !AiOwnership.IsAutonomous(soldier))
+        if (soldier == null || !soldier.IsAlive)
             return;
 
         var id = soldier.GetInstanceID();
+        if (!AiOwnership.IsAutonomous(soldier))
+        {
+            // A player who takes over a previously ducked AI gunner must not
+            // inherit the suppression latch; leaving it stale would block their
+            // stand-up on the same seat through the SetPoseVehicle prefix.
+            States.Remove(id);
+            return;
+        }
         var seat = soldier.currentVehicleSeat;
         if (!Settings.MountedGunnerSuppressionEnabled.Value)
         {
@@ -93,7 +101,7 @@ internal static class MountedGunnerSuppression
             state.FireInhibitedBySuppression = true;
             state.DuckUntil = now + Settings.MountedGunnerMinimumDuckSeconds.Value;
             state.FireAllowedAt = float.PositiveInfinity;
-            GroundAiDirector.ExecuteSoldierFireInhibition(ai, soldier);
+            SetMountedFirePermission(ai, soldier, false);
             StopMountedGun(seat, soldier);
             soldier.SetPoseVehicle(false);
             state.DuckPoseApplied = true;
@@ -104,7 +112,7 @@ internal static class MountedGunnerSuppression
         // Keep the native trigger quiet while the gunner is below the shield. The
         // Shoot prefix below is a second guard against turret AI restarting a burst.
         state.FireInhibitedBySuppression = true;
-        GroundAiDirector.ExecuteSoldierFireInhibition(ai, soldier);
+        SetMountedFirePermission(ai, soldier, false);
         StopMountedGun(seat, soldier);
         if (!state.DuckPoseApplied)
         {
@@ -130,15 +138,31 @@ internal static class MountedGunnerSuppression
     internal static bool IsFireInhibited(int soldierId)
         => States.TryGetValue(soldierId, out var state) && state.FireInhibitedBySuppression;
 
+    // The mounted duck is a SEPARATE fire channel from the foot-soldier fire arbiter
+    // (plan 017): ContactResponse.ApplyFireDecision returns FireBlocker.NativeControl and
+    // writes nothing for a soldier who IsOnVehicle(), so these two writers can never
+    // contend. The moment the gunner dismounts, the arbiter reclaims the flag and
+    // recomputes it, so a stale duck cannot leave a soldier on foot permanently mute.
+    private static void SetMountedFirePermission(SoldierAI ai, Soldier soldier, bool allowed)
+    {
+        if (ai == null)
+            return;
+
+        ai.allowFireAtEnemy = allowed;
+        if (allowed)
+            return;
+
+        ai.aimingEnemy = false;
+        soldier.StopFire();
+    }
+
     private static void ReleaseFireInhibition(SoldierAI ai, Soldier soldier, State state)
     {
         if (!state.FireInhibitedBySuppression)
             return;
 
-        var contactState = AiState.GetContactState(soldier.GetInstanceID());
-        contactState.FireRestorePending = true;
         state.FireInhibitedBySuppression = false;
-        ContactResponse.RestoreFireAfterOwnedInhibition(ai, soldier);
+        SetMountedFirePermission(ai, soldier, true);
     }
 
     internal static bool CanFire(Soldier soldier, float now)
@@ -160,6 +184,15 @@ internal static class MountedGunnerSuppression
             !MultiplayerAuthority.CanMutateGameplay() || soldier == null ||
             !States.TryGetValue(soldier.GetInstanceID(), out var state) || !state.Ducked)
         {
+            return false;
+        }
+
+        // Never gate a player's pose: the native seating path itself calls
+        // SetPoseVehicle(true), so a stale AI latch would trap a possessed
+        // soldier below the shield. Purge it the moment ownership is gone.
+        if (!AiOwnership.IsAutonomous(soldier))
+        {
+            States.Remove(soldier.GetInstanceID());
             return false;
         }
 

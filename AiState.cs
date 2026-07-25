@@ -22,8 +22,6 @@ internal static class AiState
     internal static readonly Dictionary<int, float> NextOrderGesture = new();
     internal static readonly Dictionary<int, float> NextGrenadeThrow = new();
     internal static readonly Dictionary<int, BattleChatterState> BattleChatterStates = new();
-    internal static readonly Dictionary<int, float> AircraftEvasionUntil = new();
-    internal static readonly Dictionary<int, Vector3> AircraftEvasionDirection = new();
     internal static readonly Dictionary<int, Flame> Flames = new();
     internal static readonly Dictionary<int, TankEngagementRuntimeState> TankEngagementStates = new();
 
@@ -83,7 +81,6 @@ internal static class AiState
         NextGrenadeThrow.Remove(id);
         BattleChatter.RemoveSoldier(soldier);
         MountedGunnerSuppression.RemoveSoldier(id);
-        ContactKnowledge.RemoveSoldier(soldier);
         GroundAiDirector.ReleaseSoldier(id);
     }
 
@@ -134,6 +131,36 @@ internal static class AiState
         }
 
         return reservedByOther;
+    }
+
+    // Crowding count for cover scoring (plan 016). Reuses the existing reservation
+    // map the way CoverReservedByOther does - no physics, no allocation - so it is
+    // safe to call from the already-budgeted detailed candidate loop. Read-only: it
+    // does not prune expired entries, since CoverReservedByOther already does that
+    // sweep on the same per-soldier decision.
+    internal static int CountNearbyReservations(
+        Vector3 coverPosition,
+        int soldierId,
+        float now,
+        float radius)
+    {
+        var count = 0;
+        foreach (var pair in CoverReservations)
+        {
+            var reservation = pair.Value;
+            if (reservation.ExpiresAt <= now || reservation.SoldierId == soldierId)
+                continue;
+
+            if (InfantryCoverDecisionCore.CoverPositionsConflict(
+                    new MapPoint(coverPosition.x, coverPosition.z),
+                    new MapPoint(reservation.Position.x, reservation.Position.z),
+                    radius))
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     internal static void ReserveCover(
@@ -206,6 +233,7 @@ internal sealed class TargetMemoryState
     internal IntPtr IncomingFireShooterToken;
     internal bool IncomingFireIsDirect;
     internal float NextGunfirePollAt;
+    internal float NextCloseConfirmPollAt;
     internal readonly Dictionary<IntPtr, TargetCandidateState> Candidates = new();
 }
 
@@ -214,6 +242,8 @@ internal sealed class TargetCandidateState
     internal float LastSeenAt;
     internal float ObservedSeconds;
     internal Vector3 LastKnownPosition;
+    internal Spottable? Target;
+    internal float FirstSeenAt;
 }
 
 /// <summary>

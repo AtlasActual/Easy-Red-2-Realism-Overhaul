@@ -16,14 +16,13 @@ public sealed class Plugin : BasePlugin
 {
     public const string PluginGuid = "ca.antoi.er2.tacticalai";
     public const string PluginName = "Easy Red 2 Realism Overhaul";
-    public const string PluginVersion = "1.0.3";
+    public const string PluginVersion = "1.0.4";
 
     internal static ManualLogSource LogSource { get; private set; } = null!;
     private Harmony? _harmony;
     private AtmosphericParticlePersistenceController? _atmosphericParticlePersistenceController;
     private SettingsSyncController? _settingsSyncController;
     private SettingsMenuController? _settingsMenuController;
-    private AircraftFlightInstrumentsController? _aircraftFlightInstrumentsController;
     private FirstPersonPlayerShadowController? _firstPersonPlayerShadowController;
     private PlayerViewFeaturesController? _playerViewFeaturesController;
     private PlayerSuppressionBlurController? _playerSuppressionBlurController;
@@ -35,13 +34,25 @@ public sealed class Plugin : BasePlugin
     public override void Load()
     {
         LogSource = Log;
+        // The mod's interop wrapper churn (per-soldier per-frame patch calls) feeds
+        // the managed GC; its blocking full collections pause the game thread for
+        // 100-300ms. SustainedLowLatency defers blocking gen2 collections to
+        // genuinely necessary moments while keeping background collection active.
+        try
+        {
+            System.Runtime.GCSettings.LatencyMode = System.Runtime.GCLatencyMode.SustainedLowLatency;
+        }
+        catch (Exception ex)
+        {
+            Log.LogWarning($"Could not set GC latency mode: {ex.Message}");
+        }
+
         StartupSplashSkipper.TrySkip();
         Settings.Bind(Config);
         SettingsCatalog.Initialize();
         _atmosphericParticlePersistenceController = AddComponent<AtmosphericParticlePersistenceController>();
         _settingsSyncController = AddComponent<SettingsSyncController>();
         _settingsMenuController = AddComponent<SettingsMenuController>();
-        _aircraftFlightInstrumentsController = AddComponent<AircraftFlightInstrumentsController>();
         _firstPersonPlayerShadowController = AddComponent<FirstPersonPlayerShadowController>();
         _playerViewFeaturesController = AddComponent<PlayerViewFeaturesController>();
         _playerSuppressionBlurController = AddComponent<PlayerSuppressionBlurController>();
@@ -55,9 +66,8 @@ public sealed class Plugin : BasePlugin
 
         Log.LogInfo($"{PluginName} {PluginVersion} loaded. attackPostureBonus={Settings.AttackingForceBonusEnabled.Value}, " +
                     $"FOV={Settings.PerceptionEnabled.Value}, " +
-                    $"contact={Settings.ContactResponseEnabled.Value}, reports={Settings.ContactReportingEnabled.Value}, " +
-                    $"sharing={Settings.InterSquadContactSharingEnabled.Value}, " +
-                    $"commander={Settings.CommanderEnabled.Value}, " +
+                    $"contact={Settings.ContactResponseEnabled.Value}, " +
+                    $"staticWeaponStaffing={Settings.StaticWeaponStaffingEnabled.Value}, " +
                     $"danger={Settings.DangerReactionsEnabled.Value}, tankFear={Settings.TankFearEnabled.Value}, " +
                     $"gunnerDuck={Settings.MountedGunnerSuppressionEnabled.Value}, " +
                     $"fireSafety={Settings.FriendlyFireChecksEnabled.Value}, safeGrenades={Settings.SafeAiGrenadeThrowsEnabled.Value}, " +
@@ -66,8 +76,7 @@ public sealed class Plugin : BasePlugin
                     $"persistentDust={Settings.ExplosionDustPersistenceEnabled.Value}, " +
                     $"largeCraters={Settings.HeavyOrdnanceCratersEnabled.Value}, " +
                     $"layeredBlast={Settings.LayeredBlastEffectsEnabled.Value}, " +
-                    $"fragmentation={Settings.EnhancedFragmentationEnabled.Value}, aircraftSafety={Settings.AircraftSafetyEnabled.Value}, " +
-                    $"aircraftPhysics={Settings.AircraftFlightPhysicsEnabled.Value}, " +
+                    $"fragmentation={Settings.EnhancedFragmentationEnabled.Value}, " +
                     $"bulletPenetration={Settings.BulletPenetrationEnabled.Value}, " +
                     $"addedRicochets={Settings.AddedSmallArmsRicochetsEnabled.Value}, " +
                     $"tracers={Settings.TracerReductionEnabled.Value}, chatter={Settings.BattleChatterEnabled.Value}, " +

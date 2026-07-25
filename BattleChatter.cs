@@ -136,7 +136,7 @@ internal static class BattleChatter
         }
 
         var squadId = soldier.joinedSquad != null
-            ? ContactKnowledge.GetSquadId(soldier.joinedSquad)
+            ? SquadIdentity.GetSquadId(soldier.joinedSquad)
             : -soldier.GetInstanceID();
         if (NextSquadLineAt.TryGetValue(squadId, out var squadReadyAt) && now < squadReadyAt)
             return false;

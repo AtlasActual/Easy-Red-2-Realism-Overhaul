@@ -78,8 +78,7 @@ internal static class TransportDismount
             return false;
         }
 
-        return driver.joinedSquad == null ||
-               CommanderMvp.AllowsAutonomousSafetyResponse(driver.joinedSquad);
+        return true;
     }
 
     private static bool TryCollectEligibleOccupants(Vehicle vehicle)
@@ -118,11 +117,8 @@ internal static class TransportDismount
             }
 
             var squad = seated.joinedSquad;
-            if (squad == null ||
-                !CommanderMvp.AllowsAutonomousSafetyResponse(squad))
-            {
+            if (squad == null)
                 return false;
-            }
 
             Passengers.Add(seated);
         }
@@ -157,22 +153,6 @@ internal static class TransportDismount
                     ref reason,
                     ref distance);
             }
-        }
-
-        foreach (var passenger in Passengers)
-        {
-            if (!ContactKnowledge.TryGetImminentTransportThreat(
-                    passenger, vehicle.GetCenterOfUnit(), now,
-                    out var contactKind, out var contactDistance) ||
-                contactDistance >= distance)
-            {
-                continue;
-            }
-
-            reason = contactKind == ContactKind.GroundVehicle
-                ? "fresh report of enemy armor"
-                : "fresh report of nearby infantry";
-            distance = contactDistance;
         }
 
         return distance < float.MaxValue;

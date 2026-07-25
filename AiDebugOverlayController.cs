@@ -7,7 +7,6 @@ namespace ER2RealismOverhaul;
 internal sealed class AiDebugOverlayController : MonoBehaviour
 {
     private const float SampleIntervalSeconds = 0.20f;
-    private const int MaximumContactMarkers = 32;
     private const int MaximumLeaseMarkers = 20;
     private const int MaximumWorldLabels = 12;
 
@@ -18,7 +17,7 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
     private static readonly Color DangerColor = new(1.00f, 0.22f, 0.35f);
     private static readonly Color CommandColor = new(0.74f, 0.45f, 1.00f);
     private static readonly Color VehicleColor = new(0.18f, 0.88f, 0.72f);
-    private static readonly Color AircraftColor = new(0.38f, 0.62f, 1.00f);
+    private static readonly Color SupportAccentColor = new(0.38f, 0.62f, 1.00f);
     private static readonly Color EventColor = new(1.00f, 0.76f, 0.24f);
 
     private static readonly LayerDescriptor[] LayerPresets =
@@ -34,21 +33,18 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
         new(5, AiDebugCategory.Danger, "DANGER", DangerColor,
             "bar=suppression  red ray=incoming fire  tags=pin/tank/flame"),
         new(6, AiDebugCategory.Command, "COMMAND", CommandColor,
-            "violet=lease  green/amber/blue=direct/voice/radio contact"),
+            "violet=lease  line=squad order source to destination"),
         new(7, AiDebugCategory.Vehicle, "VEHICLES", VehicleColor,
             "teal=clear  orange=engaged/retro  stem=heading"),
-        new(8, AiDebugCategory.Aircraft | AiDebugCategory.Support | AiDebugCategory.Events, "AIR + SUPPORT", AircraftColor,
-            "blue=flight  pink=evasion  support decisions appear in feed"),
+        new(8, AiDebugCategory.Support | AiDebugCategory.Events, "SUPPORT", SupportAccentColor,
+            "support decisions appear in feed"),
         new(9, AiDebugCategory.Events | AiDebugCategory.Performance, "EVENTS + CPU", EventColor,
             "left=recent decisions  right=one-second update cost")
     };
 
     private readonly List<SoldierDebugSnapshot> _soldiers = new();
     private readonly List<VehicleDebugSnapshot> _vehicles = new();
-    private readonly List<AircraftDebugSnapshot> _aircraft = new();
     private readonly List<CommandLease> _leases = new();
-    private readonly List<ContactDebugReport> _reports = new();
-    private readonly List<ContactDebugDelivery> _deliveries = new();
     private readonly List<CoverReservationDebugSnapshot> _coverReservations = new();
     private readonly List<AiDebugEvent> _events = new();
     private readonly List<AiDebugProfileSnapshot> _profiles = new();
@@ -214,7 +210,6 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
 
         _soldiers.Clear();
         _vehicles.Clear();
-        _aircraft.Clear();
         _entityPositions.Clear();
         _squadPositions.Clear();
         _entityFactions.Clear();
@@ -279,6 +274,8 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
                 if (ai == null)
                     continue;
                 var vehicle = ai.veh;
+                // AIPlane is an AIVehicle, so planes turn up in this enumeration. The
+                // ground-vehicle layer has always excluded them and still should.
                 if (vehicle == null || vehicle is VehiclePlane)
                     continue;
                 var position = vehicle.GetCenterOfUnit();
@@ -303,41 +300,7 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
             }
         }
 
-        foreach (var ai in UnityEngine.Object.FindObjectsOfType<AIPlane>())
-        {
-            try
-            {
-                if (ai == null)
-                    continue;
-                var plane = ai.veh;
-                if (plane == null)
-                    continue;
-                var position = plane.GetCenterOfUnit();
-                var distance = Vector3.Distance(origin, position);
-                var faction = plane.GetVehicleFaction() ?? string.Empty;
-                if (distance > _maximumDistance)
-                    continue;
-                var id = plane.GetInstanceID();
-                var evading = AiState.AircraftEvasionUntil.TryGetValue(id, out var evadeUntil) &&
-                               now < evadeUntil;
-                var evadeDirection = AiState.AircraftEvasionDirection.TryGetValue(id, out var direction)
-                    ? direction
-                    : Vector3.zero;
-                _aircraft.Add(new AircraftDebugSnapshot(
-                    id, faction, position, plane.transform.forward, distance,
-                    ai.planeState.ToString(), ai.hasEnemy, ai.hasEnemyTank,
-                    ai.targetToAttack != null, evading, evadeUntil - now, evadeDirection));
-                _entityPositions[id] = position;
-                _entityFactions[id] = faction;
-            }
-            catch
-            {
-                // Despawn race; omit this sample.
-            }
-        }
-
         GroundAiDirector.CollectDebugLeases(now, _leases);
-        ContactKnowledge.CollectDebugState(now, _reports, _deliveries);
         AiDebugTelemetry.CopyEvents(
             Time.unscaledTime,
             Settings.AiDebugOverlayEventHistorySeconds.Value,
@@ -355,7 +318,7 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
     {
         var id = soldier.GetInstanceID();
         var squadId = soldier.joinedSquad != null
-            ? ContactKnowledge.GetSquadId(soldier.joinedSquad)
+            ? SquadIdentity.GetSquadId(soldier.joinedSquad)
             : 0;
         var order = soldier.joinedSquad != null
             ? soldier.joinedSquad.order.ToString()
@@ -482,7 +445,9 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
                 : 0f,
             AiState.FlameEvasionUntil.TryGetValue(id, out var flameUntil)
                 ? Mathf.Max(0f, flameUntil - now)
-                : 0f);
+                : 0f,
+            contact?.LastMovementOwner ?? MovementOwner.Free,
+            contact?.LatchedPoseOwner ?? PoseOwner.None);
     }
 
     [HideFromIl2Cpp]
@@ -566,17 +531,6 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
     }
 
     [HideFromIl2Cpp]
-    private bool CommandTrafficInScope(int sourceSoldierId, int sourceSquadId,
-        int recipientSquadId)
-    {
-        if (_scope == AiDebugScope.All)
-            return true;
-        return EntityOrSquadInScope(sourceSoldierId) ||
-               EntityOrSquadInScope(sourceSquadId) ||
-               EntityOrSquadInScope(recipientSquadId);
-    }
-
-    [HideFromIl2Cpp]
     private string ReferenceFactionStatus()
     {
         if (_scope == AiDebugScope.All)
@@ -648,7 +602,7 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
                      (AiDebugCategory.Identity, "ID"), (AiDebugCategory.Perception, "PER"),
                      (AiDebugCategory.Navigation, "NAV"), (AiDebugCategory.Combat, "CBT"),
                      (AiDebugCategory.Danger, "DNG"), (AiDebugCategory.Command, "CMD"),
-                     (AiDebugCategory.Vehicle, "VEH"), (AiDebugCategory.Aircraft, "AIR"),
+                     (AiDebugCategory.Vehicle, "VEH"),
                      (AiDebugCategory.Support, "SUP"), (AiDebugCategory.Events, "EVT"),
                      (AiDebugCategory.Performance, "CPU")
                  })
@@ -722,26 +676,6 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
             }
         }
 
-        if (Enabled(AiDebugCategory.Aircraft))
-        {
-            foreach (var aircraft in _aircraft)
-            {
-                if (!InScope(aircraft.Faction))
-                    continue;
-                var color = aircraft.Evading ? new Color(1f, 0.38f, 0.85f) : AircraftColor;
-                DrawWorldCross(camera, aircraft.Position, 8f, color);
-                DrawWorldLine(camera, aircraft.Position, aircraft.Position + aircraft.Forward * 35f, color, 2f);
-                if (aircraft.Evading && aircraft.EvasionDirection.sqrMagnitude > 0.01f)
-                    DrawWorldLine(camera, aircraft.Position,
-                        aircraft.Position + aircraft.EvasionDirection.normalized * 45f,
-                        new Color(1f, 0.38f, 0.85f), 3f);
-                DrawWorldLabel(camera, aircraft.Position + Vector3.up * 4f,
-                    $"AIR {aircraft.Id} {aircraft.Distance:0}m  {aircraft.State}\n" +
-                    $"enemy={aircraft.HasEnemy}/{aircraft.HasEnemyTank} target={aircraft.HasTarget}" +
-                    (aircraft.Evading ? $" EVADE {aircraft.EvasionSeconds:0.0}s" : string.Empty), color);
-            }
-        }
-
         if (Enabled(AiDebugCategory.Command))
         {
             var focused = _soldiers.FirstOrDefault(candidate =>
@@ -773,50 +707,6 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
                 }
             }
 
-            var reportCount = 0;
-            foreach (var report in _reports)
-            {
-                if (!CommandTrafficInScope(report.SourceSoldierId,
-                        report.SourceSquadId, report.RecipientSquadId))
-                    continue;
-                var relevant = focused == null || report.SourceSoldierId == focused.Id ||
-                               report.TargetId == focused.Id || report.SourceSquadId == focused.SquadId ||
-                               report.RecipientSquadId == focused.SquadId;
-                if (!relevant || reportCount++ >= MaximumContactMarkers)
-                    continue;
-                var color = ContactColor(report.DeliveryKind, report.Confidence);
-                DrawWorldDiamond(camera, report.Position + Vector3.up * 0.5f, 5f, color);
-                if (focused != null)
-                {
-                    DrawWorldLabel(camera, report.Position + Vector3.up * 1.5f,
-                        $"{report.Kind}/{report.DeliveryKind} c={report.Confidence:P0}\n" +
-                        $"sq {report.SourceSquadId}->{report.RecipientSquadId} target {report.TargetId}", color);
-                }
-            }
-
-            var deliveryCount = 0;
-            foreach (var delivery in _deliveries)
-            {
-                if (!CommandTrafficInScope(0, delivery.SourceSquadId,
-                        delivery.RecipientSquadId))
-                    continue;
-                var relevant = focused == null || delivery.TargetId == focused.Id ||
-                               delivery.SourceSquadId == focused.SquadId ||
-                               delivery.RecipientSquadId == focused.SquadId;
-                if (!relevant || deliveryCount++ >= MaximumContactMarkers)
-                    continue;
-                var color = ContactColor(delivery.DeliveryKind, 1f);
-                DrawWorldDiamond(camera, delivery.Position + Vector3.up * 1.1f, 7f, color);
-                if (focused != null && delivery.SourcePosition != Vector3.zero &&
-                    delivery.RecipientPosition != Vector3.zero)
-                {
-                    DrawWorldLine(camera, delivery.SourcePosition, delivery.RecipientPosition, color, 1.5f);
-                    var midpoint = Vector3.Lerp(delivery.SourcePosition, delivery.RecipientPosition, 0.5f);
-                    DrawWorldLabel(camera, midpoint + Vector3.up * 1.5f,
-                        $"{delivery.DeliveryKind} {delivery.SourceSquadId}->{delivery.RecipientSquadId} " +
-                        $"in {Mathf.Max(0f, delivery.DeliverAt - Time.time):0.0}s", color);
-                }
-            }
         }
 
         if (Enabled(AiDebugCategory.Navigation))
@@ -934,7 +824,7 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
                 (!soldier.HasMovementDestination ||
                  Vector3.Distance(soldier.MovementWatchDestination, soldier.MovementDestination) > 1f))
                 DrawWorldLine(camera, soldier.Position, soldier.MovementWatchDestination,
-                    soldier.MovementStallFailures > 0 ? DangerColor : AircraftColor, 1f);
+                    soldier.MovementStallFailures > 0 ? DangerColor : SupportAccentColor, 1f);
         }
 
         if (Enabled(AiDebugCategory.Combat))
@@ -963,12 +853,18 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
         _builder.Clear();
         _builder.AppendLine($"FOCUS S{soldier.Id} / Q{soldier.SquadId}  |  {DescribeCategories()}");
         if (Enabled(AiDebugCategory.Identity))
-            _builder.AppendLine($"ACTOR  faction={soldier.Faction}  order={soldier.Order}  pose={soldier.Pose}  mounted={soldier.Mounted}");
+            // The pose OWNER next to the pose itself: with LOCOMOTION below, the pose/movement
+            // contract (plan 019) is readable at a glance - a moving locomotion owner beside a
+            // prone pose is the contradiction this line exists to make visible.
+            _builder.AppendLine($"ACTOR  faction={soldier.Faction}  order={soldier.Order}  pose={soldier.Pose}/{soldier.PoseOwner}  mounted={soldier.Mounted}");
         if (Enabled(AiDebugCategory.Perception))
             _builder.AppendLine($"PERCEPTION  confirmed={soldier.HasTarget}  last-known={soldier.HasLastKnown}  candidates={soldier.CandidateCount}  contact={soldier.ContactActive}");
         if (Enabled(AiDebugCategory.Navigation))
         {
             _builder.AppendLine($"MOVEMENT OWNER  {soldier.MovementOwner} / {soldier.MovementAction} / {soldier.MovementAuthority}");
+            // LOCOMOTION is the movement arbiter's committed owner (plan 018) - the single
+            // answer to "who stopped this soldier?", separate from the proposal source above.
+            _builder.AppendLine($"LOCOMOTION  {soldier.LocomotionOwner}");
             _builder.AppendLine($"ENGINE EXECUTOR  target={soldier.HasMovementDestination}  distance={soldier.MovementDestinationDistance:0.0}m  moveCharacter={soldier.MoveCharacter}  pathRequest={soldier.HasPathRequest}");
             _builder.AppendLine($"CONSTRAINT  {(string.IsNullOrWhiteSpace(soldier.MovementConstraint) ? "none" : soldier.MovementConstraint)}");
             _builder.AppendLine($"STATE  relocating={soldier.Relocating}  watch={soldier.MovementWatchActive}  stalls={soldier.MovementStallFailures}  anchor={soldier.HasDefensiveAnchor}  hold={soldier.HasPlayerHold}");
@@ -1046,8 +942,8 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
         }
         var width = Mathf.Min(430f, Screen.width * 0.38f);
         var rect = new Rect(Screen.width - width - 12f, Screen.height - 110f, width, 98f);
-        DrawOutlinedPanel(rect, new Color(0.02f, 0.03f, 0.04f, 0.90f), AircraftColor);
-        SetTextColor(_smallStyle!, AircraftColor);
+        DrawOutlinedPanel(rect, new Color(0.02f, 0.03f, 0.04f, 0.90f), SupportAccentColor);
+        SetTextColor(_smallStyle!, SupportAccentColor);
         GUI.Label(new Rect(rect.x + 8f, rect.y + 5f, rect.width - 16f, rect.height - 10f),
             _builder.ToString(), _smallStyle!);
     }
@@ -1211,19 +1107,6 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
     }
 
     [HideFromIl2Cpp]
-    private static Color ContactColor(ContactDeliveryKind delivery, float confidence)
-    {
-        var baseColor = delivery switch
-        {
-            ContactDeliveryKind.Direct => PerceptionColor,
-            ContactDeliveryKind.Voice => EventColor,
-            _ => AircraftColor
-        };
-        baseColor.a = Mathf.Lerp(0.25f, 1f, confidence);
-        return baseColor;
-    }
-
-    [HideFromIl2Cpp]
     private static void DrawPanel(Rect rect, Color color) => DrawSolidRect(rect, color);
 
     [HideFromIl2Cpp]
@@ -1354,7 +1237,9 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
         float CoverHoldSeconds,
         float EngagementHoldSeconds,
         float TankHideSeconds,
-        float FlameEvadeSeconds)
+        float FlameEvadeSeconds,
+        MovementOwner LocomotionOwner,
+        PoseOwner PoseOwner)
     {
         internal bool FireBlocked => FireInhibitedMovement || FireInhibitedRange ||
                                      FireInhibitedArmor || FiringLaneBlocked;
@@ -1390,18 +1275,4 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
         bool HasEnemy,
         Vector2 Drive,
         float Life);
-
-    private sealed record AircraftDebugSnapshot(
-        int Id,
-        string Faction,
-        Vector3 Position,
-        Vector3 Forward,
-        float Distance,
-        string State,
-        bool HasEnemy,
-        bool HasEnemyTank,
-        bool HasTarget,
-        bool Evading,
-        float EvasionSeconds,
-        Vector3 EvasionDirection);
 }

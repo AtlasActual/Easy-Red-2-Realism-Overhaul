@@ -99,16 +99,8 @@ internal static class TankTactics
         try
         {
             var squad = vehicle.GetDriver()?.joinedSquad;
-            if (squad != null &&
-                (squad.order == Order.attackFromSide || squad.order == Order.charge))
-            {
-                return true;
-            }
-
-            // The lease is the semantically correct signal: it also covers
-            // defending/reserve armor with a live commander movement order that
-            // Squad.order alone would miss.
-            return GroundAiDirector.VehicleHasOffensiveArmorRole(vehicle);
+            return squad != null &&
+                   (squad.order == Order.attackFromSide || squad.order == Order.charge);
         }
         catch
         {
@@ -329,10 +321,9 @@ internal static class TankTactics
     }
 
     /// <summary>
-    /// While following an active commander destination with no engagement, sample
+    /// While following an active native destination with no engagement, sample
     /// progress every few seconds. A tank making no real progress gets one forced
-    /// straight reverse to clear the obstruction; after repeated failures without
-    /// net progress the commander vehicle lease is released so it can be reassigned.
+    /// straight reverse to clear the obstruction.
     /// </summary>
     internal static void UpdateStallWatchdog(
         AIVehicle ai,
@@ -387,8 +378,7 @@ internal static class TankTactics
         if (TankStallWatchdogCore.ShouldGiveUp(runtime.WatchdogFailedRecoveries))
         {
             AiState.Trace(
-                $"Tank tactics: vehicle {id} watchdog giving up after repeated stalls; releasing commander lease");
-            GroundAiDirector.ReleaseCommanderVehicle(id);
+                $"Tank tactics: vehicle {id} watchdog giving up after repeated stalls");
             runtime.WatchdogFailedRecoveries = 0;
             return;
         }

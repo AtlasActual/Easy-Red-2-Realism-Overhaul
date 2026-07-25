@@ -38,7 +38,6 @@ internal static class ExposedReloadPosture
             // in which the AI repeatedly dry-fired the still-empty weapon.
             var state = AiState.GetContactState(soldierId);
             state.ExposedReloadProneOwned = true;
-            state.FireRestorePending = true;
             GroundAiDirector.ExecuteRequiredActionHalt(soldier);
         }
         catch
@@ -48,11 +47,7 @@ internal static class ExposedReloadPosture
         }
     }
 
-    internal static bool TryMaintain(
-        SoldierAI ai,
-        Soldier soldier,
-        float now,
-        float deltaTime)
+    internal static bool TryMaintain(Soldier soldier, float now)
     {
         var state = AiState.GetContactState(soldier.GetInstanceID());
         if (!state.ExposedReloadProneOwned)
@@ -66,14 +61,13 @@ internal static class ExposedReloadPosture
                 !soldier.IsReloading || soldier.IsOnVehicle() || soldier.IsOnFire ||
                 flameEvading || ContactResponse.IsOnUsableCover(soldier))
             {
-                Release(ai, soldier, state);
+                state.ExposedReloadProneOwned = false;
                 return false;
             }
 
             // Reload owns both posture and fire permission until the magazine is
-            // seated. Other tactical systems must not raise the soldier to engage
-            // an enemy in the middle of this vulnerable action.
-            state.FireRestorePending = true;
+            // seated (the arbiter's rank b). Other tactical systems must not raise the
+            // soldier to engage an enemy in the middle of this vulnerable action.
             GroundAiDirector.ExecuteRequiredActionHalt(soldier);
             return true;
         }
@@ -82,15 +76,6 @@ internal static class ExposedReloadPosture
             state.ExposedReloadProneOwned = false;
             return false;
         }
-    }
-
-    private static void Release(
-        SoldierAI ai,
-        Soldier soldier,
-        ContactResponseState state)
-    {
-        state.ExposedReloadProneOwned = false;
-        ContactResponse.RestoreFireAfterOwnedInhibition(ai, soldier);
     }
 }
 
@@ -103,15 +88,15 @@ internal static class ProneMovingActionRestriction
 
         try
         {
-            if (soldier.m_pose != SoldierPose.Prone || !soldier.IsMoving())
+            // This mod never gates a player's own actions; only an AI crawler is
+            // halted here so its urgent action can begin from a stable position.
+            if (!AiOwnership.IsAutonomous(soldier) ||
+                !MultiplayerAuthority.CanMutateGameplay())
+            {
                 return true;
+            }
 
-            // A player must deliberately stop crawling before manipulating a
-            // weapon or dressing a wound. An AI cannot make that extra input, so
-            // stop its crawl here and let the urgent action begin immediately.
-            if (!AiOwnership.IsAutonomous(soldier))
-                return false;
-            if (!MultiplayerAuthority.CanMutateGameplay())
+            if (soldier.m_pose != SoldierPose.Prone || !soldier.IsMoving())
                 return true;
 
             GroundAiDirector.ExecuteRequiredActionHalt(soldier);

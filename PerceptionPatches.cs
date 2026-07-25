@@ -615,10 +615,17 @@ internal static class IncomingFireOrientationPatch
             try
             {
                 var soldier = __instance.GetSoldier();
-                if (AiOwnership.IsAutonomous(soldier) &&
-                    !KnownTargetSuppressiveFire.OwnsAim(soldier.GetInstanceID(), Time.time))
+                if (AiOwnership.IsAutonomous(soldier))
                 {
-                    IncomingFireAwareness.Update(__instance, soldier, Time.time);
+                    // Acquisition is not aim ownership: run the close-range confirm
+                    // tick even while KnownTargetSuppressiveFire owns aim, unlike the
+                    // orientation update below.
+                    CloseRangeAcquisitionTick.Update(__instance, soldier, Time.time);
+
+                    if (!KnownTargetSuppressiveFire.OwnsAim(soldier.GetInstanceID(), Time.time))
+                    {
+                        IncomingFireAwareness.Update(__instance, soldier, Time.time);
+                    }
                 }
             }
             catch (Exception ex)
@@ -863,8 +870,6 @@ internal static class SoldierSequentialUpdatePatch
                 return;
 
             var now = Time.time;
-            ContactKnowledge.RegisterSquad(soldier, now);
-            ContactKnowledge.Update(now);
 
             if (!AiOwnership.IsAutonomous(soldier))
                 return;
@@ -906,8 +911,7 @@ internal static class SoldierSequentialUpdatePatch
         var suppression = TargetAcquisition.Suppression(soldier);
         var effectiveFov = Settings.HorizontalFov.Value *
                            Mathf.Lerp(1f, Settings.SuppressedFovMultiplier.Value, suppression);
-        var effectivePeripheralDistance = Settings.PeripheralAwarenessDistance.Value *
-                                          Mathf.Lerp(1f, Settings.SuppressedPeripheralMultiplier.Value, suppression);
+        var effectivePeripheralDistance = TargetAcquisition.EffectivePeripheralDistance(suppression);
         var effectiveMemory = Settings.TargetMemorySeconds.Value *
                               Mathf.Lerp(1f, Settings.SuppressedMemoryMultiplier.Value, suppression);
         var insideFov = distance <= effectivePeripheralDistance ||
@@ -926,7 +930,6 @@ internal static class SoldierSequentialUpdatePatch
 
             var memory = AiState.GetTargetMemory(id);
             memory.LastObservedAt = now;
-            ContactKnowledge.Observe(soldier, target!, now);
             return;
         }
 
@@ -1068,6 +1071,13 @@ internal static class SoldierSequentialUpdatePatch
             AiState.Trace($"Tank fear: soldier {id} committed to tank-masked cover at {distance:0}m");
             return;
         }
+
+        // The urgent search has conclusively failed to find any reachable tank-masked
+        // cover. A soldier does not lie prone in the open forever: he resumes his orders
+        // (moving crouched/prone-crawl per the ordinary movement pose rules). The wait
+        // re-arms on its own when cover becomes reachable or the tank threat changes.
+        if (ContactResponse.TryResumeFromUnreachableTankCover(ai, soldier, now))
+            return;
 
         // No safe cover route exists yet. A human does not pace back and forth in
         // the open; he makes himself small and waits for a viable move.
@@ -1325,14 +1335,29 @@ internal static class TargetAcquisition
             ? Mathf.Clamp01(soldier.GetSuppressionValue() / 255f)
             : 0f;
 
+    internal static float EffectivePeripheralDistance(float suppression)
+    {
+        var distance = Settings.PeripheralAwarenessDistance.Value *
+                       Mathf.Lerp(1f, Settings.SuppressedPeripheralMultiplier.Value, suppression);
+
+        if (!Settings.CloseQuartersEnabled.Value)
+            return distance;
+
+        // Suppression can never blind a soldier to a threat within the
+        // configurable minimum awareness floor, and the floor never raises
+        // awareness above the unsuppressed distance.
+        return Mathf.Min(
+            Settings.PeripheralAwarenessDistance.Value,
+            Mathf.Max(Settings.MinimumPeripheralAwarenessMeters.Value, distance));
+    }
+
     internal static bool IsInsideEffectiveFov(
         Soldier soldier,
         Vector3 targetPosition,
         float distance,
         float suppression)
     {
-        var effectivePeripheralDistance = Settings.PeripheralAwarenessDistance.Value *
-                                          Mathf.Lerp(1f, Settings.SuppressedPeripheralMultiplier.Value, suppression);
+        var effectivePeripheralDistance = EffectivePeripheralDistance(suppression);
         if (distance <= effectivePeripheralDistance)
             return true;
 
@@ -1377,7 +1402,9 @@ internal static class TargetAcquisition
             candidate = new TargetCandidateState
             {
                 LastSeenAt = now,
-                LastKnownPosition = targetPosition
+                LastKnownPosition = targetPosition,
+                Target = target,
+                FirstSeenAt = now
             };
             state.Candidates[targetToken] = candidate;
             AiState.Trace($"Acquisition: soldier {soldierId} began observing target {targetToken} at {distance:0}m");
@@ -1390,6 +1417,8 @@ internal static class TargetAcquisition
 
         candidate.LastSeenAt = now;
         candidate.LastKnownPosition = targetPosition;
+        if (!IsUsableTarget(candidate.Target))
+            candidate.Target = target;
         var requiredObservationSeconds = RequiredObservationSeconds(distance, suppression);
         if (state.IncomingFireShooterToken == targetToken &&
             now < state.IncomingFireUntil)
@@ -1451,7 +1480,22 @@ internal static class TargetAcquisition
             return;
         }
 
-        state.Candidates.Clear();
+        var now = Time.time;
+        List<IntPtr>? stale = null;
+        foreach (var pair in state.Candidates)
+        {
+            // A candidate seen this recently survives one stale negative native
+            // scan; a fresher positive raycast (e.g. the close-range fast tick)
+            // outweighs one staggered negative sample.
+            if (now - pair.Value.LastSeenAt > TargetConfirmationCore.RecentPositiveObservationGraceSeconds)
+                (stale ??= new List<IntPtr>()).Add(pair.Key);
+        }
+
+        if (stale == null)
+            return;
+
+        foreach (var token in stale)
+            state.Candidates.Remove(token);
         AiState.Trace($"Acquisition: soldier {soldierId} lost sight of pending candidates");
     }
 
@@ -1587,6 +1631,15 @@ internal static class TargetAcquisition
             Settings.DistantTargetAcquisitionSeconds.Value,
             distanceFactor);
 
+        if (Settings.CloseQuartersEnabled.Value && distance < Settings.ContactImmediateFireDistance.Value)
+        {
+            // Point-blank threats should be identified faster than the general
+            // "close" acquisition time; lerp down toward the point-blank value
+            // as distance shrinks below the immediate-fire distance.
+            var pointBlankFactor = Mathf.Clamp01(distance / Settings.ContactImmediateFireDistance.Value);
+            seconds = Mathf.Lerp(Settings.PointBlankAcquisitionSeconds.Value, seconds, pointBlankFactor);
+        }
+
         // Suppression slows interpretation of new visual information while the
         // configurable awareness floors still allow eventual acquisition.
         return seconds * Mathf.Lerp(1f, 1.75f, suppression);
@@ -1612,5 +1665,100 @@ internal static class TargetAcquisition
         state.ConfirmedLastKnownTargetToken = targetToken;
         state.ConfirmedLastKnownPosition = targetPosition;
         state.ConfirmedLastKnownObservedAt = now;
+    }
+}
+
+/// <summary>
+/// Decouples close-range confirmation from the staggered native visibility scan.
+/// A pending candidate inside <see cref="Settings.ContactImmediateFireDistance"/>
+/// is re-checked with a direct native <c>CanSee</c> raycast on its own short
+/// cadence, so the ~0.6s close acquisition delay is no longer stretched by the
+/// gaps between <c>SoldierAI.SequentialUpdate</c> samples at high AI counts.
+/// First sighting itself stays native-scan-bound; this only speeds up the
+/// interval between first sighting and confirmation.
+/// </summary>
+internal static class CloseRangeAcquisitionTick
+{
+    // Perf budget: at most one poll per soldier per this interval, and only for
+    // soldiers that already have a pending close-range candidate.
+    private const float PollIntervalSeconds = 0.2f;
+
+    internal static void Update(SoldierAI ai, Soldier soldier, float now)
+    {
+        if (!Settings.PerceptionEnabled.Value || soldier.IsOnVehicle())
+            return;
+
+        var soldierId = soldier.GetInstanceID();
+        if (!AiState.TargetMemory.TryGetValue(soldierId, out var state) ||
+            state.HasConfirmedTarget ||
+            state.Candidates.Count == 0)
+        {
+            return;
+        }
+
+        if (now < state.NextCloseConfirmPollAt)
+            return;
+        state.NextCloseConfirmPollAt = now + PollIntervalSeconds;
+
+        var closeDistance = Settings.ContactImmediateFireDistance.Value;
+        var closeRangeSqr = closeDistance * closeDistance;
+        Vector3 origin;
+        try
+        {
+            origin = soldier.LookPosition();
+        }
+        catch (NullReferenceException) { return; }
+        catch (Il2CppException) { return; }
+        catch (ObjectCollectedException) { return; }
+
+        List<IntPtr>? closeCandidates = null;
+        foreach (var pair in state.Candidates)
+        {
+            if ((pair.Value.LastKnownPosition - origin).sqrMagnitude <= closeRangeSqr)
+                (closeCandidates ??= new List<IntPtr>()).Add(pair.Key);
+        }
+
+        if (closeCandidates == null)
+            return;
+
+        foreach (var token in closeCandidates)
+        {
+            if (!state.Candidates.TryGetValue(token, out var candidate))
+                continue;
+
+            if (!TargetAcquisition.TryGetTargetSnapshot(
+                    candidate.Target, out var targetToken, out var targetPosition) ||
+                targetToken != token)
+            {
+                continue;
+            }
+
+            var target = candidate.Target!;
+            bool canSee;
+            try
+            {
+                canSee = soldier.CanSee(target);
+            }
+            catch (NullReferenceException) { continue; }
+            catch (Il2CppException) { continue; }
+            catch (ObjectCollectedException) { continue; }
+
+            if (!canSee)
+                continue;
+
+            var distance = Vector3.Distance(origin, targetPosition);
+            var suppression = TargetAcquisition.Suppression(soldier);
+            if (!TargetAcquisition.TryConfirm(soldier, target, distance, suppression, now))
+                continue;
+
+            TargetAcquisition.RecordConfirmedNativeObservation(soldier, targetToken, targetPosition, now);
+            TargetAcquisition.PublishSoldierTarget(soldier, target);
+            if (!TargetAcquisition.MatchesTarget(ai.visibleTarget, targetToken))
+                ai.visibleTarget = target;
+            AiState.Trace(
+                $"Acquisition: soldier {soldierId} fast-confirmed close target {targetToken} " +
+                $"at {distance:0}m via close-range tick");
+            return;
+        }
     }
 }

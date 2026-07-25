@@ -9,11 +9,14 @@ namespace ER2RealismOverhaul;
 /// <summary>
 /// Global defender emplacement allocator. It inventories a complete objective
 /// position, protects the mobile reserve, and sends one selected soldier through
-/// the native vehicle destination API for each viable gun.
+/// the native vehicle destination API for each viable gun. Guns count as viable
+/// whether they belong to a static emplacement or to an empty armed vehicle
+/// parked inside the position, such as a halftrack with a mounted machine gun.
 /// </summary>
 internal static class StaticAntiTankStaffing
 {
     private const float ObjectiveDefensiveMarginMeters = 12f;
+    private const float VehicleRelocationReleaseMeters = 25f;
     private const float TransitProgressEpsilonMeters = 0.75f;
     private const float UnreachableTransitSeconds = 18f;
     private const float PlayerOrderReleaseGraceSeconds = 12f;
@@ -26,9 +29,7 @@ internal static class StaticAntiTankStaffing
 
     internal static void Update(Squad squad, float now)
     {
-        // Static weapons are part of commander doctrine. There is deliberately no
-        // independent enable switch that can silently disable a defensive position.
-        if (!Settings.CommanderEnabled.Value || !MultiplayerAuthority.CanMutateGameplay() ||
+        if (!Settings.StaticWeaponStaffingEnabled.Value || !MultiplayerAuthority.CanMutateGameplay() ||
             squad == null || squad.IsVehicleCrew || !GroundAiDirector.IsDefendingSquad(squad) ||
             now < _nextInventoryAt || _updating)
         {
@@ -56,20 +57,9 @@ internal static class StaticAntiTankStaffing
         }
     }
 
-    internal static void OnPostureOrObjectiveChanged(string faction, int revision)
-    {
-        foreach (var assignment in AssignmentsByWeapon.Values.Where(assignment =>
-                     string.Equals(assignment.Faction, faction, StringComparison.OrdinalIgnoreCase) &&
-                     assignment.ObjectiveRevision != revision).ToArray())
-        {
-            Release(assignment, "posture/objective change");
-        }
-        _nextInventoryAt = 0f;
-    }
-
     internal static void YieldToPlayerOrder(Squad squad, Vehicle weapon, float now)
     {
-        if (squad == null || weapon == null || !weapon.IsStatic())
+        if (squad == null || weapon == null)
             return;
 
         var assignmentsToRelease = new Dictionary<int, WeaponAssignment>();
@@ -95,7 +85,7 @@ internal static class StaticAntiTankStaffing
 
         PlayerOverridesByWeapon[weaponId] = new PlayerWeaponOverride(
             weaponId,
-            ContactKnowledge.GetSquadId(squad),
+            SquadIdentity.GetSquadId(squad),
             squad,
             weapon,
             now,
@@ -104,11 +94,16 @@ internal static class StaticAntiTankStaffing
             $"Player vehicle order superseded defender gun leases for weapon {weaponId}");
     }
 
+    internal static bool IsAssignedGunner(Vehicle weapon, Soldier soldier)
+        => weapon != null && soldier != null &&
+           AssignmentsByWeapon.TryGetValue(weapon.GetInstanceID(), out var assignment) &&
+           assignment.SoldierId == soldier.GetInstanceID();
+
     internal static bool IsPlayerOrderedEntrant(Vehicle weapon, Soldier soldier)
     {
         if (weapon == null || soldier == null ||
             !PlayerOverridesByWeapon.TryGetValue(weapon.GetInstanceID(), out var playerOrder) ||
-            playerOrder.SquadId != ContactKnowledge.GetSquadId(soldier))
+            playerOrder.SquadId != SquadIdentity.GetSquadId(soldier))
         {
             return false;
         }
@@ -172,7 +167,7 @@ internal static class StaticAntiTankStaffing
                     continue;
                 crewCandidates.Add(new DefenderCrewCandidate(
                     member.GetInstanceID(),
-                    ContactKnowledge.GetSquadId(candidateSquad),
+                    SquadIdentity.GetSquadId(candidateSquad),
                     candidateSquad.Leader != null &&
                     candidateSquad.Leader.GetInstanceID() == member.GetInstanceID(),
                     member.IsMedic(),
@@ -182,11 +177,11 @@ internal static class StaticAntiTankStaffing
             }
 
             squadCandidates.Add(new DefenderSquadCandidate(
-                ContactKnowledge.GetSquadId(candidateSquad),
+                SquadIdentity.GetSquadId(candidateSquad),
                 effectiveStrength,
                 combatReadyOnFoot,
-                GroundAiDirector.IsReserveSquad(candidateSquad),
-                !CommanderMvp.OwnsSquad(candidateSquad)));
+                false,
+                GroundAiDirector.IsExternallyControlledSquad(candidateSquad)));
         }
 
         var weaponCandidates = runtimeWeapons.Select(runtime => new DefensiveWeaponCandidate(
@@ -201,7 +196,7 @@ internal static class StaticAntiTankStaffing
             squadCandidates, crewCandidates, weaponCandidates, armor.Count > 0);
 
         var soldiers = crewCandidates.ToDictionary(candidate => candidate.SoldierId);
-        var squadsById = squads.ToDictionary(ContactKnowledge.GetSquadId);
+        var squadsById = squads.ToDictionary(SquadIdentity.GetSquadId);
         var weaponsById = runtimeWeapons.ToDictionary(candidate => candidate.Id);
         foreach (var assignment in plan.WeaponAssignments)
         {
@@ -229,7 +224,8 @@ internal static class StaticAntiTankStaffing
                 weaponInfo.Weapon,
                 now,
                 now,
-                distance);
+                distance,
+                weaponInfo.Position);
             AssignmentsByWeapon[weaponInfo.Id] = stamp;
             WeaponBySoldier[soldier.GetInstanceID()] = weaponInfo.Id;
 
@@ -263,7 +259,8 @@ internal static class StaticAntiTankStaffing
             var squad = pair.Value;
             var leader = squad?.Leader;
             if (squad == null || leader == null || squad.IsVehicleCrew ||
-                !SameFaction(leader.faction, faction) || !CommanderMvp.OwnsSquad(squad) ||
+                !SameFaction(leader.faction, faction) ||
+                GroundAiDirector.IsExternallyControlledSquad(squad) ||
                 !TryGetDefensiveArea(squad, out var squadCenter, out var squadRadius))
             {
                 continue;
@@ -275,8 +272,8 @@ internal static class StaticAntiTankStaffing
                 result.Add(squad);
         }
 
-        return result.GroupBy(ContactKnowledge.GetSquadId).Select(group => group.First())
-            .OrderBy(ContactKnowledge.GetSquadId).ToList();
+        return result.GroupBy(SquadIdentity.GetSquadId).Select(group => group.First())
+            .OrderBy(SquadIdentity.GetSquadId).ToList();
     }
 
     private static List<RuntimeWeapon> CollectWeapons(
@@ -314,8 +311,11 @@ internal static class StaticAntiTankStaffing
         out RuntimeWeapon info)
     {
         info = default;
-        if (weapon == null || weapon.life <= 0 || !weapon.IsStatic())
+        if (weapon == null || weapon.life <= 0 ||
+            (!weapon.IsStatic() && !IsStaffableVehicleGun(weapon)))
+        {
             return false;
+        }
 
         var weaponFaction = weapon.GetVehicleFaction();
         if (!string.IsNullOrWhiteSpace(weaponFaction) &&
@@ -366,6 +366,19 @@ internal static class StaticAntiTankStaffing
         return true;
     }
 
+    private static bool IsStaffableVehicleGun(Vehicle vehicle)
+    {
+        // A halftrack or gun truck parked inside the position is as useful as an
+        // emplacement, but only while nobody owns it: anyone already aboard means
+        // the vehicle belongs to its own crew. Tanks and aircraft are never
+        // re-crewed this way; one rifleman in a tank turret is not a defensive gun.
+        if (!Settings.VehicleGunStaffingEnabled.Value || !vehicle.IsEmpty())
+            return false;
+
+        return vehicle.GetComponent<VehicleTank>() == null &&
+               vehicle.GetComponent<VehiclePlane>() == null;
+    }
+
     private static List<Vehicle> CollectReportedArmor(string faction, Vector3 center)
     {
         var result = new List<Vehicle>();
@@ -396,7 +409,7 @@ internal static class StaticAntiTankStaffing
                 assignment.Soldier == null || !assignment.Soldier.CanFight() ||
                 assignment.Weapon == null || assignment.Weapon.life <= 0 ||
                 !WeaponStillHasAmmunition(assignment.Weapon) ||
-                !CommanderMvp.OwnsSquad(assignment.Soldier.joinedSquad))
+                GroundAiDirector.IsExternallyControlledSquad(assignment.Soldier.joinedSquad))
             {
                 Release(assignment, "invalid, empty, dead, or externally owned");
                 continue;
@@ -407,6 +420,18 @@ internal static class StaticAntiTankStaffing
                 var mounted = assignment.Soldier.GetCurrentVehicle();
                 if (mounted != null && mounted.GetInstanceID() == assignment.WeaponId)
                 {
+                    // A staffed vehicle that leaves the position is no longer a
+                    // defensive gun. Drop the lease and let the native AI own the
+                    // rider instead of holding a station that moved away.
+                    if (!assignment.Weapon.IsStatic() &&
+                        HorizontalDistance(
+                            assignment.Weapon.GetCenterOfUnit(), assignment.LeasePosition) >
+                        VehicleRelocationReleaseMeters)
+                    {
+                        Release(assignment, "staffed vehicle left the position");
+                        continue;
+                    }
+
                     assignment.LastProgressAt = now;
                     assignment.LastDistance = 0f;
                     continue;
@@ -545,15 +570,6 @@ internal static class StaticAntiTankStaffing
         radius = 0f;
         try
         {
-            if (GroundAiDirector.TryGetCommanderDefensiveArea(
-                    squad, out center, out var commanderRadius))
-            {
-                radius = Mathf.Max(
-                    Mathf.Max(55f, Settings.StaticAtSearchRadius.Value),
-                    Mathf.Max(0f, commanderRadius));
-                return true;
-            }
-
             if (squad.order != Order.defend)
                 return false;
             center = squad.moveOrderPosition;
@@ -653,6 +669,7 @@ internal static class StaticAntiTankStaffing
         internal readonly Soldier Soldier;
         internal readonly Vehicle Weapon;
         internal readonly float AssignedAt;
+        internal readonly Vector3 LeasePosition;
         internal float LastProgressAt;
         internal float LastDistance;
 
@@ -665,7 +682,8 @@ internal static class StaticAntiTankStaffing
             Vehicle weapon,
             float assignedAt,
             float lastProgressAt,
-            float lastDistance)
+            float lastDistance,
+            Vector3 leasePosition)
         {
             WeaponId = weaponId;
             SoldierId = soldierId;
@@ -674,6 +692,7 @@ internal static class StaticAntiTankStaffing
             Soldier = soldier;
             Weapon = weapon;
             AssignedAt = assignedAt;
+            LeasePosition = leasePosition;
             LastProgressAt = lastProgressAt;
             LastDistance = lastDistance;
         }
@@ -713,7 +732,7 @@ internal static class PlayerStaticWeaponOrderPatch
     private static void Prefix(Squad __instance, Vehicle v)
     {
         if (!MultiplayerAuthority.CanMutateGameplay() || __instance == null || v == null ||
-            !CommanderMvp.HasPlayerOwnership(__instance) || !v.IsStatic())
+            !GroundAiDirector.IsExternallyControlledSquad(__instance))
         {
             return;
         }
@@ -732,22 +751,25 @@ internal static class PlayerStaticWeaponOrderPatch
     }
 }
 
-[HarmonyPatch(typeof(Vehicle), nameof(Vehicle.GetOnVehicleBestPos))]
-internal static class PlayerStaticWeaponSeatPriorityPatch
+/// <summary>
+/// The native seat search takes the nearest free seat, which on a halftrack or a
+/// gun truck is usually the driver's or a passenger bench. A soldier who was sent
+/// to a vehicle to work its gun must reach the gun instead.
+/// </summary>
+internal static class GunnerSeatPriority
 {
-    [HarmonyPrefix]
-    private static bool Prefix(Vehicle __instance, Soldier soldier, ref bool __result)
+    internal static bool TrySeatGunner(Vehicle? vehicle, Soldier? soldier, ref bool result)
     {
-        if (!MultiplayerAuthority.CanMutateGameplay() || __instance == null || soldier == null ||
-            !__instance.IsStatic() ||
-            !StaticAntiTankStaffing.IsPlayerOrderedEntrant(__instance, soldier))
+        if (!MultiplayerAuthority.CanMutateGameplay() || vehicle == null || soldier == null ||
+            !(StaticAntiTankStaffing.IsAssignedGunner(vehicle, soldier) ||
+              vehicle.IsStatic() && StaticAntiTankStaffing.IsPlayerOrderedEntrant(vehicle, soldier)))
         {
             return true;
         }
 
         try
         {
-            var mainSeat = __instance.GetMainTurretSeat(false, out var seatId);
+            var mainSeat = vehicle.GetMainTurretSeat(false, out var seatId);
             if (mainSeat == null ||
                 (mainSeat.unitSet != null &&
                  mainSeat.unitSet.GetInstanceID() != soldier.GetInstanceID()))
@@ -755,16 +777,34 @@ internal static class PlayerStaticWeaponSeatPriorityPatch
                 return true;
             }
 
-            __instance.SetFaction(soldier.faction);
-            __instance.GetOnVehicle(seatId, soldier);
-            __result = true;
+            vehicle.SetFaction(soldier.faction);
+            vehicle.GetOnVehicle(seatId, soldier);
+            result = true;
             return false;
         }
         catch (Exception ex)
         {
             Plugin.LogSource.LogWarning(
-                $"Could not prioritize static weapon gunner seat: {ex.Message}");
+                $"Could not prioritize gunner seat: {ex.Message}");
             return true;
         }
     }
+}
+
+[HarmonyPatch(typeof(Vehicle), nameof(Vehicle.GetOnVehicleBestPos))]
+internal static class StaticWeaponSeatPriorityPatch
+{
+    [HarmonyPrefix]
+    private static bool Prefix(Vehicle __instance, Soldier soldier, ref bool __result)
+        => GunnerSeatPriority.TrySeatGunner(__instance, soldier, ref __result);
+}
+
+// Wheeled vehicles override the seat search, so the base-class patch never runs
+// for the halftracks and gun trucks this allocator staffs.
+[HarmonyPatch(typeof(VehicleWithWheels), nameof(VehicleWithWheels.GetOnVehicleBestPos))]
+internal static class VehicleGunSeatPriorityPatch
+{
+    [HarmonyPrefix]
+    private static bool Prefix(VehicleWithWheels __instance, Soldier soldier, ref bool __result)
+        => GunnerSeatPriority.TrySeatGunner(__instance, soldier, ref __result);
 }

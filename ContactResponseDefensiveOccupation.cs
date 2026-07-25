@@ -31,7 +31,10 @@ internal static partial class ContactResponse
         {
             SetCoverState(state, InfantryCoverState.Holding, soldierId,
                 "holding protected defensive fighting position");
-            state.EngagementHoldUntil = float.PositiveInfinity;
+            // D4 (plan 015): bounded instead of +inf. This branch runs every tick
+            // the anchor stays stable, so the hold keeps refreshing; if it ever
+            // stops running the hold simply lapses instead of freezing.
+            state.EngagementHoldUntil = BoundedEngagementHold(target != null, state, now);
             state.ContactCrouchOwned = true;
             var pose = target != null
                 ? GetStationaryEngagementPose(soldier, state, targetPosition)
@@ -40,7 +43,6 @@ internal static partial class ContactResponse
             if (target != null)
             {
                 FaceThreatWhenStationary(ai, soldier, targetPosition);
-                GrantFirePermissionIfReady(ai, soldier);
             }
             return true;
         }
@@ -61,7 +63,7 @@ internal static partial class ContactResponse
             state.NextDecisionAt = now + InfantryCoverPolicy.DecisionIntervalSeconds;
             var threatPosition = target != null
                 ? targetPosition
-                : GetDefensiveApproachPoint(soldier, state, center, radius, now);
+                : GetDefensiveApproachPoint(soldier, state, center, radius);
             var cover = FindCover(
                 soldier,
                 threatPosition,
@@ -92,13 +94,13 @@ internal static partial class ContactResponse
         // defender across open ground. A slow retry can occupy a later vacancy.
         SetCoverState(state, InfantryCoverState.WaitingForSafeMove, soldierId,
             "holding arrival point while no defensive cover slot is available");
-        state.EngagementHoldUntil = float.PositiveInfinity;
+        // D4 (plan 015): bounded — see the comment on the stable-anchor branch above.
+        state.EngagementHoldUntil = BoundedEngagementHold(target != null, state, now);
         state.ContactCrouchOwned = true;
         StopTacticalMovement(ai, soldier, SoldierPose.Prone, Time.deltaTime);
         if (target != null)
         {
             FaceThreatWhenStationary(ai, soldier, targetPosition);
-            GrantFirePermissionIfReady(ai, soldier);
         }
         return true;
     }
@@ -107,22 +109,12 @@ internal static partial class ContactResponse
         Soldier soldier,
         ContactResponseState state,
         Vector3 center,
-        float radius,
-        float now)
+        float radius)
     {
         if (state.HasThreatPosition && IsFinite(state.LastThreatPosition) &&
             HorizontalDistanceSqr(soldier.transform.position, state.LastThreatPosition) >= 4f)
         {
             return state.LastThreatPosition;
-        }
-
-        var reportedThreats = new List<Vector3>(1);
-        ContactKnowledge.AppendRecentGroundThreatPositions(
-            soldier, now, reportedThreats, 1);
-        if (reportedThreats.Count > 0 && IsFinite(reportedThreats[0]) &&
-            HorizontalDistanceSqr(soldier.transform.position, reportedThreats[0]) >= 4f)
-        {
-            return reportedThreats[0];
         }
 
         var outward = soldier.transform.position - center;
@@ -132,7 +124,7 @@ internal static partial class ContactResponse
             // Soldiers near the objective center share one stable squad-facing
             // approach axis. Per-soldier random axes made one squad scatter across
             // unrelated faces of the position and select incoherent cover.
-            var squadId = ContactKnowledge.GetSquadId(soldier);
+            var squadId = SquadIdentity.GetSquadId(soldier);
             var seed = unchecked((uint)(squadId * 397));
             var angle = (seed % 360u) * Mathf.Deg2Rad;
             outward = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
@@ -167,19 +159,18 @@ internal static partial class ContactResponse
         try
         {
             var squad = soldier.joinedSquad;
-            var squadId = squad == null ? 0 : ContactKnowledge.GetSquadId(squad);
+            var squadId = squad == null ? 0 : SquadIdentity.GetSquadId(squad);
             var revision = GroundAiDirector.CurrentObjectiveRevision(soldier.faction);
-            var hasStationaryArea = squad != null &&
-                                    GroundAiDirector.TryGetCommanderDefensiveArea(
-                                        squad, out _, out _);
+            // The commander's own stationary-area lease is gone; a squad's native
+            // defend order (the same signal TryGetDefensiveArea already falls back
+            // to) is now the sole source of a stationary defensive area.
+            var hasStationaryArea = squad != null && TryGetDefensiveArea(soldier, out _, out _);
             var eligible = squad != null &&
                            AiOwnership.IsAutonomous(soldier) &&
                            soldier.IsAlive &&
                            !soldier.IsOnVehicle() &&
-                           GroundAiDirector.OwnsSquad(squad) &&
                            hasStationaryArea &&
-                           !GroundAiDirector.HasProtectedInfantryAssignment(soldier) &&
-                           revision > 0;
+                           !GroundAiDirector.HasProtectedInfantryAssignment(soldier);
             var insideArea = !state.DefensivePositionOwned && eligible &&
                              IsInsideDefensiveArea(soldier);
             var shouldOwn = DefensivePositionOwnershipCore.ShouldOwn(
@@ -202,7 +193,12 @@ internal static partial class ContactResponse
                 state.DefensivePositionSquadId = squadId;
                 state.DefensivePositionObjectiveRevision = revision;
                 state.DefensivePositionEntryPoint = soldier.transform.position;
-                state.EngagementHoldUntil = float.PositiveInfinity;
+                // D4 (plan 015): bounded instead of +inf. This is an edge-triggered
+                // write (only on first acquisition), but ShouldHoldDefensivePosition
+                // — not this timer — is what actually keeps a defender's movement
+                // held every frame, so a lapsed value here does not un-freeze a
+                // defender; it only keeps the protocol's +inf ban consistent.
+                state.EngagementHoldUntil = BoundedEngagementHold(false, state, Time.time);
                 AiState.Trace(
                     $"Defensive position: soldier {soldier.GetInstanceID()} acquired stationary ownership");
             }
@@ -250,8 +246,9 @@ internal static partial class ContactResponse
         state.DefensivePositionSquadId = 0;
         state.DefensivePositionObjectiveRevision = 0;
         state.DefensivePositionEntryPoint = default;
-        if (float.IsPositiveInfinity(state.EngagementHoldUntil))
-            state.EngagementHoldUntil = 0f;
+        // D4 (plan 015): EngagementHoldUntil is bounded at acquisition now (see
+        // RefreshDefensivePositionOwnership), so it self-heals on its own timer
+        // instead of needing an explicit clear here.
         ReleaseDefensiveCoverHold(state, soldierId);
     }
 
@@ -375,9 +372,9 @@ internal static partial class ContactResponse
             state.EngagementHoldUntil = 0f;
             state.ContactCrouchOwned = target != null;
             ClearCoverClearancePose(state);
-            state.MovementInhibitedByContactResponse = false;
-            state.FireRestorePending = true;
-            ai.moveCharacter = true;
+            ApplyMovementDecision(
+                ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
+                SoldierPose.Crouch, "player-hold-route");
             if (target != null)
                 ApplyContactMovementPose(ai, soldier, state, now);
             if (wasControllingMovement && HasCommittedDestination(soldier))
@@ -405,7 +402,9 @@ internal static partial class ContactResponse
         {
             SetCoverState(state, InfantryCoverState.Holding, soldierId,
                 "holding protected position inside player hold area");
-            state.EngagementHoldUntil = float.PositiveInfinity;
+            // D4 (plan 015): bounded — see the comment on
+            // TryEstablishInitialDefensivePosition's stable-anchor branch.
+            state.EngagementHoldUntil = BoundedEngagementHold(target != null, state, now);
             state.ContactCrouchOwned = true;
             var anchorPose = target != null
                 ? GetStationaryEngagementPose(soldier, state, targetPosition)
@@ -414,7 +413,6 @@ internal static partial class ContactResponse
             if (target != null)
             {
                 FaceThreatWhenStationary(ai, soldier, targetPosition);
-                GrantFirePermissionIfReady(ai, soldier);
             }
             return true;
         }
@@ -433,7 +431,7 @@ internal static partial class ContactResponse
             state.NextDecisionAt = now + InfantryCoverPolicy.DecisionIntervalSeconds;
             var threatPosition = target != null
                 ? targetPosition
-                : GetDefensiveApproachPoint(soldier, state, center, radius, now);
+                : GetDefensiveApproachPoint(soldier, state, center, radius);
             var cover = FindCover(
                 soldier,
                 threatPosition,
@@ -463,7 +461,9 @@ internal static partial class ContactResponse
         // bounded decision cadence instead of accepting exposure or wandering.
         SetCoverState(state, InfantryCoverState.WaitingForSafeMove, soldierId,
             "holding locally while waiting for protected player-hold cover");
-        state.EngagementHoldUntil = float.PositiveInfinity;
+        // D4 (plan 015): bounded — see the comment on
+        // TryEstablishInitialDefensivePosition's stable-anchor branch.
+        state.EngagementHoldUntil = BoundedEngagementHold(target != null, state, now);
         state.ContactCrouchOwned = true;
         var pose = target != null && IsOnUsableCover(soldier)
             ? GetStationaryEngagementPose(soldier, state, targetPosition)
@@ -472,7 +472,6 @@ internal static partial class ContactResponse
         if (target != null)
         {
             FaceThreatWhenStationary(ai, soldier, targetPosition);
-            GrantFirePermissionIfReady(ai, soldier);
         }
         return true;
     }
@@ -604,6 +603,13 @@ internal static partial class ContactResponse
                     coverKnownCompromised,
                     withinAnchorLeash))
             {
+                // Kept as +inf (plan 015 audit): a genuine DefensiveCoverHold
+                // anchor is meant to hold until the position is defeated or the
+                // order changes, not on a timer. Its release path is
+                // ReleaseDefensiveCoverHold, reached above via
+                // anchorDefeatedByRealThreat / ShouldKeepDefensiveCoverAnchor
+                // failing, and elsewhere via actualCharge, player-hold-order
+                // changes, and YieldMovementToHigherAuthority.
                 state.DefensiveCoverHold = true;
                 state.HoldCoverUntil = float.PositiveInfinity;
                 state.ReservedCoverId = state.DefensiveCoverAnchorId;
@@ -630,10 +636,12 @@ internal static partial class ContactResponse
         // and a current/recent approach axis. Once accepted, the stable anchor is
         // deliberately not churned merely because the observed angle changes.
         var threatPosition = GetDefensiveApproachPoint(
-            soldier, state, center, radius, now);
+            soldier, state, center, radius);
         if (!TryCaptureDefensiveCoverAnchor(soldier, state, threatPosition, now))
             return;
 
+        // Kept as +inf (plan 015 audit): see the comment on the anchor-refresh
+        // branch above — release path is ReleaseDefensiveCoverHold.
         state.DefensiveCoverHold = true;
         state.HoldCoverUntil = float.PositiveInfinity;
         AiState.ReserveCover(
@@ -728,6 +736,9 @@ internal static partial class ContactResponse
         state.HasDefensiveCoverAnchor = true;
         state.DefensiveCoverAnchorId = state.ReservedCoverId;
         state.DefensiveCoverAnchorPosition = state.ReservedCoverPosition;
+        // Kept as +inf (plan 015 audit): see the comment in
+        // UpdateDefensiveCoverHold's anchor-refresh branch — release path is
+        // ReleaseDefensiveCoverHold.
         state.DefensiveCoverHold = true;
         state.HoldCoverUntil = float.PositiveInfinity;
         AiState.ReserveCover(
@@ -789,10 +800,16 @@ internal static partial class ContactResponse
 
             if (state.ManeuverCoverAnchorId != cover.Pointer)
             {
+                // D5 (plan 015): an attacker with a live attack route rearms this
+                // hold on a short assault tempo; everyone else (defenders with no
+                // route) keeps the long hold.
+                var hasAttackRoute = TryGetAttackWaypoint(soldier, out _);
+                var holdSeconds = hasAttackRoute
+                    ? InfantryCoverPolicy.MinimumAttackCoverHoldSeconds
+                    : InfantryCoverPolicy.MinimumManeuverCoverHoldSeconds;
                 state.ManeuverCoverAnchorId = cover.Pointer;
                 state.ManeuverCoverAnchorPosition = coverPosition;
-                state.ManeuverCoverMinimumHoldUntil = now +
-                    InfantryCoverPolicy.MinimumManeuverCoverHoldSeconds;
+                state.ManeuverCoverMinimumHoldUntil = now + holdSeconds;
                 // Attackers still wait for covering fire before the next bound —
                 // that gate is enforced by ShouldAuthorizeAttackBound after this
                 // hold expires, not by an unreachable +inf timer (plan 012).
@@ -800,10 +817,9 @@ internal static partial class ContactResponse
                 state.ManeuverCoverReleaseUntil = 0f;
                 state.ManeuverCoverReleasedId = IntPtr.Zero;
                 AiState.Trace(
-                    IsCommanderAttacker(soldier)
+                    hasAttackRoute
                         ? $"Cover hold: attacker {soldierId} reached a fighting position and will wait for covering fire"
-                        : $"Cover hold: soldier {soldierId} reached a fighting position for " +
-                          $"{InfantryCoverPolicy.MinimumManeuverCoverHoldSeconds:0}s");
+                        : $"Cover hold: soldier {soldierId} reached a fighting position for {holdSeconds:0}s");
             }
 
             return now < state.HoldCoverUntil;
@@ -883,17 +899,6 @@ internal static partial class ContactResponse
             if (squad == null)
                 return false;
 
-            // A commander lease is the authoritative source. The native order
-            // fields are mutable game state and may be rewritten between director
-            // updates; allowing that to revoke this area was the main movement-churn
-            // hole for defenders.
-            if (GroundAiDirector.TryGetCommanderDefensiveArea(
-                    squad, out center, out radius))
-            {
-                return IsFinite(center) && !float.IsNaN(radius) &&
-                       !float.IsInfinity(radius) && radius >= 0f;
-            }
-
             if (squad.order != Order.defend)
                 return false;
 
@@ -909,9 +914,7 @@ internal static partial class ContactResponse
 
             var tolerance = IsPlayerLedSquad(squad)
                 ? PlayerHoldAreaToleranceMeters
-                : GroundAiDirector.OwnsSquad(squad)
-                    ? 0f
-                    : DefensiveAreaToleranceMeters;
+                : DefensiveAreaToleranceMeters;
             radius = Mathf.Max(0f, radius) + tolerance;
             return true;
         }
