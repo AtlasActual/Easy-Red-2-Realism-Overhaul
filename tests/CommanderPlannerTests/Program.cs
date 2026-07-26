@@ -45,7 +45,6 @@ internal static class Program
             (nameof(TransportDismountsBeforeTakingFire), TransportDismountsBeforeTakingFire),
             (nameof(AttackCoverCorridorAllowsFlankingWithinBoundedBacktrack), AttackCoverCorridorAllowsFlankingWithinBoundedBacktrack),
             (nameof(FailedCoverSearchBacksOffProgressively), FailedCoverSearchBacksOffProgressively),
-            (nameof(TankFearNoCoverWaitIsBounded), TankFearNoCoverWaitIsBounded),
             (nameof(PoseArbiterLatchShapesTransitions), PoseArbiterLatchShapesTransitions),
             (nameof(DisagreeingStationaryOwnersConvergeToOneStance), DisagreeingStationaryOwnersConvergeToOneStance),
             (nameof(ClearanceStandIsGrantedWhileADefensiveHoldIsActive), ClearanceStandIsGrantedWhileADefensiveHoldIsActive),
@@ -70,8 +69,7 @@ internal static class Program
             (nameof(PlayerHoldCoverFollowsCommittedCoverMove), PlayerHoldCoverFollowsCommittedCoverMove),
             (nameof(MovementSafetyLadderPicksHazardThenSafetyThenSuppression), MovementSafetyLadderPicksHazardThenSafetyThenSuppression),
             (nameof(ProtectedAssignmentSkipsDefensivePositionBranch), ProtectedAssignmentSkipsDefensivePositionBranch),
-            (nameof(ContactRequiresPolicyEnabledAndNoTankThreatOtherwiseTankFearWins), ContactRequiresPolicyEnabledAndNoTankThreatOtherwiseTankFearWins),
-            (nameof(MountedCrewNeverReceivesATankFearProposal), MountedCrewNeverReceivesATankFearProposal),
+            (nameof(ContactResponseRequiresPolicyEnabled), ContactResponseRequiresPolicyEnabled),
             (nameof(ReloadSafetyAddsProneAndFireInhibitionAlongsideTheHold), ReloadSafetyAddsProneAndFireInhibitionAlongsideTheHold),
             (nameof(MovementDebugProjectionUsesOnlyExecutorDestination), MovementDebugProjectionUsesOnlyExecutorDestination),
             (nameof(AiDebugAllegianceScopeIsExplicitAndFailClosed), AiDebugAllegianceScopeIsExplicitAndFailClosed),
@@ -268,45 +266,6 @@ internal static class Program
             CoverSearchBackoffCore.NextDecisionDelaySeconds(float.NaN, 3),
             0.001f,
             "An invalid base interval was not rejected.");
-    }
-
-    private static void TankFearNoCoverWaitIsBounded()
-    {
-        // A soldier who has not failed a tank-cover search still tries to hide.
-        False(TankCoverWaitCore.ShouldResumeOrders(0),
-            "A soldier with no failed tank-cover search abandoned the hide immediately.");
-
-        // First conclusive miss: brief prone wait, not yet resuming orders.
-        var first = TankCoverWaitCore.RecordFailure(0, 0f, 100f);
-        Equal(1, first, "The first tank-cover miss did not start the streak at one.");
-        False(TankCoverWaitCore.ShouldResumeOrders(first),
-            "A single tank-cover miss abandoned the hide too early.");
-
-        // A second miss within a search cycle bounds the wait: resume orders instead of
-        // freezing prone in the open.
-        var second = TankCoverWaitCore.RecordFailure(first, 100f, 104f);
-        Equal(2, second, "Consecutive tank-cover misses did not accumulate.");
-        True(TankCoverWaitCore.ShouldResumeOrders(second),
-            "Two consecutive tank-cover misses did not bound the no-cover wait.");
-
-        // A gap wider than a search cycle means the soldier stopped open-field waiting;
-        // the streak resets so the hide re-arms on a materially new situation.
-        var reArmed = TankCoverWaitCore.RecordFailure(second, 104f, 120f);
-        Equal(1, reArmed, "A stale tank-cover miss did not reset the streak.");
-        False(TankCoverWaitCore.ShouldResumeOrders(reArmed),
-            "A re-armed tank-cover wait resumed orders without a fresh streak.");
-
-        // A gap exactly at the reset window still counts as continuous waiting.
-        Equal(2,
-            TankCoverWaitCore.RecordFailure(
-                1, 100f, 100f + TankCoverWaitCore.FailureStreakResetSeconds),
-            "A miss at the reset boundary did not extend the streak.");
-
-        // Absent or invalid last-failure timestamps start a fresh streak.
-        Equal(1, TankCoverWaitCore.RecordFailure(5, 0f, 10f),
-            "A missing last-failure time did not reset the streak.");
-        Equal(1, TankCoverWaitCore.RecordFailure(5, float.NaN, 10f),
-            "A non-finite last-failure time did not reset the streak.");
     }
 
     // Mirrors ContactResponse.CommitArbitratedPose over the pure PoseArbiterCore: applies
@@ -606,13 +565,12 @@ internal static class Program
         bool safetyHalt = false,
         bool hazardEscape = false,
         bool pinnedHold = false,
-        bool tankHide = false,
         bool haltSpacing = false,
         bool engagementHold = false,
         bool coverHold = false,
         bool committedMove = false)
         => MovementArbiterCore.Resolve(
-            declared, safetyHalt, hazardEscape, pinnedHold, tankHide, haltSpacing,
+            declared, safetyHalt, hazardEscape, pinnedHold, haltSpacing,
             engagementHold, coverHold, committedMove);
 
     private static void MovementArbiterSafetyOutranksEveryLesserOwner()
@@ -621,16 +579,16 @@ internal static class Program
         // pinned. Safety wins over every lesser owner, and over all of them at once.
         Equal(MovementOwner.SafetyHalt,
             ResolveMovement(MovementOwner.OrderedMove, safetyHalt: true, hazardEscape: true,
-                pinnedHold: true, tankHide: true, haltSpacing: true, engagementHold: true,
+                pinnedHold: true, haltSpacing: true, engagementHold: true,
                 coverHold: true, committedMove: true),
             "A safety halt lost locomotion to a lesser owner.");
         False(MovementArbiterCore.Grants(MovementOwner.SafetyHalt),
             "The safety halt was treated as permission to move.");
 
         // Flame escape is the one owner above the halts that GRANTS movement: a man in
-        // the beaten zone of a flamethrower leaves it even while pinned or tank-hiding.
+        // the beaten zone of a flamethrower leaves it even while pinned.
         Equal(MovementOwner.HazardEscape,
-            ResolveMovement(hazardEscape: true, pinnedHold: true, tankHide: true,
+            ResolveMovement(hazardEscape: true, pinnedHold: true,
                 engagementHold: true, coverHold: true, committedMove: true),
             "Flame evasion lost locomotion to a lesser halt.");
         True(MovementArbiterCore.Grants(MovementOwner.HazardEscape),
@@ -640,13 +598,9 @@ internal static class Program
         // specifically outranks the engagement hold, which is the case that decides
         // whether a pinned or reloading soldier can be walked out of his own halt.
         Equal(MovementOwner.PinnedHold,
-            ResolveMovement(pinnedHold: true, tankHide: true, haltSpacing: true,
+            ResolveMovement(pinnedHold: true, haltSpacing: true,
                 engagementHold: true, coverHold: true, committedMove: true),
             "Pinning lost locomotion to a lesser owner.");
-        Equal(MovementOwner.TankHide,
-            ResolveMovement(tankHide: true, haltSpacing: true, engagementHold: true,
-                coverHold: true, committedMove: true),
-            "Tank hide lost locomotion to a lesser owner.");
         Equal(MovementOwner.HaltSpacing,
             ResolveMovement(haltSpacing: true, engagementHold: true, coverHold: true),
             "The halt-spacing step could not step out of the halt it belongs to.");
@@ -738,7 +692,6 @@ internal static class Program
         out PoseOwner owner,
         bool requiredAction = false,
         bool pinnedOrBurning = false,
-        bool tankHide = false,
         bool flameEvading = false,
         bool nativelyMoving = false)
     {
@@ -750,11 +703,6 @@ internal static class Program
         if (pinnedOrBurning && !flameEvading)
         {
             owner = PoseOwner.Suppression;
-            return TacticalStance.Prone;
-        }
-        if (tankHide && !flameEvading)
-        {
-            owner = PoseOwner.TankHide;
             return TacticalStance.Prone;
         }
         if (PoseMovementContractCore.MovementOwnsPose(
@@ -820,12 +768,10 @@ internal static class Program
             "A required-action prone pose was not matched by a movement halt.");
         True(MovementArbiterCore.Halts(ResolveMovement(pinnedHold: true)),
             "A pinned prone pose was not matched by a movement halt.");
-        True(MovementArbiterCore.Halts(ResolveMovement(tankHide: true)),
-            "A tank-hide prone pose was not matched by a movement halt.");
 
         foreach (var safety in new[]
                  {
-                     PoseOwner.TankHide, PoseOwner.Suppression, PoseOwner.RequiredAction
+                     PoseOwner.Suppression, PoseOwner.RequiredAction
                  })
         {
             True((int)safety > (int)PoseOwner.MovementPose,
@@ -845,23 +791,17 @@ internal static class Program
                 out var pinnedOwner, pinnedOrBurning: true),
             "A pinned or burning soldier stood up for a move.");
         Equal(PoseOwner.Suppression, pinnedOwner, "Pinning lost the pose.");
-        Equal(TacticalStance.Prone,
-            ResolvePoseWithMovementContract(
-                MovementOwner.OrderedMove, movementHalted: false, TacticalStance.Crouched,
-                out var tankOwner, tankHide: true),
-            "A soldier hiding from armor stood up for a move.");
-        Equal(PoseOwner.TankHide, tankOwner, "Tank hide lost the pose.");
 
         // Flame escape is the one movement GRANT above the halts, so the safety poses carry
         // the same carve-out the pinned rank always had: a man leaving a beaten zone runs.
         True(MovementArbiterCore.Grants(
-                ResolveMovement(hazardEscape: true, pinnedHold: true, tankHide: true)),
+                ResolveMovement(hazardEscape: true, pinnedHold: true)),
             "Flame evasion stopped granting movement.");
         Equal(TacticalStance.Crouched,
             ResolvePoseWithMovementContract(
                 MovementOwner.HazardEscape, movementHalted: false, TacticalStance.Prone,
                 out var hazardOwner, requiredAction: true, pinnedOrBurning: true,
-                tankHide: true, flameEvading: true),
+                flameEvading: true),
             "A soldier escaping a flame was held prone while the ladder moved him.");
         Equal(PoseOwner.MovementPose, hazardOwner, "The flame escape did not own the pose.");
     }
@@ -872,7 +812,7 @@ internal static class Program
         // arbiter is actually MOVING. Every halting owner leaves the fighting pose alone.
         foreach (var halting in new[]
                  {
-                     MovementOwner.SafetyHalt, MovementOwner.PinnedHold, MovementOwner.TankHide,
+                     MovementOwner.SafetyHalt, MovementOwner.PinnedHold,
                      MovementOwner.EngagementHold, MovementOwner.CoverHold
                  })
         {
@@ -949,9 +889,6 @@ internal static class Program
         Equal(MovementOwner.HaltSpacing,
             ResolveMovement(haltSpacing: true, engagementHold: true, coverHold: true),
             "The dispersion step could not step out of a fighting halt.");
-        Equal(MovementOwner.TankHide,
-            ResolveMovement(haltSpacing: true, tankHide: true),
-            "A soldier hiding from armor was walked sideways.");
         Equal(MovementOwner.SafetyHalt,
             ResolveMovement(haltSpacing: true, safetyHalt: true),
             "A burning or reloading soldier was walked sideways.");
@@ -2529,21 +2466,20 @@ internal static class Program
         bool autonomous = true,
         bool hasPlayerHoldOrder = false,
         bool hasProtectedAssignment = false,
-        bool tankThreat = false,
         bool mounted = false)
     {
         return new SoldierTacticalSnapshot(
             1, 1, 1, StrategicPosture.Attack, playerLed, scriptOwned, true, mounted,
             suppressed, needsReloadSafety, lethalHazard, position, threatPosition,
             hazardPosition, contactMovement, autonomous, hasPlayerHoldOrder,
-            hasProtectedAssignment, tankThreat);
+            hasProtectedAssignment);
     }
 
     private static void ExternalSquadWithoutPlayerHoldCoverEmitsOnlyNativeAndExternal()
     {
         var snapshot = ProposalSnapshot(playerLed: true, hasPlayerHoldOrder: false);
         var destination = new List<TacticalProposal>();
-        ProposalGenerationCore.Collect(snapshot, new TacticalPolicyOptions(true, true), destination);
+        ProposalGenerationCore.Collect(snapshot, new TacticalPolicyOptions(true), destination);
 
         Equal(2, destination.Count,
             "An external squad without a player-hold order produced more than Native+External.");
@@ -2568,7 +2504,7 @@ internal static class Program
         var holding = ProposalSnapshot(playerLed: true, hasPlayerHoldOrder: true, autonomous: true,
             position: position, contactMovement: holdSensor);
         var destination = new List<TacticalProposal>();
-        ProposalGenerationCore.Collect(holding, new TacticalPolicyOptions(true, true), destination);
+        ProposalGenerationCore.Collect(holding, new TacticalPolicyOptions(true), destination);
         var holdProposal = destination.Single(p => p.Source == ProposalSource.PlayerHold);
         Equal(TacticalAction.Hold, holdProposal.Action,
             "An uncommitted player-hold cover move issued Move instead of Hold.");
@@ -2577,7 +2513,7 @@ internal static class Program
 
         var moving = holding with { ContactMovement = holdSensor with { HasCommittedCoverMove = true } };
         destination.Clear();
-        ProposalGenerationCore.Collect(moving, new TacticalPolicyOptions(true, true), destination);
+        ProposalGenerationCore.Collect(moving, new TacticalPolicyOptions(true), destination);
         var moveProposal = destination.Single(p => p.Source == ProposalSource.PlayerHold);
         Equal(TacticalAction.Move, moveProposal.Action,
             "A committed cover move under player hold did not issue Move.");
@@ -2594,7 +2530,7 @@ internal static class Program
 
     private static void MovementSafetyLadderPicksHazardThenSafetyThenSuppression()
     {
-        var options = new TacticalPolicyOptions(true, true);
+        var options = new TacticalPolicyOptions(true);
 
         var hazardDestination = new List<TacticalProposal>();
         ProposalGenerationCore.Collect(
@@ -2624,7 +2560,7 @@ internal static class Program
             HasActionableContact: false, HasRecentContact: false, HasCommittedCoverMove: false,
             HasStableCoverHold: false, HasTimedCoverHold: false, CanClaimReachedCover: false,
             HasEngagementHold: false, NeedsDefensivePositionControl: true);
-        var options = new TacticalPolicyOptions(true, true);
+        var options = new TacticalPolicyOptions(true);
 
         var protectedDestination = new List<TacticalProposal>();
         ProposalGenerationCore.Collect(
@@ -2645,7 +2581,7 @@ internal static class Program
             "The defensive-position branch did not run once the protected assignment was released.");
     }
 
-    private static void ContactRequiresPolicyEnabledAndNoTankThreatOtherwiseTankFearWins()
+    private static void ContactResponseRequiresPolicyEnabled()
     {
         var contactSensor = new ContactMovementSensor(
             HasActionableContact: true, HasRecentContact: false, HasCommittedCoverMove: false,
@@ -2655,50 +2591,31 @@ internal static class Program
         var contactAllowed = ProposalSnapshot(contactMovement: contactSensor, threatPosition: threat);
 
         var allowedDestination = new List<TacticalProposal>();
-        ProposalGenerationCore.Collect(contactAllowed, new TacticalPolicyOptions(true, true), allowedDestination);
+        ProposalGenerationCore.Collect(contactAllowed, new TacticalPolicyOptions(true), allowedDestination);
         True(allowedDestination.Any(p => p.Source == ProposalSource.Contact),
-            "Contact response did not fire when policy was enabled, there was no tank threat, " +
-            "and the sensor demanded local control.");
+            "Contact response did not fire when policy was enabled and the sensor " +
+            "demanded local control.");
 
         var policyDisabledDestination = new List<TacticalProposal>();
         ProposalGenerationCore.Collect(
-            contactAllowed, new TacticalPolicyOptions(false, true), policyDisabledDestination);
+            contactAllowed, new TacticalPolicyOptions(false), policyDisabledDestination);
         False(policyDisabledDestination.Any(p => p.Source == ProposalSource.Contact),
             "Contact response fired even though ContactResponseEnabled was false.");
 
-        var tankThreatened = contactAllowed with { TankThreat = true };
-        var tankDestination = new List<TacticalProposal>();
-        ProposalGenerationCore.Collect(tankThreatened, new TacticalPolicyOptions(true, true), tankDestination);
-        False(tankDestination.Any(p => p.Source == ProposalSource.Contact),
-            "Contact response fired even though a tank threat was present.");
-        var tankFear = tankDestination.Single(p => p.Source == ProposalSource.TankFear);
-        Equal(TacticalChannel.Movement, tankFear.Channel, "Tank fear did not target the movement channel.");
-        Equal(TacticalAction.Move, tankFear.Action, "Tank fear did not command a move.");
-        Equal(CommandAuthority.ImmediateCombat, tankFear.Priority,
-            "Tank fear did not use immediate-combat authority.");
-        Equal(threat, tankFear.Destination, "Tank fear did not target the sensed threat position.");
-    }
-
-    private static void MountedCrewNeverReceivesATankFearProposal()
-    {
-        var snapshot = ProposalSnapshot(tankThreat: true, mounted: true);
-        var destination = new List<TacticalProposal>();
-        ProposalGenerationCore.Collect(snapshot, new TacticalPolicyOptions(true, true), destination);
-        False(destination.Any(p => p.Source == ProposalSource.TankFear),
-            "A mounted crewman received a tank-fear proposal that would pull him off his own vehicle.");
-
-        var dismounted = snapshot with { Mounted = false };
-        var dismountedDestination = new List<TacticalProposal>();
-        ProposalGenerationCore.Collect(dismounted, new TacticalPolicyOptions(true, true), dismountedDestination);
-        True(dismountedDestination.Any(p => p.Source == ProposalSource.TankFear),
-            "A dismounted soldier under tank threat did not receive a tank-fear proposal.");
+        var contact = allowedDestination.Single(p => p.Source == ProposalSource.Contact);
+        Equal(TacticalChannel.Movement, contact.Channel,
+            "Contact response did not target the movement channel.");
+        Equal(CommandAuthority.ImmediateCombat, contact.Priority,
+            "Contact response did not use immediate-combat authority.");
+        Equal(threat, contact.Destination,
+            "Contact response did not target the sensed threat position.");
     }
 
     private static void ReloadSafetyAddsProneAndFireInhibitionAlongsideTheHold()
     {
         var snapshot = ProposalSnapshot(needsReloadSafety: true);
         var destination = new List<TacticalProposal>();
-        ProposalGenerationCore.Collect(snapshot, new TacticalPolicyOptions(true, true), destination);
+        ProposalGenerationCore.Collect(snapshot, new TacticalPolicyOptions(true), destination);
 
         var hold = destination.Single(p =>
             p.Channel == TacticalChannel.Movement && p.Source == ProposalSource.ActionSafety);

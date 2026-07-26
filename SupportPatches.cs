@@ -515,7 +515,6 @@ internal sealed class AtmosphericParticlePersistenceController : MonoBehaviour
 {
     private void Update()
     {
-        DistantSoundShaper.UpdateTrackedExplosions();
         AtmosphericParticleEmissionPersistence.Update();
         AudioSourceCacheMaintenance.Update(Time.unscaledTime);
     }

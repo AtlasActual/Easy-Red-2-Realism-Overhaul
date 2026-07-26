@@ -30,7 +30,10 @@ internal static class TankTactics
         vehicle = ai.veh;
         return vehicle != null &&
                vehicle.GetComponent<VehicleTank>() != null &&
-               vehicle.IsLocalAIDriving();
+               vehicle.IsLocalAIDriving() &&
+               // A player riding as gunner or commander leaves the AI driving, but the
+               // crew squad is the player's squad and the tank answers to them alone.
+               !AiOwnership.IsInPlayerSquad(vehicle.GetDriver());
     }
 
     internal static bool IsArmoredVehicle(Vehicle vehicle)
@@ -524,8 +527,11 @@ internal static class AiVehicleUpdatePatch
             try
             {
                 var vehicle = __instance.veh;
-                if (vehicle == null || vehicle.GetComponent<VehicleTank>() == null || !vehicle.IsLocalAIDriving())
+                if (vehicle == null || !SoldierSequentialUpdatePatch.IsTankCached(vehicle) ||
+                    !vehicle.IsLocalAIDriving())
+                {
                     return;
+                }
 
                 var id = vehicle.GetInstanceID();
                 var runtime = AiState.GetTankEngagementState(id);

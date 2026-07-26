@@ -251,11 +251,41 @@ internal static class GroundAiDirector
         ContactResponse.ExecuteHazardEscape(ai, soldier, escape);
     }
 
+    // Ceiling on how many soldiers may run the director tail (snapshot, proposal
+    // collection, arbitration, and the contact FSM it dispatches into) in one frame —
+    // the heaviest per-soldier work this mod does. The game reaches SequentialUpdate on
+    // a rolling schedule, so only a handful of soldiers normally arrive per frame and
+    // this never binds; it exists for the waves that land together, which measured
+    // 55.7ms in a single frame. 12 is far above the steady-state arrival rate.
+    private const int MaxDirectorResolutionsPerFrame = 12;
+    private static int _directorResolutionFrame = -1;
+    private static int _directorResolutionsThisFrame;
+
+    // Deferring a soldier is indistinguishable from the game's own rolling schedule not
+    // reaching him this frame: he keeps the resolution he already has and runs on his
+    // next SequentialUpdate. The system is built to tolerate exactly that gap.
+    private static bool TryTakeDirectorBudget()
+    {
+        var frame = Time.frameCount;
+        if (frame != _directorResolutionFrame)
+        {
+            _directorResolutionFrame = frame;
+            _directorResolutionsThisFrame = 0;
+        }
+
+        if (_directorResolutionsThisFrame >= MaxDirectorResolutionsPerFrame)
+            return false;
+
+        _directorResolutionsThisFrame++;
+        return true;
+    }
+
     internal static void UpdateSoldier(SoldierAI ai, Soldier soldier, float now)
     {
         if (ai == null || soldier == null || !MultiplayerAuthority.CanMutateGameplay())
             return;
 
+        ModTimeProbe.Stage(SequentialStage.DirectorSquadOwnership);
         var squad = soldier.joinedSquad;
         if (squad != null)
             ObserveExternalOwnership(squad);
@@ -263,18 +293,22 @@ internal static class GroundAiDirector
         var leader = squad?.Leader;
         if (squad != null && leader != null && leader.GetInstanceID() == soldier.GetInstanceID())
         {
+            ModTimeProbe.Stage(SequentialStage.DirectorSquadLeaderSupport);
             SquadRadioSupport.Update(squad, now);
             StaticAntiTankStaffing.Update(squad, now);
         }
 
         if (Settings.PerceptionEnabled.Value)
         {
+            ModTimeProbe.Stage(SequentialStage.DirectorGunfirePoll);
             GunfireAwareness.Poll(soldier, now);
+            ModTimeProbe.Stage(SequentialStage.DirectorPerception);
             SoldierSequentialUpdatePatch.ApplyPerception(ai, soldier);
         }
         else
             AiState.TargetMemory.Remove(soldier.GetInstanceID());
 
+        ModTimeProbe.Stage(SequentialStage.DirectorSquadChange);
         var id = soldier.GetInstanceID();
         var currentSquadId = squad == null ? 0 : SquadIdentity.GetSquadId(squad);
         if (SoldierResolutions.TryGetValue(id, out var previousResolution) &&
@@ -284,14 +318,19 @@ internal static class GroundAiDirector
             ContactResponse.ResetDefensivePositionOwnership(id);
             SoldierResolutions.Remove(id);
         }
-        if (!Settings.TankFearEnabled.Value)
-            AiState.TankCoverHideUntil.Remove(id);
+        // Perception and the squad-change cleanup above are cheap and time-sensitive, so
+        // they always run; only the heavy tail is budgeted.
+        if (!TryTakeDirectorBudget())
+            return;
 
+        ModTimeProbe.Stage(SequentialStage.DirectorSnapshot);
         var snapshot = CaptureSnapshot(ai, soldier, squad);
         var reusableResolution = SoldierResolutions.TryGetValue(id, out var priorResolution)
             ? priorResolution
             : new SoldierTacticalResolution(snapshot);
+        ModTimeProbe.Stage(SequentialStage.DirectorProposals);
         CollectProposals(snapshot, TacticalProposalBuffer);
+        ModTimeProbe.Stage(SequentialStage.DirectorArbitration);
         var resolution = TacticalArbitrationCore.ResolveInto(
             reusableResolution, snapshot, TacticalProposalBuffer);
         SoldierResolutions[id] = resolution;
@@ -299,7 +338,9 @@ internal static class GroundAiDirector
         // Suppression, fire safety, and lethal hazard systems remain local safety
         // executors. The selected movement owner decides whether contact/tank policy
         // may replace the current assignment.
-        ContactResponse.UpdateSuppressionReaction(ai, soldier, now, Time.deltaTime);
+        ModTimeProbe.Stage(SequentialStage.DirectorSuppressionReaction);
+        ContactResponse.UpdateSuppressionReaction(ai, soldier, id, now, Time.deltaTime);
+        ModTimeProbe.Stage(SequentialStage.DirectorSuppressiveSchedule);
         KnownTargetSuppressiveFire.Schedule(ai, soldier, now);
 
         var movementSource = resolution.Winners.TryGetValue(TacticalChannel.Movement, out var movement)
@@ -313,6 +354,7 @@ internal static class GroundAiDirector
         // Name the winning proposal on every change so the flapping pair is identified from
         // the log instead of inferred from the halt/grant it produces.
         TraceMovementAuthority(id, movementSource, movement.Constraint);
+        ModTimeProbe.Stage(SequentialStage.DirectorMovementExecutor);
         if (movementSource == ProposalSource.DefensivePosition)
             ContactResponse.UpdateDefensivePosition(ai, soldier);
         else if (movementSource == ProposalSource.PlayerHold)
@@ -329,6 +371,7 @@ internal static class GroundAiDirector
                 releaseDefensiveAnchor:
                     movementSource is ProposalSource.External or ProposalSource.ProtectedAssignment);
 
+        ModTimeProbe.Stage(SequentialStage.DirectorHazard);
         if (movementSource == ProposalSource.Hazard)
         {
             SoldierFireDanger.Execute(
@@ -339,9 +382,7 @@ internal static class GroundAiDirector
                 now);
         }
 
-        if (movementSource == ProposalSource.TankFear)
-            SoldierSequentialUpdatePatch.ApplyTankFear(ai, soldier);
-
+        ModTimeProbe.Stage(SequentialStage.DirectorMovementWatchdog);
         ContactResponse.ApplyMovementProgressWatchdog(
             ai,
             soldier,
@@ -349,15 +390,22 @@ internal static class GroundAiDirector
             movement.Action,
             now);
 
+        ModTimeProbe.Stage(SequentialStage.DirectorPose);
         ContactResponse.MaintainOwnedPose(ai, soldier, now);
+        ModTimeProbe.Stage(SequentialStage.DirectorAntiArmor);
         InfantryAntiArmorFireDiscipline.Update(ai, soldier);
+        ModTimeProbe.Stage(SequentialStage.DirectorWeaponRange);
         HandheldWeaponClassifier.EnforceEngagementRange(soldier, ai);
         // Last word on the fire channel each authoritative tick, exactly as
         // MaintainOwnedPose is the last word on the pose channel.
+        ModTimeProbe.Stage(SequentialStage.DirectorFireDecision);
         ContactResponse.ApplyFireDecision(ai, soldier, now, authoritative: true);
 
         if (Settings.BattleChatterEnabled.Value)
+        {
+            ModTimeProbe.Stage(SequentialStage.DirectorBattleChatter);
             BattleChatter.Update(ai, soldier, now);
+        }
     }
 
     internal static void ReleaseSoldier(int soldierId)
@@ -409,7 +457,7 @@ internal static class GroundAiDirector
             soldier.GetInstanceID(),
             squad == null ? 0 : SquadIdentity.GetSquadId(squad),
             0,
-            IsAttackingFaction(soldier.faction) ? StrategicPosture.Attack : StrategicPosture.Defend,
+            IsAttackingFaction(AiState.FactionOf(soldier)) ? StrategicPosture.Attack : StrategicPosture.Defend,
             playerLed,
             scriptOwned,
             soldier.IsAlive,
@@ -423,17 +471,14 @@ internal static class GroundAiDirector
             ContactResponse.SenseMovement(ai, soldier, Time.time),
             AiOwnership.IsAutonomous(soldier),
             ContactResponse.TryGetPlayerHoldOrder(soldier, out _, out _),
-            HasProtectedInfantryAssignment(soldier),
-            SoldierSequentialUpdatePatch.HasNearbyTankThreat(soldier));
+            HasProtectedInfantryAssignment(soldier));
     }
 
     private static void CollectProposals(
         SoldierTacticalSnapshot snapshot,
         List<TacticalProposal> destination)
     {
-        var options = new TacticalPolicyOptions(
-            Settings.ContactResponseEnabled.Value,
-            Settings.TankFearEnabled.Value);
+        var options = new TacticalPolicyOptions(Settings.ContactResponseEnabled.Value);
         ProposalGenerationCore.Collect(snapshot, options, destination);
     }
 
@@ -474,30 +519,7 @@ internal static class GroundAiDirector
     }
 
     private static bool HasPlayerMember(Squad squad)
-    {
-        try
-        {
-            if (squad.IsPlayerInSquad())
-                return true;
-
-            for (var index = 0; index < squad.CountMembers; index++)
-            {
-                var member = squad.GetMember(index);
-                if (member == null)
-                    continue;
-
-                var sync = member.GetComponent<SyncSoldier>();
-                if (sync != null && sync.IsControlledByAPlayer())
-                    return true;
-            }
-        }
-        catch (Il2CppInterop.Runtime.ObjectCollectedException)
-        {
-            return true;
-        }
-
-        return false;
-    }
+        => AiOwnership.IsPlayerSquad(squad);
 
     private static bool HasScriptAssignedMember(Squad squad)
     {

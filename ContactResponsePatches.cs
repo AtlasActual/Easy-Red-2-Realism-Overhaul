@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using HarmonyLib;
 using Il2CppInterop.Runtime;
 using UnityEngine;
@@ -154,19 +155,79 @@ internal static class BrokenCombatCoverAvailabilityPatch
     }
 }
 
+/// <summary>
+/// Carries the identity and ownership a tactical prefix already resolved across to its own
+/// postfix. Harmony runs the postfix inside the same call as the prefix — including when
+/// the prefix returned false — so those facts are still valid there, and re-deriving them
+/// cost a second GetSoldier plus IsAutonomous (itself IsAI + IsPlayer + GetInstanceID) plus
+/// IsOnVehicle for every AI soldier every frame. That is managed->il2cpp boundary traffic,
+/// not AI work: the same measurement that showed the pipeline's cost tracking the NUMBER of
+/// calls rather than what any of them decides.
+///
+/// One slot is enough because the engine drives these calls one soldier at a time. It is
+/// keyed on the controller pointer AND the frame so a postfix whose prefix did not run can
+/// never consume a stale or foreign verdict — it simply misses and resolves for itself.
+/// </summary>
+internal static class TacticalMoveHandoff
+{
+    private static IntPtr _controller;
+    private static int _frame = -1;
+    private static Soldier? _soldier;
+    private static int _soldierId;
+    private static float _now;
+    private static bool _owned;
+
+    internal static void Publish(
+        IntPtr controller, Soldier? soldier, int soldierId, float now, bool owned)
+    {
+        _controller = controller;
+        _frame = Time.frameCount;
+        _soldier = soldier;
+        _soldierId = soldierId;
+        _now = now;
+        _owned = owned;
+    }
+
+    internal static bool TryConsume(
+        IntPtr controller, out Soldier? soldier, out int soldierId, out float now, out bool owned)
+    {
+        if (controller != IntPtr.Zero && controller == _controller && _frame == Time.frameCount)
+        {
+            soldier = _soldier;
+            soldierId = _soldierId;
+            now = _now;
+            owned = _owned;
+            return true;
+        }
+
+        soldier = null;
+        soldierId = 0;
+        now = 0f;
+        owned = false;
+        return false;
+    }
+}
+
 [HarmonyPatch(typeof(SoldierAI), nameof(SoldierAI.MoveOptimized))]
 internal static class SoldierTacticalSprintPatch
 {
+    // NOTE: __instance must stay the wrapper type. Declaring it as IntPtr to skip the
+    // per-call marshalling made Harmony emit a method the runtime rejects outright —
+    // "InvalidProgramException: Common Language Runtime detected an invalid program" on
+    // every invocation of the native->managed trampoline. The boundary allocation is real
+    // and measurable, but this is not a way to avoid it.
     [HarmonyPrefix]
     private static bool Prefix(SoldierAI __instance, ref bool sprint, float deltaTime)
     {
         var __t = ModTimeProbe.Begin();
+        var __a = ModTimeProbe.BeginAlloc();
         try
         {
             return SharedTacticalMovePrefix(__instance, deltaTime, ref sprint, updateFireInhibitionOnPass: true);
         }
         finally
         {
+            ModTimeProbe.EndTacticalAlloc(__a);
             ModTimeProbe.EndTacticalMove(__t);
         }
     }
@@ -183,18 +244,38 @@ internal static class SoldierTacticalSprintPatch
         ref bool sprint,
         bool updateFireInhibitionOnPass)
     {
+        InteropWrapperLifetime.Retain(ai);
+        ModTimeProbe.Stage(TacticalStage.PrefixEntry);
+        // Measures only the opening block — the instance marshalling this method was
+        // entered with, GetSoldier, and the ownership tests. Compared against the
+        // whole-call figure it says whether the per-call garbage is at the boundary or
+        // further in, which decides whether changing the patch signature is the fix.
+        var __entryAlloc = ModTimeProbe.BeginAlloc();
         if (!MultiplayerAuthority.CanMutateGameplay())
+        {
+            ModTimeProbe.EndEntryAlloc(__entryAlloc);
             return true;
+        }
 
         var soldier = ai.GetSoldier();
-        if (!AiOwnership.IsAutonomous(soldier) || soldier.IsOnVehicle())
+        var ownedByAi = AiOwnership.IsAutonomous(soldier) && !soldier.IsOnVehicle();
+        ModTimeProbe.EndEntryAlloc(__entryAlloc);
+        if (!ownedByAi)
+        {
+            // Publish the negative verdict too: the postfix bails on exactly this test, so
+            // handing it the answer saves it from repeating the whole ownership probe.
+            TacticalMoveHandoff.Publish(ai.Pointer, soldier: null, soldierId: 0, now: 0f, owned: false);
             return true;
+        }
 
         var id = soldier.GetInstanceID();
         var now = Time.time;
-        ContactResponse.UpdateSuppressionReaction(ai, soldier, now, deltaTime);
+        TacticalMoveHandoff.Publish(ai.Pointer, soldier, id, now, owned: true);
+        ModTimeProbe.Stage(TacticalStage.SuppressionReaction);
+        ContactResponse.UpdateSuppressionReaction(ai, soldier, id, now, deltaTime);
         if (Settings.DangerReactionsEnabled.Value && soldier.IsOnFire)
         {
+            ModTimeProbe.Stage(TacticalStage.FireDanger);
             sprint = false;
             soldier.StopFire();
             ContactResponse.StopDangerMovement(ai, soldier, deltaTime);
@@ -204,6 +285,7 @@ internal static class SoldierTacticalSprintPatch
         // The low-node-count movement path must honor the same committed reload
         // ownership as MoveOptimized; otherwise it can raise the soldier back to
         // a fighting crouch between reload frames.
+        ModTimeProbe.Stage(TacticalStage.ReloadPosture);
         if (ExposedReloadPosture.TryMaintain(soldier, now))
         {
             sprint = false;
@@ -214,6 +296,7 @@ internal static class SoldierTacticalSprintPatch
                            AiState.IsFlameEvading(id, now);
         if (ContactResponse.IsPinned(id) && !flameEvading)
         {
+            ModTimeProbe.Stage(TacticalStage.PinnedSuppression);
             sprint = false;
             var remainsStationary = ContactResponse.ApplyPinnedSuppression(
                 ai,
@@ -225,6 +308,7 @@ internal static class SoldierTacticalSprintPatch
                 return false;
         }
 
+        ModTimeProbe.Stage(TacticalStage.MovementStall);
         if (!flameEvading &&
             ContactResponse.TryHoldMovementStall(ai, soldier, now, deltaTime))
         {
@@ -232,27 +316,22 @@ internal static class SoldierTacticalSprintPatch
             return false;
         }
 
-        if (!flameEvading &&
-            ContactResponse.TryHoldTankCover(ai, soldier, now, deltaTime))
-        {
-            sprint = false;
-            return false;
-        }
-
         // Everything above is a per-frame SAFETY reaction (fire, reload, pinned, flame,
-        // movement stall, tank-hide) and stays per-frame. Everything below is the
+        // movement stall) and stays per-frame. Everything below is the
         // per-soldier DECISION tail — selecting which stationary hold owns the soldier
         // (native ownership refresh, IsActualCharge, IsOnCover) and resolving its pose
         // (StationaryHoldPose cover geometry). On the non-decision frames of the
         // round-robin stagger, re-assert the last-decided gate instead of recomputing.
+        ModTimeProbe.Stage(TacticalStage.WriteThrough);
         if (!flameEvading && !ContactResponse.RunsDecisionThisFrame(id) &&
             ContactResponse.TryWriteThroughTacticalMove(
-                ai, soldier, deltaTime, ref sprint, updateFireInhibitionOnPass,
+                ai, soldier, id, now, deltaTime, ref sprint, updateFireInhibitionOnPass,
                 out var stagger))
         {
             return stagger;
         }
 
+        ModTimeProbe.Stage(TacticalStage.ChargeCheck);
         var actualCharge = ContactResponse.IsActualCharge(soldier);
         var hazardEvading = flameEvading;
         var activeThreatMovement = (ContactResponse.HasActiveContact(id, now) ||
@@ -267,6 +346,7 @@ internal static class SoldierTacticalSprintPatch
             ContactResponse.ShouldHoldEngagement(id, now) ||
             (ContactResponse.ShouldHoldCover(id, now) && soldier.IsOnCover() && !actualCharge))
         {
+            ModTimeProbe.Stage(TacticalStage.StopTacticalMovement);
             sprint = false;
             var haltOwner = ContactResponse.StopTacticalMovement(
                 ai,
@@ -276,14 +356,53 @@ internal static class SoldierTacticalSprintPatch
                 return false;
         }
 
+        ModTimeProbe.Stage(TacticalStage.PoseApply);
         var suppression = soldier.GetSuppressionValue();
-        ApplyTacticalMovementPose(ai, soldier, now, suppression, activeThreatMovement);
+        ApplyTacticalMovementPose(ai, soldier, id, now, suppression, activeThreatMovement);
 
+        ModTimeProbe.Stage(TacticalStage.FireDecision);
         if (updateFireInhibitionOnPass)
             ContactResponse.ApplyFireDecision(ai, soldier, now, authoritative: false);
+        ModTimeProbe.Stage(TacticalStage.ThreatFacingRelease);
         ContactResponse.ReleaseStationaryThreatFacingForMovement(ai, soldier);
+        ModTimeProbe.Stage(TacticalStage.SuppressiveInterrupt);
         KnownTargetSuppressiveFire.InterruptForMovement(ai, soldier);
 
+        return true;
+    }
+
+    /// <summary>
+    /// Resolves the soldier a tactical postfix should act on, reusing whatever this frame's
+    /// prefix already established for the same controller and falling back to a full
+    /// resolve when there is nothing to reuse (the prefix bailed before publishing, or a
+    /// higher-priority patch skipped it).
+    /// </summary>
+    internal static bool TryResolveTacticalTarget(
+        SoldierAI ai,
+        [NotNullWhen(true)] out Soldier? soldier,
+        out int soldierId,
+        out float now)
+    {
+        // WasCollected is a managed-side handle check, not a boundary crossing. It restores
+        // the collected-object resilience the full path gets free from IsAutonomous's
+        // catch blocks, which reusing the prefix's reference would otherwise skip.
+        if (TacticalMoveHandoff.TryConsume(
+                ai.Pointer, out soldier, out soldierId, out now, out var owned))
+            return owned && soldier != null && !soldier.WasCollected;
+
+        soldier = null;
+        soldierId = 0;
+        now = 0f;
+        if (!MultiplayerAuthority.CanMutateGameplay())
+            return false;
+
+        var resolved = ai.GetSoldier();
+        if (!AiOwnership.IsAutonomous(resolved) || resolved.IsOnVehicle())
+            return false;
+
+        soldier = resolved;
+        soldierId = resolved.GetInstanceID();
+        now = Time.time;
         return true;
     }
 
@@ -293,17 +412,16 @@ internal static class SoldierTacticalSprintPatch
         var __t = ModTimeProbe.Begin();
         try
         {
-            if (!MultiplayerAuthority.CanMutateGameplay())
+            ModTimeProbe.Stage(TacticalStage.PostfixEntry);
+            if (!TryResolveTacticalTarget(
+                    __instance, out var soldier, out var soldierId, out var now))
                 return;
 
-            var soldier = __instance.GetSoldier();
-            if (!AiOwnership.IsAutonomous(soldier) || soldier.IsOnVehicle())
-                return;
-
-            var now = Time.time;
+            ModTimeProbe.Stage(TacticalStage.PostfixMaintainPose);
             ContactResponse.MaintainOwnedPose(
                 __instance, soldier, now,
-                ContactResponse.RunsDecisionThisFrame(soldier.GetInstanceID()));
+                ContactResponse.RunsDecisionThisFrame(soldierId));
+            ModTimeProbe.Stage(TacticalStage.PostfixFireDecision);
             ContactResponse.ApplyFireDecision(__instance, soldier, now, authoritative: false);
         }
         finally
@@ -315,11 +433,11 @@ internal static class SoldierTacticalSprintPatch
     internal static void ApplyTacticalMovementPose(
         SoldierAI ai,
         Soldier soldier,
+        int id,
         float now,
         int suppression,
         bool activeThreatMovement)
     {
-        var id = soldier.GetInstanceID();
         // Moving pose write: runs on both decision frames (the prefix tail) and the
         // per-frame moving write-through, so it uses the round-robin stagger cadence for
         // the arbiter's interop-heavy decision tail.
@@ -378,18 +496,17 @@ internal static class SoldierTacticalFpsMovePatch
         var __t = ModTimeProbe.Begin();
         try
         {
-            if (!MultiplayerAuthority.CanMutateGameplay())
+            ModTimeProbe.Stage(TacticalStage.PostfixEntry);
+            if (!SoldierTacticalSprintPatch.TryResolveTacticalTarget(
+                    __instance, out var soldier, out var soldierId, out var now))
                 return;
 
-            var soldier = __instance.GetSoldier();
-            if (!AiOwnership.IsAutonomous(soldier) || soldier.IsOnVehicle())
-                return;
-
-            var now = Time.time;
+            ModTimeProbe.Stage(TacticalStage.PostfixFireDecision);
             ContactResponse.ApplyFireDecision(__instance, soldier, now, authoritative: false);
+            ModTimeProbe.Stage(TacticalStage.PostfixMaintainPose);
             ContactResponse.MaintainOwnedPose(
                 __instance, soldier, now,
-                ContactResponse.RunsDecisionThisFrame(soldier.GetInstanceID()));
+                ContactResponse.RunsDecisionThisFrame(soldierId));
         }
         finally
         {
@@ -446,6 +563,7 @@ internal static class SoldierAiDestroyPatch
     {
         try
         {
+            InteropWrapperLifetime.Release(__instance);
             var soldier = __instance.GetSoldier();
             if (soldier != null)
                 AiState.RemoveSoldier(soldier);

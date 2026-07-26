@@ -10,7 +10,7 @@ internal static class AttackingForceBonus
         if (!AiOwnership.IsAutonomous(soldier))
             return false;
 
-        return GroundAiDirector.IsAttackingFaction(soldier.faction);
+        return GroundAiDirector.IsAttackingFaction(AiState.FactionOf(soldier));
     }
 }
 

@@ -124,10 +124,15 @@ internal static class CasualtySuppression
 
                 Vector3? position = null;
                 var soldierAffected = false;
+                // Invariant across the death loop, but it was being re-marshalled from
+                // il2cpp once per death per creature — on a mass-casualty flush with the
+                // battle's whole alive list that is the dominant cost of this pass, and
+                // the frame it landed on allocated 62KB against a 3-6KB baseline.
+                var soldierFaction = soldier.faction;
                 foreach (var death in deaths)
                 {
                     if (soldier == death.Casualty ||
-                        !CombatSafety.SameFaction(soldier.faction, death.Faction))
+                        !CombatSafety.SameFaction(soldierFaction, death.Faction))
                     {
                         continue;
                     }

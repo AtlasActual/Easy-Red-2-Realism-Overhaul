@@ -76,7 +76,61 @@ internal static class HandheldWeaponClassifier
         "greasegun", "grease_gun", "m3_grease", "erma_emp", "emp35"
     };
 
-    internal static bool IsMachineGun(GenericGun gun, bool allowHolderRoleFallback)
+    /// <summary>
+    /// Traits of a weapon MODEL, which cannot change while the weapon exists. Answering
+    /// them costs an il2cpp string marshal for <c>item_id</c>, a second allocation for
+    /// <c>ToLowerInvariant</c>, up to ~30 substring scans, and — for the machine-gun
+    /// test — two <c>GetComponent</c> lookups. That was being recomputed per soldier per
+    /// frame on the moving-fire path (via the fire arbiter, from both the movement prefix
+    /// and its postfix) and per soldier per physics step on the suppressive-fire path.
+    /// It is the source of the allocation spikes measured on stutter frames.
+    /// </summary>
+    private readonly struct GunTraits
+    {
+        internal GunTraits(bool submachineGun, bool machineGunCore)
+        {
+            SubmachineGun = submachineGun;
+            MachineGunCore = machineGunCore;
+        }
+
+        internal bool SubmachineGun { get; }
+
+        // The component/id half of the machine-gun test. The holder-role fallback is NOT
+        // cached: it depends on who is carrying the weapon, which does change.
+        internal bool MachineGunCore { get; }
+    }
+
+    // Keys are plain integers, so nothing here keeps a destroyed weapon alive. An address
+    // CAN be reused by a later allocation, so the cache is dropped on a coarse cadence:
+    // a stale entry could then misclassify one weapon until the next drop, while the cost
+    // still falls from hundreds of classifications per second to one per weapon per drop.
+    private static readonly Dictionary<IntPtr, GunTraits> TraitsCache = new();
+
+    internal static void ClearCache() => TraitsCache.Clear();
+
+    private static GunTraits GetTraits(GenericGun gun)
+    {
+        IntPtr token;
+        try
+        {
+            token = gun.Pointer;
+        }
+        catch (Exception)
+        {
+            token = IntPtr.Zero;
+        }
+
+        if (token != IntPtr.Zero && TraitsCache.TryGetValue(token, out var cached))
+            return cached;
+
+        var traits = new GunTraits(ComputeSubmachineGun(gun), ComputeMachineGunCore(gun));
+        if (token != IntPtr.Zero)
+            TraitsCache[token] = traits;
+
+        return traits;
+    }
+
+    private static bool ComputeMachineGunCore(GenericGun gun)
     {
         if (gun.IsHeavyMg() ||
             gun.GetComponent<AutomaticGunWithAmmoBelt>() != null ||
@@ -91,6 +145,29 @@ internal static class HandheldWeaponClassifier
             if (id.Contains(marker))
                 return true;
         }
+
+        return false;
+    }
+
+    private static bool ComputeSubmachineGun(GenericGun gun)
+    {
+        if (!gun.IsFullAuto())
+            return false;
+
+        var id = (gun.item_id ?? string.Empty).ToLowerInvariant();
+        foreach (var marker in SubmachineGunIds)
+        {
+            if (id.Contains(marker))
+                return true;
+        }
+
+        return false;
+    }
+
+    internal static bool IsMachineGun(GenericGun gun, bool allowHolderRoleFallback)
+    {
+        if (GetTraits(gun).MachineGunCore)
+            return true;
 
         if (!allowHolderRoleFallback)
             return false;
@@ -270,20 +347,7 @@ internal static class HandheldWeaponClassifier
         return muzzleVelocity > 0 && muzzleVelocity <= MaximumLauncherMuzzleVelocity;
     }
 
-    private static bool IsSubmachineGun(GenericGun gun)
-    {
-        if (!gun.IsFullAuto())
-            return false;
-
-        var id = (gun.item_id ?? string.Empty).ToLowerInvariant();
-        foreach (var marker in SubmachineGunIds)
-        {
-            if (id.Contains(marker))
-                return true;
-        }
-
-        return false;
-    }
+    private static bool IsSubmachineGun(GenericGun gun) => GetTraits(gun).SubmachineGun;
 }
 
 internal static class InfantryAntiArmorFireDiscipline

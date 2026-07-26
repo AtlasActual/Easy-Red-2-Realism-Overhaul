@@ -8,6 +8,31 @@ internal sealed class ContactResponseState
 {
     internal bool Relocating;
     internal float NextDecisionAt;
+    // Decision-cadence bookkeeping for ContactResponse.RunsDecisionThisFrame: when this
+    // soldier last ran its decision tail, and the verdict already resolved for the
+    // current frame. Several call sites ask for the same soldier within one frame
+    // (movement prefix, pose write, postfix) and must all be told the same thing.
+    internal float LastDecisionAt;
+    internal int DecisionVerdictFrame = -1;
+    internal bool DecisionVerdict;
+    // When this soldier was last admitted by the per-frame service budget. Drives the
+    // starvation guard so a soldier cannot be squeezed out indefinitely by arrival order.
+    // Wall-clock rather than a frame index: a frame count scales with framerate and stops
+    // being a backstop on a fast machine.
+    internal float LastServicedAt;
+    // Last native StopMove issued for this soldier. Four patched entry points can resolve
+    // the same halted soldier in one frame (both movement prefixes, their postfixes, and
+    // the native-hold branch of SequentialUpdate), and re-issuing an identical stop is a
+    // locomotion write the game has already performed this frame.
+    internal int LastStopMoveFrame = -1;
+    internal SoldierPose LastStopMovePose;
+    // Short-lived result of the squad covering-fire scan, which is O(all contact states)
+    // and was being answered per soldier per frame.
+    internal float CoveringFireCheckedUntil;
+    internal bool CoveringFireEstablished;
+    // Next time the write-through's re-assertion tail (pose latch, fire permission, body
+    // facing) is due. The locomotion gate itself is never throttled.
+    internal float NextWriteThroughMaintenanceAt;
     internal float RelocateUntil;
     internal float RelocateLastDistance;
     internal float RelocateLastProgressAt;
@@ -21,11 +46,6 @@ internal sealed class ContactResponseState
     internal IntPtr FailedCoverId;
     internal float FailedCoverUntil;
     internal int ConsecutiveCoverSearchFailures;
-    // Tank-fear no-cover wait bound (TankCoverWaitCore): consecutive conclusive urgent
-    // tank-cover search misses and when the last one occurred, so a soldier with no
-    // reachable tank-masked cover resumes his orders instead of freezing prone forever.
-    internal int ConsecutiveTankCoverFailures;
-    internal float LastTankCoverFailureAt;
     // Output of the fire arbiter (plan 017), not an input: ApplyFireDecision recomputes it
     // every frame so the debug overlay and the suppressive-fire scheduler can read why the
     // trigger is withheld. Nothing latches it.
@@ -116,7 +136,7 @@ internal sealed class ContactResponseState
     // pose - reused on this soldier's non-decision frames by the maintain/favourite/
     // write-through fast paths. HasArbiterCache stays false until the first full
     // resolution so a first result is never deferred. The safety owners (required action,
-    // pinned/fire, tank-hide) are recomputed every frame above the cache.
+    // pinned/fire) are recomputed every frame above the cache.
     internal bool HasArbiterCache;
     internal PoseOwner ArbiterCachedOwner;
     internal SoldierPose ArbiterCachedPose;

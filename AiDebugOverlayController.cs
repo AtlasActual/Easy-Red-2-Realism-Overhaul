@@ -31,7 +31,7 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
         new(4, AiDebugCategory.Combat, "FIRE SAFETY", CombatColor,
             "magenta=suppress aim  green=clear lane  red=blocked/veto"),
         new(5, AiDebugCategory.Danger, "DANGER", DangerColor,
-            "bar=suppression  red ray=incoming fire  tags=pin/tank/flame"),
+            "bar=suppression  red ray=incoming fire  tags=pin/flame"),
         new(6, AiDebugCategory.Command, "COMMAND", CommandColor,
             "violet=lease  line=squad order source to destination"),
         new(7, AiDebugCategory.Vehicle, "VEHICLES", VehicleColor,
@@ -418,7 +418,6 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
             contact?.MovementStallFailures ?? 0,
             suppressiveFire?.Active ?? false,
             suppressiveFire?.AimPoint ?? Vector3.zero,
-            AiState.IsHidingFromTank(id, now),
             AiState.IsFlameEvading(id, now),
             winners,
             movement.Source.ToString(),
@@ -440,9 +439,6 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
             contact?.CoverState.ToString() ?? "none",
             Mathf.Max(0f, (contact?.HoldCoverUntil ?? 0f) - now),
             Mathf.Max(0f, (contact?.EngagementHoldUntil ?? 0f) - now),
-            AiState.TankCoverHideUntil.TryGetValue(id, out var tankUntil)
-                ? Mathf.Max(0f, tankUntil - now)
-                : 0f,
             AiState.FlameEvasionUntil.TryGetValue(id, out var flameUntil)
                 ? Mathf.Max(0f, flameUntil - now)
                 : 0f,
@@ -530,6 +526,35 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
                InScope(squadFaction);
     }
 
+    // Named methods rather than the LINQ one-liners they replace: those compiled to
+    // lambdas that captured `this`, which Roslyn emits as instance methods on this
+    // MonoBehaviour. [HideFromIl2Cpp] cannot be placed on a compiler-generated method,
+    // so registering the injected type warned about each one's SoldierDebugSnapshot
+    // parameter. A named method takes the attribute and is skipped outright.
+    [HideFromIl2Cpp]
+    private int CountInScope()
+    {
+        var count = 0;
+        for (var index = 0; index < _soldiers.Count; index++)
+        {
+            if (InScope(_soldiers[index].Faction))
+                count++;
+        }
+        return count;
+    }
+
+    [HideFromIl2Cpp]
+    private SoldierDebugSnapshot? FindFocusedInScope()
+    {
+        for (var index = 0; index < _soldiers.Count; index++)
+        {
+            var candidate = _soldiers[index];
+            if (candidate.Id == _focusedId && InScope(candidate.Faction))
+                return candidate;
+        }
+        return null;
+    }
+
     [HideFromIl2Cpp]
     private string ReferenceFactionStatus()
     {
@@ -552,7 +577,7 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
         DrawOutlinedPanel(rect, new Color(0.015f, 0.022f, 0.03f, 0.94f), accent);
 
         SetTextColor(_headerStyle!, accent);
-        var visibleActors = _soldiers.Count(soldier => InScope(soldier.Faction));
+        var visibleActors = CountInScope();
         GUI.Label(new Rect(rect.x + 9f, rect.y + 5f, rect.width - 18f, 19f),
             $"AI DEBUG  {state}  |  {_scope.ToString().ToUpperInvariant()} [{ReferenceFactionStatus()}]  |  {_maximumDistance:0}m  |  {visibleActors}/{_soldiers.Count} visible actors  |  {DescribeCategories()}",
             _headerStyle);
@@ -678,8 +703,7 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
 
         if (Enabled(AiDebugCategory.Command))
         {
-            var focused = _soldiers.FirstOrDefault(candidate =>
-                candidate.Id == _focusedId && InScope(candidate.Faction));
+            var focused = FindFocusedInScope();
             var leaseCount = 0;
             foreach (var lease in _leases)
             {
@@ -845,8 +869,7 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
     [HideFromIl2Cpp]
     private void DrawFocusedInspector(Camera camera)
     {
-        var soldier = _soldiers.FirstOrDefault(candidate =>
-            candidate.Id == _focusedId && InScope(candidate.Faction));
+        var soldier = FindFocusedInScope();
         if (soldier == null)
             return;
 
@@ -872,7 +895,7 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
         if (Enabled(AiDebugCategory.Combat))
             _builder.AppendLine($"FIRE SAFETY  movement={soldier.FireInhibitedMovement}  range={soldier.FireInhibitedRange}  armor={soldier.FireInhibitedArmor}  friendly-lane={soldier.FiringLaneBlocked}");
         if (Enabled(AiDebugCategory.Danger))
-            _builder.AppendLine($"DANGER  suppression={soldier.Suppression:P0}  pinned={soldier.Pinned}  incoming={soldier.HasIncomingFire}  tank={soldier.TankHiding}  flame={soldier.FlameEvading}");
+            _builder.AppendLine($"DANGER  suppression={soldier.Suppression:P0}  pinned={soldier.Pinned}  incoming={soldier.HasIncomingFire}  flame={soldier.FlameEvading}");
         if ((_categories & (AiDebugCategory.Command | AiDebugCategory.Events)) != 0)
         {
             _builder.AppendLine("ARBITRATION WINNERS");
@@ -977,15 +1000,36 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
     [HideFromIl2Cpp]
     private void CycleFocus(int direction)
     {
-        var visible = _soldiers.Where(soldier => InScope(soldier.Faction)).ToList();
-        if (visible.Count == 0)
+        // Ordinal of the focused actor among the in-scope ones, and how many there are.
+        var visibleCount = 0;
+        var focusedIndex = -1;
+        for (var index = 0; index < _soldiers.Count; index++)
+        {
+            if (!InScope(_soldiers[index].Faction))
+                continue;
+            if (focusedIndex < 0 && _soldiers[index].Id == _focusedId)
+                focusedIndex = visibleCount;
+            visibleCount++;
+        }
+        if (visibleCount == 0)
         {
             _focusedId = 0;
             return;
         }
-        var index = visible.FindIndex(candidate => candidate.Id == _focusedId);
-        index = index < 0 ? 0 : (index + direction + visible.Count) % visible.Count;
-        _focusedId = visible[index].Id;
+
+        var target = focusedIndex < 0
+            ? 0
+            : (focusedIndex + direction + visibleCount) % visibleCount;
+        var seen = 0;
+        for (var index = 0; index < _soldiers.Count; index++)
+        {
+            if (!InScope(_soldiers[index].Faction))
+                continue;
+            if (seen++ != target)
+                continue;
+            _focusedId = _soldiers[index].Id;
+            return;
+        }
     }
 
     [HideFromIl2Cpp]
@@ -1214,7 +1258,6 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
         int MovementStallFailures,
         bool SuppressingKnownTarget,
         Vector3 SuppressiveAimPoint,
-        bool TankHiding,
         bool FlameEvading,
         string Winners,
         string MovementOwner,
@@ -1236,7 +1279,6 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
         string CoverState,
         float CoverHoldSeconds,
         float EngagementHoldSeconds,
-        float TankHideSeconds,
         float FlameEvadeSeconds,
         MovementOwner LocomotionOwner,
         PoseOwner PoseOwner)

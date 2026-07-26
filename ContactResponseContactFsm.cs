@@ -28,30 +28,169 @@ internal static partial class ContactResponse
 
     private static int _coverAssignmentExecutorSoldierId;
 
-    // Round-robin decision stagger. The TacticalMove pipeline
-    // (SharedTacticalMovePrefix + the MaintainOwnedPose/ApplyFireDecision
-    // postfix) runs for every owned soldier EVERY frame; its interop-heavy per-soldier
-    // DECISION work (which stationary hold owns the soldier, and the cover/suppression
-    // pose RESOLUTION) is spread so each soldier re-decides on one of every
-    // DecisionStaggerModulus frames, its cohort keyed by instance id — the same shape
-    // as the game's own rolling SoldierAI.SequentialUpdate index. Between decision
-    // frames the soldier holds its already-latched decisions via cheap write-through
-    // re-assertion, so decision latency is bounded to <= DecisionStaggerModulus - 1
-    // frames (~33ms at K=3). SAFETY reactions (fire/flame/pinned/reload/stall/tank-hide)
-    // and pure write-through (movement-inhibition flags, moveCharacter/sprint
-    // suppression, latched-pose re-assertion, stationary threat facing, moving-fire
-    // gate) stay per-frame. Every timer that gates behavior (ContactUntil,
+    // Decision scheduling. The TacticalMove pipeline (SharedTacticalMovePrefix + the
+    // MaintainOwnedPose/ApplyFireDecision postfix) runs for every owned soldier EVERY
+    // frame, but its interop-heavy per-soldier DECISION work — which stationary hold owns
+    // the soldier, and the cover/suppression pose RESOLUTION — is scheduled by two rules
+    // working together:
+    //
+    //   1. A wall-clock floor, so a soldier re-decides at most 30 times a second no
+    //      matter the framerate. This bounds TOTAL decision work per second. It replaced
+    //      a pure frame modulus, which tied the cadence to the framerate and had a
+    //      210 FPS run re-deciding every 14ms — 3.5x a 60 FPS run's work for decisions
+    //      no player can see change that often.
+    //   2. A per-frame allowance, so the soldiers whose floors happen to expire together
+    //      do not all re-decide on the same frame. The floor alone left that clustering
+    //      free to happen, and it is the measured spike shape: no single slow call, every
+    //      site elevated at once.
+    //
+    // Between decision frames a soldier holds its already-latched decisions through cheap
+    // write-through re-assertion. SAFETY reactions (fire/flame/pinned/reload/stall)
+    // and the locomotion gate itself (moveCharacter/sprint) stay per-frame for
+    // every soldier and are never budgeted. Every timer that gates behavior (ContactUntil,
     // EngagementHoldUntil, HoldCoverUntil, TacticalPoseHoldUntil, MovementStallHoldUntil)
-    // is Time.time based, so this frame-count stagger cannot desync them.
-    internal const int DecisionStaggerModulus = 3;
+    // is Time.time based, so deferring a decision by a frame cannot desync them.
+    private const float MinimumDecisionIntervalSeconds = 1f / 30f;
+
+    // 60Hz floor for the write-through maintenance tail: at or below 60 FPS it runs every
+    // frame exactly as before, so only high-framerate runs change.
+    private const float WriteThroughMaintenanceSeconds = 1f / 60f;
+
+    // The 30Hz floor already caps TOTAL decisions per second, so the problem this budget
+    // solves is not volume but CLUSTERING: nothing stopped thirty soldiers' floors from
+    // expiring on the same frame, and that is the measured spike shape exactly — no
+    // single slow call, every site elevated at once. The budget spreads that wave over
+    // consecutive frames.
+    //
+    // It is expressed per SECOND, not per frame, and converted using the frame's own
+    // duration. A fixed per-frame count would silently throttle low-framerate machines
+    // (8 per frame at 60 FPS starves a 60-soldier battle) while a 5ms frame and a 17ms
+    // frame can plainly afford different amounts of work. 1800/s is what a 60-soldier
+    // battle already consumes at the 30Hz floor, so this re-shapes the existing work
+    // rather than removing any of it.
+    private const float TargetDecisionsPerSecond = 1800f;
+    private const int MinimumDecisionsPerFrame = 4;
+    private const int MaximumDecisionsPerFrame = 48;
+
+    // Safety net only, in WALL-CLOCK time. A frame count here defeats the budget it is
+    // meant to backstop: 12 frames is 68ms at 175 FPS, barely longer than the 33ms
+    // service interval, so in a battle large enough for demand to exceed the allowance
+    // nearly every deferred soldier aged past it within a frame or two and was admitted
+    // anyway — measured as decided=23 against a budget of 10, with deferred reading 0
+    // because forced admissions never take the denial path. At 0.2s the budget does the
+    // scheduling and this only catches genuine starvation, which is its job.
+    //
+    // The consequence is deliberate: when a battle is too large to service every soldier
+    // at 30Hz within the allowance, the per-soldier rate degrades gracefully (about 19Hz
+    // at 90 soldiers) instead of the frame cost growing without limit. Bounded frame cost
+    // is the point.
+    private const float MaxStarvationSeconds = 0.2f;
+
+    // Ceiling on how many overdue soldiers may bypass the budget in one frame. The
+    // starvation guard exists so no individual soldier is starved; it must not become a
+    // route for the whole battle to bypass the allowance at once.
+    private const int MaxStarvationOverridesPerFrame = 3;
+
+    private static int _serviceFrame = -1;
+    private static float _lastServiceFrameAt = -1f;
+    private static float _smoothedFrameSeconds = 1f / 60f;
+    private static int _frameDecisionBudget = MinimumDecisionsPerFrame;
+    private static int _servicedThisFrame;
+    private static int _deniedThisFrame;
+    private static int _starvationOverridesThisFrame;
+
+    // Diagnostic only: lets the probe show whether the allowance is actually binding,
+    // rather than being set so high it never does anything.
+    internal static int LastServicedCount => _servicedThisFrame;
+
+    internal static int LastDeniedCount => _deniedThisFrame;
 
     internal static bool RunsDecisionThisFrame(int soldierId)
-        // == 0 tests divisibility regardless of sign, so a negative Unity instance id
-        // still fires exactly once every DecisionStaggerModulus frames. (K=3 is not a
-        // power of two, so the plan's `id & (K-1)` cohort formula would collapse to two
-        // cohorts and leave one frame in three empty; `+ soldierId` spreads all cohorts
-        // evenly across frames — see Review notes.)
-        => (Time.frameCount + soldierId) % DecisionStaggerModulus == 0;
+    {
+        var frame = Time.frameCount;
+        var state = AiState.GetContactState(soldierId);
+        // One verdict per soldier per frame, replayed to every caller: resolving it
+        // independently would let the prefix decide and the postfix skip, splitting a
+        // decision across two different cadences.
+        if (state.DecisionVerdictFrame == frame)
+            return state.DecisionVerdict;
+
+        if (frame != _serviceFrame)
+        {
+            // Measured here rather than read from Time.deltaTime, which reports the fixed
+            // step when this is reached from a physics-driven path and would size the
+            // budget against the wrong clock. frameCount only advances on rendered frames,
+            // so the gap between resets is the real frame duration.
+            var realtime = Time.realtimeSinceStartup;
+            var frameSeconds = _lastServiceFrameAt >= 0f
+                ? Mathf.Clamp(realtime - _lastServiceFrameAt, 0.001f, 0.1f)
+                : 1f / 60f;
+            _lastServiceFrameAt = realtime;
+
+            // Sized from a SMOOTHED frame time, never from the frame that just happened.
+            // Using the last frame directly is a feedback loop: a hitch — from any cause —
+            // hands the next frame a larger allowance, which makes that frame longer,
+            // which raises the allowance again. Measured as decided=27 on a 143ms frame
+            // whose allowance should have been 10. Each sample is capped at twice the
+            // current average so a spike cannot drag the average up behind it.
+            _smoothedFrameSeconds = Mathf.Lerp(
+                _smoothedFrameSeconds,
+                Mathf.Min(frameSeconds, _smoothedFrameSeconds * 2f),
+                0.05f);
+
+            _frameDecisionBudget = Mathf.Clamp(
+                Mathf.CeilToInt(TargetDecisionsPerSecond * _smoothedFrameSeconds),
+                MinimumDecisionsPerFrame,
+                MaximumDecisionsPerFrame);
+
+            _serviceFrame = frame;
+            _servicedThisFrame = 0;
+            _deniedThisFrame = 0;
+            _starvationOverridesThisFrame = 0;
+        }
+
+        var runs = true;
+        var now = Time.time;
+
+        // Wall-clock floor first: a soldier that re-decided a moment ago does not need a
+        // slot at all, and releasing it early leaves room for one that does.
+        if (now - state.LastDecisionAt < MinimumDecisionIntervalSeconds)
+        {
+            runs = false;
+        }
+        else if (_servicedThisFrame >= _frameDecisionBudget)
+        {
+            // Over budget. A soldier long overdue may still override, but only a few per
+            // frame: whenever a frame runs long, Time.time jumps by that whole duration
+            // and EVERY soldier crosses the starvation threshold at once, so an uncapped
+            // override let the entire battle bypass the budget on precisely the frame
+            // that could least afford it. Measured as decided=19/deferred=0 on the two
+            // worst frames of a run whose healthy frames read decided=8-11/deferred=18-24.
+            // That turned an external hitch into a mod-work storm that deepened it.
+            var overdue = state.LastServicedAt <= 0f ||
+                          now - state.LastServicedAt >= MaxStarvationSeconds;
+            if (overdue && _starvationOverridesThisFrame < MaxStarvationOverridesPerFrame)
+            {
+                _starvationOverridesThisFrame++;
+            }
+            else
+            {
+                runs = false;
+                _deniedThisFrame++;
+            }
+        }
+
+        if (runs)
+        {
+            state.LastDecisionAt = now;
+            state.LastServicedAt = now;
+            _servicedThisFrame++;
+        }
+
+        state.DecisionVerdictFrame = frame;
+        state.DecisionVerdict = runs;
+        return runs;
+    }
 
     private static int _staggerSkipFrame = -1;
     private static int _staggerSkipsThisFrame;
@@ -91,14 +230,14 @@ internal static partial class ContactResponse
     internal static bool TryWriteThroughTacticalMove(
         SoldierAI ai,
         Soldier soldier,
+        int id,
+        float now,
         float deltaTime,
         ref bool sprint,
         bool updateFireInhibitionOnPass,
         out bool passThrough)
     {
-        var id = soldier.GetInstanceID();
         var state = AiState.GetContactState(id);
-        var now = Time.time;
 
         var staggerOwner = ResolveMovementOwner(soldier, state, id, now, MovementOwner.Free);
         if (MovementArbiterCore.Halts(staggerOwner))
@@ -134,11 +273,28 @@ internal static partial class ContactResponse
         ApplyResolvedMovementDecision(
             ai, soldier, state, id, staggerOwner, deltaTime, now,
             "stagger", resolvePose: false);
+
+        // The locomotion gate above is the only part that must track the frame, because
+        // native movement reads it every frame. The maintenance tail below re-asserts
+        // state the game already holds — pose latch, fire permission, body facing — and
+        // re-asserting it 200 times a second instead of 60 buys nothing observable while
+        // multiplying this mod's interop volume by the framerate. Spike frames now show
+        // no slow individual call (max 0.7ms) and 140ms of uniformly slowed calls, i.e.
+        // the remaining cost IS the call count, so that is what this cuts.
+        if (now < state.NextWriteThroughMaintenanceAt)
+        {
+            CountStaggerSkip();
+            passThrough = true;
+            return true;
+        }
+
+        state.NextWriteThroughMaintenanceAt = now + WriteThroughMaintenanceSeconds;
+
         var suppression = soldier.GetSuppressionValue();
         var activeThreatMovement = HasActiveContact(id, now) ||
                                    IncomingFireAwareness.HasActiveCue(id, now);
         SoldierTacticalSprintPatch.ApplyTacticalMovementPose(
-            ai, soldier, now, suppression, activeThreatMovement);
+            ai, soldier, id, now, suppression, activeThreatMovement);
         if (updateFireInhibitionOnPass)
             ApplyFireDecision(ai, soldier, now, authoritative: false);
         ReleaseStationaryThreatFacingForMovement(ai, soldier);
@@ -180,6 +336,11 @@ internal static partial class ContactResponse
         state.SquadId = SquadIdentity.GetSquadId(soldier);
         var hasAttackRoute = TryGetAttackWaypoint(soldier, out _) &&
                              HasCommittedDestination(soldier);
+        // The liveness fact, deliberately WIDER than hasAttackRoute (plan 028): the halt
+        // caps below must bound every soldier his squad is walking away from, not only
+        // the ones on an attackFromSide order. hasAttackRoute stays in use for the
+        // cover-SELECTION inputs, which must not widen with it.
+        var hasMovementOrder = HasLiveMovementOrder(soldier);
         var targetInsideAttackHalt = target != null &&
                                      HorizontalDistanceSqr(
                                          soldier.transform.position,
@@ -191,7 +352,7 @@ internal static partial class ContactResponse
         var attackUnderPressure = target != null || state.Pinned ||
                                   IncomingFireAwareness.HasActiveCue(id, now);
         var (maximumAttackHaltReached, maximumOnCoverAttackHaltReached) =
-            UpdateAttackProgressClock(state, hasAttackRoute, attackUnderPressure, now);
+            UpdateAttackProgressClock(state, hasMovementOrder, attackUnderPressure, now);
         if (state.LastOutgoingShotWasStationary &&
             (soldier.IsMoving(0.2f) || state.Relocating || state.Pinned ||
              state.SuppressionMovementOwned))
@@ -281,11 +442,6 @@ internal static partial class ContactResponse
         {
             return;
         }
-
-        // Infantry hiding from armor remain at the selected position. This stops
-        // locomotion but leaves valid reaction fire against infantry available.
-        if (TryHoldTankCover(ai, soldier, now, Time.deltaTime))
-            return;
 
         // A real charge clears ordinary cover and engagement holds, but it does not
         // make a rifleman ignore an enemy inside immediate survival distance.
@@ -481,7 +637,7 @@ internal static partial class ContactResponse
 
             var onUsableCoverWithoutVisibleTarget = IsOnUsableCover(soldier);
             var forcedAttackProgressWithoutVisibleTarget = CombatMovementPolicyCore.ShouldAuthorizeAttackBound(
-                hasAttackRoute,
+                hasMovementOrder,
                 coveringFireEstablished: false,
                 maximumAttackHaltReached,
                 maximumOnCoverAttackHaltReached,
@@ -574,12 +730,15 @@ internal static partial class ContactResponse
         var targetPosition = state.LastThreatPosition;
         var distance = Vector3.Distance(soldier.transform.position, targetPosition);
         var attackContactInsideHalt = hasAttackRoute && targetInsideAttackHalt;
-        var coordinatedAttackAdvance = hasAttackRoute &&
+        // Widened with the cap (plan 028): "a squadmate is firing at this contact right
+        // now" is the same fact whatever the squad's order code, and it only ever
+        // authorizes an EARLIER bound than the halt cap would.
+        var coordinatedAttackAdvance = hasMovementOrder &&
                                        HasFavorableAttackAdvance(
                                            state, id, observedTargetToken, now);
         var onUsableNativeCover = IsOnUsableCover(soldier);
         var authorizedAttackAdvance = CombatMovementPolicyCore.ShouldAuthorizeAttackBound(
-            hasAttackRoute,
+            hasMovementOrder,
             coordinatedAttackAdvance,
             maximumAttackHaltReached,
             maximumOnCoverAttackHaltReached,
@@ -821,8 +980,6 @@ internal static partial class ContactResponse
         state.FailedCoverId = IntPtr.Zero;
         state.FailedCoverUntil = 0f;
         state.ConsecutiveCoverSearchFailures = 0;
-        state.ConsecutiveTankCoverFailures = 0;
-        state.LastTankCoverFailureAt = 0f;
         state.EngagementHoldUntil = 0f;
         state.ContactUntil = 0f;
         state.ContactCrouchOwned = false;
@@ -941,8 +1098,6 @@ internal static partial class ContactResponse
         state.ReservedCoverId = IntPtr.Zero;
         state.ReservedCoverPosition = default;
         state.ConsecutiveCoverSearchFailures = 0;
-        state.ConsecutiveTankCoverFailures = 0;
-        state.LastTankCoverFailureAt = 0f;
         state.ContactResponseActive = false;
         state.MovementInhibitedByContactResponse = false;
         state.ContactCrouchOwned = false;
@@ -1003,6 +1158,7 @@ internal static partial class ContactResponse
             state.LastOutgoingShotAt = now;
             state.LastOutgoingShotWasStationary =
                 !shooter.IsMoving(0.2f) && !state.Relocating;
+            RecordSquadShooter(state.SquadId, soldierId);
         }
         catch (Exception ex)
         {
@@ -1014,6 +1170,69 @@ internal static partial class ContactResponse
     {
         foreach (var state in AiState.ContactStates.Values)
             ResetAttackFireEvidence(state);
+
+        // Squad ids are reissued between battles, so a surviving ring would answer the
+        // covering-fire question with the previous battle's shooters.
+        SquadFireRings.Clear();
+    }
+
+    // Well under the CoveringFireFreshSeconds window the scan itself tests, so a cached
+    // answer can never outlive the freshness it is reporting on.
+    private const float CoveringFireCacheSeconds = 0.25f;
+
+    /// <summary>
+    /// The most recent distinct shooters in a squad, newest-biased. The covering-fire
+    /// question is "has ANY squadmate laid down fresh stationary fire", and answering it
+    /// by walking every tracked soldier is O(n) per attacker — O(n^2) across a battle,
+    /// which is the one cost in this mod that grows faster than the battle does. Easy
+    /// Red 2 fields hundreds of soldiers, so that scan is the thing that breaks first.
+    ///
+    /// A ring of this size covers an entire ordinary squad, making the answer identical
+    /// for them. For a larger squad it consults the most recent shooters, which — since
+    /// the predicate demands a shot fresher than CoveringFireFreshSeconds — is exactly
+    /// the set that could satisfy it.
+    /// </summary>
+    private const int RecentShootersPerSquad = 8;
+
+    private sealed class SquadFireRing
+    {
+        internal readonly int[] SoldierIds = new int[RecentShootersPerSquad];
+        internal int Count;
+        internal int Cursor;
+    }
+
+    private static readonly Dictionary<int, SquadFireRing> SquadFireRings = new();
+
+    private static void RecordSquadShooter(int squadId, int soldierId)
+    {
+        if (squadId == 0)
+            return;
+
+        if (!SquadFireRings.TryGetValue(squadId, out var ring))
+        {
+            ring = new SquadFireRing();
+            SquadFireRings[squadId] = ring;
+        }
+
+        // Already tracked: the ring holds WHO to consult, and their shot recency is read
+        // live at query time, so re-adding would only crowd out other shooters.
+        for (var i = 0; i < ring.Count; i++)
+        {
+            if (ring.SoldierIds[i] == soldierId)
+                return;
+        }
+
+        ring.SoldierIds[ring.Cursor] = soldierId;
+        ring.Cursor = (ring.Cursor + 1) % RecentShootersPerSquad;
+        if (ring.Count < RecentShootersPerSquad)
+            ring.Count++;
+    }
+
+    private static bool CacheCoveringFire(ContactResponseState state, float now, bool established)
+    {
+        state.CoveringFireCheckedUntil = now + CoveringFireCacheSeconds;
+        state.CoveringFireEstablished = established;
+        return established;
     }
 
     private static bool HasFavorableAttackAdvance(
@@ -1031,31 +1250,49 @@ internal static partial class ContactResponse
             return false;
         }
 
-        // Only reached when this soldier is an attacker on a live contact; the
-        // O(all ContactStates) covering-fire scan below is timed separately so
-        // the probe can tell it apart from the ballistic geometry cost.
+        // "Is somebody in my squad covering me right now" is a squad-level fact that
+        // changes on the scale of a burst, not of a frame, and answering it walks every
+        // contact state — so at 200 FPS with 60 attackers this scan alone is O(n^2) per
+        // frame for an answer that cannot meaningfully differ between two of them. The
+        // freshness window it tests against is measured in seconds, so a short cache is
+        // invisible to the decision and bounds the scan to a few times a second.
+        if (now < state.CoveringFireCheckedUntil)
+            return state.CoveringFireEstablished;
+
+        // Answered from the squad's own recent-shooter ring rather than by walking every
+        // tracked soldier. Easy Red 2 fields battles of several hundred, and a scan over
+        // all contact states per attacker is O(n^2) across the battle — the one cost here
+        // that gets worse faster than the battle grows.
         var __t = ModTimeProbe.Begin();
         try
         {
-            foreach (var pair in AiState.ContactStates)
+            if (!SquadFireRings.TryGetValue(state.SquadId, out var ring))
+                return CacheCoveringFire(state, now, false);
+
+            for (var i = 0; i < ring.Count; i++)
             {
-                if (pair.Key == soldierId)
+                var candidateId = ring.SoldierIds[i];
+                if (candidateId == soldierId)
                     continue;
 
-                var covering = pair.Value;
+                if (!AiState.ContactStates.TryGetValue(candidateId, out var covering))
+                    continue;
+
                 // D2 (plan 015): any squadmate's fresh stationary shot at a
                 // confirmed enemy counts, not just one at this mover's own token.
+                // Live state is still read per candidate, so a squadmate who has since
+                // been pinned or started relocating stops counting exactly as before.
                 if (CombatMovementPolicyCore.IsCoveringFireEstablished(
                         state.SquadId, covering.SquadId, covering.LastOutgoingShotTargetToken,
                         covering.LastOutgoingShotWasStationary, covering.Relocating,
                         covering.Pinned, covering.SuppressionMovementOwned,
                         covering.LastOutgoingShotAt, now, CoveringFireFreshSeconds))
                 {
-                    return true;
+                    return CacheCoveringFire(state, now, true);
                 }
             }
 
-            return false;
+            return CacheCoveringFire(state, now, false);
         }
         finally
         {
@@ -1064,18 +1301,25 @@ internal static partial class ContactResponse
     }
 
     /// <summary>
-    /// Maintains the attack-halt clock and reports both the ordinary off-cover
+    /// Maintains the combat-halt clock and reports both the ordinary off-cover
     /// deadline and the longer on-cover deadline (D1, plan 015) against the same
     /// clock, so <see cref="ShouldAuthorizeAttackBound"/> can guarantee liveness
     /// on cover without shortening the off-cover cap.
+    ///
+    /// Plan 028: <paramref name="hasMovementOrder"/> used to be the attack-waypoint
+    /// flag, which made this clock — the ONLY escape from a fighting halt — exist for
+    /// <c>attackFromSide</c> squads and nobody else. A soldier under the ordinary
+    /// <c>follow</c> move order therefore held his cover for as long as he could see an
+    /// enemy, because every sighting pushed <c>ContactUntil</c> forward, while his squad
+    /// walked off without him.
     /// </summary>
     private static (bool MaximumHaltReached, bool MaximumOnCoverHaltReached) UpdateAttackProgressClock(
         ContactResponseState state,
-        bool hasAttackRoute,
+        bool hasMovementOrder,
         bool underPressure,
         float now)
     {
-        if (!hasAttackRoute)
+        if (!hasMovementOrder)
         {
             state.AttackHaltStartedAt = 0f;
             state.AttackProgressForced = false;
@@ -1237,137 +1481,19 @@ internal static partial class ContactResponse
         }
     }
 
-    internal static bool TryBeginTankHide(
-        SoldierAI ai,
-        Soldier soldier,
-        Vector3 tankPosition,
-        float now)
-    {
-        if (!Settings.ContactResponseEnabled.Value ||
-            TryGetPlayerHoldOrder(soldier, out _, out _))
-        {
-            return false;
-        }
-
-        var soldierId = soldier.GetInstanceID();
-        var state = AiState.GetContactState(soldierId);
-        if (state.Relocating)
-        {
-            // Finish the movement already chosen by the FSM. Replacing a live
-            // destination every armor scan recreates the back-and-forth failure.
-            return true;
-        }
-
-        if (now < state.NextUrgentCoverDecisionAt)
-            return false;
-
-        state.NextUrgentCoverDecisionAt = now + UrgentCoverReassessmentSeconds;
-        var searchRadius = Mathf.Max(
-            Settings.ContactCoverSearchRadius.Value,
-            Settings.TankEscapeDistance.Value);
-        var cover = FindCover(
-            soldier,
-            tankPosition,
-            searchRadius,
-            state,
-            now,
-            CoverSelectionMode.Urgent,
-            null,
-            respectAttackWaypoint: false,
-            evaluateFiringQuality: false,
-            out _,
-            out var searchDeferred);
-        if (searchDeferred)
-        {
-            state.NextUrgentCoverDecisionAt = DeferredCoverRetryAt(soldierId, now);
-            return false;
-        }
-        if (cover == null)
-        {
-            RecordTankCoverSearchFailure(state, now);
-            SetCoverState(state, InfantryCoverState.WaitingForSafeMove, soldierId,
-                "no tank-masked cover is reachable");
-            return false;
-        }
-
-        if (!BeginRelocation(ai, soldier, state, cover, soldierId, now))
-        {
-            RecordTankCoverSearchFailure(state, now);
-            SetCoverState(state, InfantryCoverState.WaitingForSafeMove, soldierId,
-                "tank-masked cover could not be assigned");
-            return false;
-        }
-
-        // A reachable cover route is the "new candidate cover" that re-arms the wait.
-        state.ConsecutiveTankCoverFailures = 0;
-        state.LastTankCoverFailureAt = 0f;
-        AiState.TankCoverHideUntil.Remove(soldierId);
-        SetCoverState(state, InfantryCoverState.Moving, soldierId,
-            "committed to tank-masked cover");
-        return true;
-    }
-
-    internal static bool TryHoldTankCover(
-        SoldierAI ai,
-        Soldier soldier,
-        float now,
-        float deltaTime)
-    {
-        var id = soldier.GetInstanceID();
-        if (!AiState.IsHidingFromTank(id, now))
-            return false;
-
-        StopDangerMovement(ai, soldier, deltaTime);
-        return true;
-    }
-
-    private static void RecordTankCoverSearchFailure(ContactResponseState state, float now)
-    {
-        state.ConsecutiveTankCoverFailures = TankCoverWaitCore.RecordFailure(
-            state.ConsecutiveTankCoverFailures, state.LastTankCoverFailureAt, now);
-        state.LastTankCoverFailureAt = now;
-    }
-
     /// <summary>
-    /// After the urgent tank-cover search has conclusively failed, a soldier with no
-    /// reachable tank-masked cover stops being movement-inhibited by tank fear and
-    /// resumes his orders instead of lying prone in the open forever. Returns true when
-    /// the wait has been abandoned (caller must not re-halt); the streak self-re-arms
-    /// through <see cref="TankCoverWaitCore"/> when a search finds cover or the tank
-    /// threat materially changes.
+    /// <paramref name="id"/> is the caller's already-resolved soldier instance id. Both
+    /// call sites hold it, and re-reading it here cost a native GetInstanceID for every AI
+    /// soldier every frame — this runs ahead of the round-robin stagger, so it is paid by
+    /// the whole roster rather than by the soldiers actually deciding this frame.
     /// </summary>
-    internal static bool TryResumeFromUnreachableTankCover(
-        SoldierAI ai,
-        Soldier soldier,
-        float now)
-    {
-        var state = AiState.GetContactState(soldier.GetInstanceID());
-        if (!TankCoverWaitCore.ShouldResumeOrders(state.ConsecutiveTankCoverFailures))
-            return false;
-
-        // Restore locomotion once and re-request the path native movement was halted
-        // from. Idempotent across the 0.75s tank scans: once moveCharacter is back true
-        // the soldier is already executing his order, so no repeated path refresh.
-        var wasHalted = !ai.moveCharacter;
-        var owner = ApplyMovementDecision(
-            ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
-            "tank-nocover-resume");
-        if (wasHalted && owner == MovementOwner.OrderedMove &&
-            HasCommittedDestination(soldier))
-        {
-            RefreshPath(ai, "Tank-fear no-cover resume path refresh failed");
-        }
-
-        return true;
-    }
-
     internal static void UpdateSuppressionReaction(
         SoldierAI ai,
         Soldier soldier,
+        int id,
         float now,
         float deltaTime)
     {
-        var id = soldier.GetInstanceID();
         var state = AiState.GetContactState(id);
         if (!Settings.DangerReactionsEnabled.Value)
         {
@@ -1568,6 +1694,47 @@ internal static partial class ContactResponse
             RefreshPath(ai, warning);
         }
     }
+
+    /// <summary>
+    /// "This soldier's squad is going somewhere" (plan 028) - the ORDER half of the
+    /// liveness fact, deliberately wider than <see cref="TryGetAttackWaypoint"/>, which
+    /// only answers true on <c>Order.attackFromSide</c>. The ordinary <c>follow</c> move
+    /// order is exactly the case where a soldier is expected to keep up with his squad,
+    /// and it used to be treated like a defender's standing order.
+    ///
+    /// <c>defend</c> is excluded on purpose: a defender is supposed to stay put, and the
+    /// defensive-occupation path owns his release.
+    /// </summary>
+    private static bool HasMovingSquadOrder(Soldier soldier)
+    {
+        try
+        {
+            var squad = soldier.joinedSquad;
+            return squad != null && squad.order != Order.defend;
+        }
+        catch (NullReferenceException)
+        {
+            return false;
+        }
+        catch (Il2CppException)
+        {
+            return false;
+        }
+        catch (ObjectCollectedException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// "His squad is going somewhere AND he is not there yet" - what the halt caps are
+    /// bounded by, mirroring the old <c>hasAttackRoute</c> exactly one order code wider.
+    /// The committed-destination term is what keeps the cap honest: a squad that has
+    /// halted leaves its members with their destination reached, so nobody is pulled out
+    /// of cover while nobody is being left behind.
+    /// </summary>
+    private static bool HasLiveMovementOrder(Soldier soldier)
+        => HasMovingSquadOrder(soldier) && HasCommittedDestination(soldier);
 
     private static bool TryGetAttackWaypoint(Soldier soldier, out Vector3 waypoint)
     {
@@ -1858,7 +2025,7 @@ internal static partial class ContactResponse
 
     /// <param name="declared">The owner this halt claims when it has no state of its own
     /// to resolve from (a grenade-safety or required-action halt). Halts whose ownership
-    /// IS state - tank hide, the stall watchdog, burning - leave it Free and let the
+    /// IS state - the stall watchdog, burning - leave it Free and let the
     /// arbiter read their timers, so their rank is not silently promoted.</param>
     internal static MovementOwner StopDangerMovement(
         SoldierAI ai,

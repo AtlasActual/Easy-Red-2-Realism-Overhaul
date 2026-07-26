@@ -1,6 +1,39 @@
+using System.Runtime.CompilerServices;
 using UnityEngine;
 
 namespace ER2RealismOverhaul;
+
+/// <summary>
+/// Interpolated-string handler for <see cref="AiState.Trace"/>. Its constructor reports
+/// through <c>isEnabled</c> whether a trace will be consumed at all; when it will not, the
+/// compiler skips the interpolation entirely rather than composing a string for
+/// <see cref="AiState.Trace"/> to throw away. The traces sit on per-soldier perception,
+/// cover, and acquisition paths, so with the overlay and verbose logging both off — the
+/// normal configuration — that composition was the bulk of the mod's remaining garbage.
+/// </summary>
+[InterpolatedStringHandler]
+internal ref struct TraceMessageHandler
+{
+    private DefaultInterpolatedStringHandler _inner;
+    private readonly bool _enabled;
+
+    public TraceMessageHandler(int literalLength, int formattedCount, out bool isEnabled)
+    {
+        _enabled = AiState.TraceEnabled;
+        isEnabled = _enabled;
+        _inner = _enabled
+            ? new DefaultInterpolatedStringHandler(literalLength, formattedCount)
+            : default;
+    }
+
+    public void AppendLiteral(string value) => _inner.AppendLiteral(value);
+
+    public void AppendFormatted<T>(T value) => _inner.AppendFormatted(value);
+
+    public void AppendFormatted<T>(T value, string? format) => _inner.AppendFormatted(value, format);
+
+    internal string GetMessage() => _enabled ? _inner.ToStringAndClear() : string.Empty;
+}
 
 internal static class AiState
 {
@@ -9,13 +42,6 @@ internal static class AiState
     internal static readonly Dictionary<int, ContactResponseState> ContactStates = new();
     internal static readonly Dictionary<int, KnownTargetSuppressiveFireState> KnownTargetSuppressionStates = new();
     internal static readonly Dictionary<IntPtr, CoverReservation> CoverReservations = new();
-    internal static readonly Dictionary<int, float> NextTankThreatCheck = new();
-    internal static readonly Dictionary<int, float> TankCoverHideUntil = new();
-    // HasNearbyTankThreat is queried every frame from CaptureSnapshot; these cache
-    // its result on the same 0.75s cadence ApplyTankFear already uses for its own
-    // identical scan, so the snapshot no longer forces an unthrottled per-frame scan.
-    internal static readonly Dictionary<int, float> NextTankThreatSnapshotCheck = new();
-    internal static readonly Dictionary<int, bool> CachedTankThreat = new();
     internal static readonly Dictionary<int, float> FlameEvasionUntil = new();
     internal static readonly Dictionary<int, float> NextTankTactic = new();
     internal static readonly Dictionary<int, float> NextSmokeAttempt = new();
@@ -33,6 +59,27 @@ internal static class AiState
         state = new TankEngagementRuntimeState();
         TankEngagementStates[id] = state;
         return state;
+    }
+
+    /// <summary>
+    /// A soldier's faction, read once and reused. <c>Soldier.faction</c> is an il2cpp
+    /// string field, so every read marshals a FRESH managed string — measured at 3.2-4.0MB
+    /// per 30 seconds from a single call site on the per-decision path, twenty to a
+    /// hundred times more garbage than every other stage of the tactical pipeline
+    /// combined. Faction cannot change for a living soldier, and the instance id used to
+    /// key this is an interop call that returns an int rather than allocating.
+    /// </summary>
+    private static readonly Dictionary<int, string> SoldierFactions = new();
+
+    internal static string FactionOf(Soldier soldier)
+    {
+        var id = soldier.GetInstanceID();
+        if (SoldierFactions.TryGetValue(id, out var faction))
+            return faction;
+
+        faction = soldier.faction ?? string.Empty;
+        SoldierFactions[id] = faction;
+        return faction;
     }
 
     internal static ContactResponseState GetContactState(int id)
@@ -67,28 +114,37 @@ internal static class AiState
         {
             soldierToken = IntPtr.Zero;
         }
+
+        RemoveSoldierById(id, soldierToken);
+    }
+
+    /// <summary>
+    /// Purge every per-soldier map by instance id alone. Cleanup used to run only from
+    /// SoldierAI.OnDestroy behind a `GetSoldier() != null` check, which a soldier whose
+    /// native object had already been released always failed — so its entries survived
+    /// the rest of the battle. That showed up as 130 contact states for 56 living
+    /// soldiers, and the covering-fire scan walks that map once per soldier, so the leak
+    /// made the scan dearer the longer a battle ran.
+    /// </summary>
+    internal static void RemoveSoldierById(int id, IntPtr soldierToken)
+    {
+        InteropWrapperLifetime.Release(soldierToken);
+        BattleChatterStates.Remove(id);
+        SoldierFactions.Remove(id);
         GunfireAwareness.RemoveShooter(id, soldierToken);
         ReleaseCoverReservation(id);
         TargetMemory.Remove(id);
         ContactStates.Remove(id);
         KnownTargetSuppressiveFire.RemoveSoldier(id);
-        NextTankThreatCheck.Remove(id);
-        TankCoverHideUntil.Remove(id);
-        NextTankThreatSnapshotCheck.Remove(id);
-        CachedTankThreat.Remove(id);
         FlameEvasionUntil.Remove(id);
         NextOrderGesture.Remove(id);
         NextGrenadeThrow.Remove(id);
-        BattleChatter.RemoveSoldier(soldier);
         MountedGunnerSuppression.RemoveSoldier(id);
         GroundAiDirector.ReleaseSoldier(id);
     }
 
     internal static bool CooldownReady(Dictionary<int, float> map, int id, float now)
         => !map.TryGetValue(id, out var readyAt) || now >= readyAt;
-
-    internal static bool IsHidingFromTank(int soldierId, float now)
-        => TankCoverHideUntil.TryGetValue(soldierId, out var until) && now < until;
 
     internal static bool IsFlameEvading(int soldierId, float now)
         => FlameEvasionUntil.TryGetValue(soldierId, out var until) && now < until;
@@ -193,11 +249,37 @@ internal static class AiState
             CoverReservations.Remove(coverId);
     }
 
+    /// <summary>
+    /// Whether anything would actually consume a trace. Callers build their message by
+    /// string interpolation, so the message is composed — with number formatting — BEFORE
+    /// <see cref="Trace"/> is entered and can discard it. With the overlay and verbose
+    /// logging both off (the normal configuration) that work was pure garbage, generated
+    /// per soldier on the perception and cover paths, and it is what remained of the
+    /// allocation feeding the collections that the stutter frames coincide with.
+    /// Guard interpolated call sites with this.
+    /// </summary>
+    internal static bool TraceEnabled =>
+        AiDebugTelemetry.CaptureEnabled || Settings.VerboseLogging.Value;
+
     internal static void Trace(string message)
     {
         AiDebugTelemetry.RecordTrace(message);
         if (Settings.VerboseLogging.Value)
             Plugin.LogSource.LogInfo(message);
+    }
+
+    /// <summary>
+    /// Overload every interpolated trace binds to. The handler decides up front whether
+    /// anything will read the message, and the compiler skips evaluating and formatting
+    /// the holes when it will not — so a disabled trace costs a boolean check rather than
+    /// a formatted string. Callers need no guard, and new trace sites get this for free.
+    /// </summary>
+    internal static void Trace(TraceMessageHandler message)
+    {
+        if (!TraceEnabled)
+            return;
+
+        Trace(message.GetMessage());
     }
 
     internal static Vector3 HorizontalAway(Vector3 source, Vector3 danger)
@@ -234,6 +316,11 @@ internal sealed class TargetMemoryState
     internal bool IncomingFireIsDirect;
     internal float NextGunfirePollAt;
     internal float NextCloseConfirmPollAt;
+    // When this soldier last ran the incoming-fire orientation step. That step is now
+    // budgeted per frame, so the turn is driven by the time actually elapsed since the
+    // last one rather than by a fixed step — a soldier who waited a frame then turns
+    // through the angle he would have covered anyway, at the same rate.
+    internal float LastIncomingFireTurnAt;
     internal readonly Dictionary<IntPtr, TargetCandidateState> Candidates = new();
 }
 

@@ -356,6 +356,8 @@ internal static class GunfireAwarenessBattleResetPatch
     [HarmonyPrefix]
     private static void Prefix()
     {
+        InteropWrapperLifetime.ResetBattle();
+        AiOwnership.ResetBattle();
         GunfireAwareness.ResetBattle();
         MountedGunnerSuppression.ResetBattle();
         KnownTargetSuppressiveFire.ResetBattle();
@@ -504,6 +506,19 @@ internal static class IncomingFireAwareness
             return;
         }
 
+        // Everything above is cue bookkeeping and must run for every soldier so stale
+        // cues expire. Everything below reaches into the game — look position, target
+        // resolution, movement test, body rotation — once per soldier per physics step
+        // for every soldier currently under fire, which in a large battle is most of
+        // them at once. It was the last per-soldier system with no per-frame ceiling,
+        // measured at 34.8ms in one frame with 149 soldiers.
+        //
+        // A soldier over budget keeps his cue (it is time-based) and turns on a later
+        // frame through the angle he would have covered anyway, so deferring costs
+        // nothing observable.
+        if (!TryTakeIncomingFireTurnBudget())
+            return;
+
         var origin = soldier.LookPosition();
         var towardSource = state.IncomingFirePosition - origin;
         if (towardSource.sqrMagnitude <= 0.01f)
@@ -532,7 +547,41 @@ internal static class IncomingFireAwareness
 
         towardSource.y = 0f;
         if (towardSource.sqrMagnitude > 0.01f)
-            soldier.RotateToward(towardSource.normalized, Time.fixedDeltaTime);
+        {
+            // Driven by real elapsed time rather than the fixed step, so the budget
+            // changes WHEN a soldier turns, never how fast he turns. Clamped so a long
+            // gap (a hitch, or a spell over budget) cannot snap him round in one step.
+            var turnDelta = state.LastIncomingFireTurnAt > 0f
+                ? Mathf.Clamp(now - state.LastIncomingFireTurnAt, Time.fixedDeltaTime, 0.1f)
+                : Time.fixedDeltaTime;
+            state.LastIncomingFireTurnAt = now;
+            soldier.RotateToward(towardSource.normalized, turnDelta);
+        }
+    }
+
+    // Ceiling on how many soldiers may run the incoming-fire orientation step in one
+    // frame. Sized well above the number that can be turning at once in ordinary
+    // fighting, so it binds only during a battle-wide volley — which is exactly the
+    // burst it exists to flatten.
+    private const int MaxIncomingFireTurnsPerFrame = 12;
+
+    private static int _incomingFireTurnFrame = -1;
+    private static int _incomingFireTurnsThisFrame;
+
+    private static bool TryTakeIncomingFireTurnBudget()
+    {
+        var frame = Time.frameCount;
+        if (frame != _incomingFireTurnFrame)
+        {
+            _incomingFireTurnFrame = frame;
+            _incomingFireTurnsThisFrame = 0;
+        }
+
+        if (_incomingFireTurnsThisFrame >= MaxIncomingFireTurnsPerFrame)
+            return false;
+
+        _incomingFireTurnsThisFrame++;
+        return true;
     }
 
     private static bool KnownTargetIsAtLeastAsClose(
@@ -603,7 +652,9 @@ internal static class IncomingFireOrientationPatch
     [HarmonyPostfix]
     private static void Postfix(SoldierAI __instance)
     {
+        InteropWrapperLifetime.Retain(__instance);
         var __t = ModTimeProbe.Begin();
+        var __a = ModTimeProbe.BeginAlloc();
         try
         {
             if (!MultiplayerAuthority.CanMutateGameplay() ||
@@ -635,7 +686,8 @@ internal static class IncomingFireOrientationPatch
         }
         finally
         {
-            ModTimeProbe.End(ModTimeSite.IncomingFire, __t);
+            ModTimeProbe.EndSiteAlloc(ModTimeSite.IncomingFire, __a);
+            ModTimeProbe.EndIncomingFire(__t);
         }
     }
 }
@@ -811,9 +863,11 @@ internal static class SoldierSequentialUpdatePatch
     [HarmonyPrefix]
     private static void Prefix(SoldierAI __instance)
     {
+        InteropWrapperLifetime.Retain(__instance);
         var __t = ModTimeProbe.Begin();
         try
         {
+            ModTimeProbe.Stage(SequentialStage.PrefixEntry);
             if (!MultiplayerAuthority.CanMutateGameplay())
                 return;
 
@@ -827,6 +881,7 @@ internal static class SoldierSequentialUpdatePatch
             // Establish and enforce the persistent defensive-position owner before
             // native SequentialUpdate gets a chance to turn HoldArea into another
             // walk. The lower movement executors below enforce the same invariant.
+            ModTimeProbe.Stage(SequentialStage.PrefixDefensiveHold);
             if (ContactResponse.ShouldHoldDefensivePosition(soldier, Time.time))
             {
                 ContactResponse.StopTacticalMovement(
@@ -843,7 +898,7 @@ internal static class SoldierSequentialUpdatePatch
         }
         finally
         {
-            ModTimeProbe.End(ModTimeSite.SequentialUpdate, __t);
+            ModTimeProbe.EndSequentialUpdate(__t);
         }
     }
 
@@ -853,6 +908,7 @@ internal static class SoldierSequentialUpdatePatch
         var __t = ModTimeProbe.Begin();
         try
         {
+            ModTimeProbe.Stage(SequentialStage.PostfixEntry);
             if (!MultiplayerAuthority.CanMutateGameplay())
             {
                 GunfireAwareness.Disable();
@@ -876,6 +932,7 @@ internal static class SoldierSequentialUpdatePatch
 
             if (soldier.IsOnVehicle())
             {
+                ModTimeProbe.Stage(SequentialStage.PostfixVehicleSuspend);
                 KnownTargetSuppressiveFire.Disable(__instance, soldier);
                 AiState.TargetMemory.Remove(soldier.GetInstanceID());
                 ContactResponse.SuspendForVehicle(__instance, soldier);
@@ -890,7 +947,7 @@ internal static class SoldierSequentialUpdatePatch
         }
         finally
         {
-            ModTimeProbe.End(ModTimeSite.SequentialUpdate, __t);
+            ModTimeProbe.EndSequentialUpdate(__t);
         }
     }
 
@@ -968,148 +1025,12 @@ internal static class SoldierSequentialUpdatePatch
         AiState.Trace($"FOV: soldier {id} rejected out-of-cone target at {distance:0}m ({reason})");
     }
 
-    internal static void ApplyTankFear(SoldierAI ai, Soldier soldier)
-    {
-        var now = Time.time;
-        var id = soldier.GetInstanceID();
-        if (!AiState.CooldownReady(AiState.NextTankThreatCheck, id, now))
-            return;
-        AiState.NextTankThreatCheck[id] = now + 0.75f;
-
-        var maxDistanceSqr = Settings.TankAwarenessDistance.Value * Settings.TankAwarenessDistance.Value;
-        if (!TryFindNearestEnemyTank(soldier, maxDistanceSqr, out var nearestTank, out var nearestSqr))
-        {
-            AiState.TankCoverHideUntil.Remove(id);
-            return;
-        }
-
-        var distance = Mathf.Sqrt(nearestSqr);
-        if (ContactResponse.IsPinned(id) ||
-            (Settings.DangerReactionsEnabled.Value &&
-             (soldier.IsOnFire || AiState.IsFlameEvading(id, now))))
-            return;
-
-        var tankPosition = nearestTank.GetCenterOfUnit();
-        var advancingTowardTank = IsAdvancingToward(ai, soldier, tankPosition);
-
-        // Anti-tank troops are the deliberate exception: they retain their current
-        // movement/order and orient toward the armor instead of entering the hide FSM.
-        if (soldier.IsATUnit())
-        {
-            AiState.TankCoverHideUntil.Remove(id);
-            if (advancingTowardTank || distance <= Settings.TankRetreatDistance.Value)
-            {
-                ContactResponse.SetTacticalPose(ai, soldier, SoldierPose.Crouch, "perception-crouch");
-                if (ContactResponse.IsRelocating(id))
-                    return;
-
-                // Do not rotate the whole body away from its travel bearing. That
-                // makes locomotion play as a sideways glide. An AT soldier keeps
-                // moving under his order and faces the armor once he actually halts.
-                if (!soldier.IsMoving(0.15f))
-                    FaceThreat(soldier, tankPosition);
-            }
-            return;
-        }
-
-        // Player-led squads obey the player's hold area. Before arrival, the tank
-        // response may not divert them; after arrival, they conceal themselves at
-        // that position instead of replacing the order with a retreat.
-        if (ContactResponse.TryGetPlayerHoldOrder(soldier, out var holdCenter, out var holdRadius))
-        {
-            var wasAlreadyHiding = AiState.IsHidingFromTank(id, now);
-            if (!ContactResponse.IsInsidePlayerHoldOrder(
-                    soldier.transform.position, holdCenter, holdRadius))
-            {
-                AiState.TankCoverHideUntil.Remove(id);
-                return;
-            }
-
-            AiState.TankCoverHideUntil[id] = now + 1f;
-            ContactResponse.StopDangerMovement(
-                ai,
-                soldier,
-                Time.deltaTime,
-                "tank-fear-playerhold");
-            if (!wasAlreadyHiding)
-                AiState.Trace($"Tank fear: soldier {id} hiding at the player hold from tank at {distance:0}m");
-            return;
-        }
-
-        if (ContactResponse.IsOnUsableCover(soldier))
-        {
-            var wasAlreadyHiding = AiState.IsHidingFromTank(id, now);
-            // The scan runs every 0.75 seconds. A small overlap makes the hold
-            // continuous while still expiring quickly when the tank disappears.
-            AiState.TankCoverHideUntil[id] = now + 1f;
-            ContactResponse.StopDangerMovement(
-                ai,
-                soldier,
-                Time.deltaTime,
-                "tank-fear-cover");
-            if (!wasAlreadyHiding)
-                AiState.Trace($"Tank fear: soldier {id} hiding in cover from tank at {distance:0}m");
-            return;
-        }
-
-        var shouldHide = advancingTowardTank ||
-                         distance <= Settings.TankRetreatDistance.Value;
-        if (!shouldHide)
-        {
-            AiState.TankCoverHideUntil.Remove(id);
-            return;
-        }
-
-        AiState.TankCoverHideUntil.Remove(id);
-        if (ContactResponse.IsRelocating(id))
-            return;
-
-        if (ContactResponse.TryBeginTankHide(ai, soldier, tankPosition, now))
-        {
-            AiState.Trace($"Tank fear: soldier {id} committed to tank-masked cover at {distance:0}m");
-            return;
-        }
-
-        // The urgent search has conclusively failed to find any reachable tank-masked
-        // cover. A soldier does not lie prone in the open forever: he resumes his orders
-        // (moving crouched/prone-crawl per the ordinary movement pose rules). The wait
-        // re-arms on its own when cover becomes reachable or the tank threat changes.
-        if (ContactResponse.TryResumeFromUnreachableTankCover(ai, soldier, now))
-            return;
-
-        // No safe cover route exists yet. A human does not pace back and forth in
-        // the open; he makes himself small and waits for a viable move.
-        var wasProneHiding = AiState.IsHidingFromTank(id, now);
-        AiState.TankCoverHideUntil[id] = now + 1f;
-        ContactResponse.StopDangerMovement(ai, soldier, Time.deltaTime);
-        if (!wasProneHiding)
-            AiState.Trace($"Tank fear: soldier {id} went prone while waiting for tank-masked cover at {distance:0}m");
-    }
-
-    internal static bool HasNearbyTankThreat(Soldier soldier)
-    {
-        if (soldier == null || soldier.IsATUnit() || soldier.IsOnVehicle())
-            return false;
-
-        var id = soldier.GetInstanceID();
-        var now = Time.time;
-        if (!AiState.CooldownReady(AiState.NextTankThreatSnapshotCheck, id, now))
-            return AiState.CachedTankThreat.TryGetValue(id, out var cached) && cached;
-
-        AiState.NextTankThreatSnapshotCheck[id] = now + 0.75f;
-        var maximumSqr = Settings.TankAwarenessDistance.Value *
-                         Settings.TankAwarenessDistance.Value;
-        var hasThreat = TryFindNearestEnemyTank(soldier, maximumSqr, out _, out _);
-        AiState.CachedTankThreat[id] = hasThreat;
-        return hasThreat;
-    }
-
-    // Tank-ness never changes for a live vehicle, so a stale cache entry is
-    // harmless; the alternative is a GetComponent call per vehicle per soldier
-    // update, which is the actual cost this cache removes.
+    // Tank-ness never changes for a live vehicle, so a stale cache entry is harmless;
+    // the alternative is a GetComponent call per vehicle per frame on AIVehicle.Update.
+    // Component lookups cross into il2cpp and are the cost this cache exists to remove.
     private static readonly Dictionary<int, bool> TankVehicleCache = new();
 
-    private static bool IsTankCached(Vehicle vehicle)
+    internal static bool IsTankCached(Vehicle vehicle)
     {
         var id = vehicle.GetInstanceID();
         if (TankVehicleCache.TryGetValue(id, out var isTank))
@@ -1120,61 +1041,9 @@ internal static class SoldierSequentialUpdatePatch
         return isTank;
     }
 
-    private static bool TryFindNearestEnemyTank(
-        Soldier soldier,
-        float maxDistanceSqr,
-        [NotNullWhen(true)] out Vehicle? tank,
-        out float sqrDistance)
+    internal static void ClearVehicleCaches()
     {
-        tank = null;
-        sqrDistance = maxDistanceSqr;
-
-        var vehicles = Vehicle.allVehicles;
-        if (vehicles == null)
-            return false;
-
-        var position = soldier.transform.position;
-        for (var i = 0; i < vehicles.Count; i++)
-        {
-            var vehicle = vehicles[i];
-            if (vehicle == null || vehicle.life <= 0 || !IsTankCached(vehicle))
-                continue;
-            if (string.Equals(vehicle.GetVehicleFaction(), soldier.faction, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            var sqr = (vehicle.GetCenterOfUnit() - position).sqrMagnitude;
-            if (sqr < sqrDistance)
-            {
-                sqrDistance = sqr;
-                tank = vehicle;
-            }
-        }
-
-        return tank != null;
-    }
-
-    private static bool IsAdvancingToward(SoldierAI ai, Soldier soldier, Vector3 threatPosition)
-    {
-        if (!soldier.HasDestinationAssigned || soldier.DestinationReached)
-            return false;
-
-        var position = soldier.transform.position;
-        var moveDirection = ai.MoveDestination - position;
-        var threatDirection = threatPosition - position;
-        moveDirection.y = 0f;
-        threatDirection.y = 0f;
-        if (moveDirection.sqrMagnitude < 1f || threatDirection.sqrMagnitude < 1f)
-            return false;
-
-        return Vector3.Dot(moveDirection.normalized, threatDirection.normalized) > 0.35f;
-    }
-
-    private static void FaceThreat(Soldier soldier, Vector3 threatPosition)
-    {
-        var threatDirection = threatPosition - soldier.transform.position;
-        threatDirection.y = 0f;
-        if (threatDirection.sqrMagnitude > 0.01f)
-            soldier.RotateToward(threatDirection.normalized, Time.deltaTime);
+        TankVehicleCache.Clear();
     }
 }
 
@@ -1681,6 +1550,37 @@ internal static class CloseRangeAcquisitionTick
     // soldiers that already have a pending close-range candidate.
     private const float PollIntervalSeconds = 0.2f;
 
+    // This tick raycasts (CanSee) once per close candidate. A fixed poll interval lets
+    // every soldier's next poll drift into the same frame, and the whole battle's
+    // line-of-sight tests then land together — measured at 67.7ms in a single frame.
+    // Two bounds fix that without dropping any check: a per-soldier offset so polls
+    // cannot stay synchronized, and a per-frame ceiling that spreads a synchronized wave
+    // across consecutive frames.
+    private const int MaxCloseConfirmScansPerFrame = 8;
+    private static int _closeConfirmScanFrame = -1;
+    private static int _closeConfirmScansThisFrame;
+
+    // Deterministic per-soldier spread (no RNG, so multiplayer peers stay in step),
+    // adding up to one extra poll interval so neighbours cannot share a due frame.
+    private static float NextCloseConfirmPollDelay(int soldierId)
+        => PollIntervalSeconds * (1f + (soldierId & 7) * 0.125f);
+
+    private static bool TryTakeCloseConfirmBudget()
+    {
+        var frame = Time.frameCount;
+        if (frame != _closeConfirmScanFrame)
+        {
+            _closeConfirmScanFrame = frame;
+            _closeConfirmScansThisFrame = 0;
+        }
+
+        if (_closeConfirmScansThisFrame >= MaxCloseConfirmScansPerFrame)
+            return false;
+
+        _closeConfirmScansThisFrame++;
+        return true;
+    }
+
     internal static void Update(SoldierAI ai, Soldier soldier, float now)
     {
         if (!Settings.PerceptionEnabled.Value || soldier.IsOnVehicle())
@@ -1696,7 +1596,6 @@ internal static class CloseRangeAcquisitionTick
 
         if (now < state.NextCloseConfirmPollAt)
             return;
-        state.NextCloseConfirmPollAt = now + PollIntervalSeconds;
 
         var closeDistance = Settings.ContactImmediateFireDistance.Value;
         var closeRangeSqr = closeDistance * closeDistance;
@@ -1717,7 +1616,18 @@ internal static class CloseRangeAcquisitionTick
         }
 
         if (closeCandidates == null)
+        {
+            // Nothing to raycast: reschedule normally without consuming budget.
+            state.NextCloseConfirmPollAt = now + NextCloseConfirmPollDelay(soldierId);
             return;
+        }
+
+        // Over budget: leave the poll DUE so this soldier retries next frame rather than
+        // losing its turn. Nothing is skipped, it is only deferred.
+        if (!TryTakeCloseConfirmBudget())
+            return;
+
+        state.NextCloseConfirmPollAt = now + NextCloseConfirmPollDelay(soldierId);
 
         foreach (var token in closeCandidates)
         {

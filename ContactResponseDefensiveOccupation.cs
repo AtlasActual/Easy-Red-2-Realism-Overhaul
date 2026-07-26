@@ -157,7 +157,7 @@ internal static partial class ContactResponse
         {
             var squad = soldier.joinedSquad;
             var squadId = squad == null ? 0 : SquadIdentity.GetSquadId(squad);
-            var revision = GroundAiDirector.CurrentObjectiveRevision(soldier.faction);
+            var revision = GroundAiDirector.CurrentObjectiveRevision(AiState.FactionOf(soldier));
             // The commander's own stationary-area lease is gone; a squad's native
             // defend order (the same signal TryGetDefensiveArea already falls back
             // to) is now the sole source of a stationary defensive area.
@@ -358,7 +358,6 @@ internal static partial class ContactResponse
                     keepOccupiedCover: false, completedMove: false,
                     markFailedCover: false);
             ReleasePlayerHoldPositionOwnership(state, soldierId);
-            AiState.TankCoverHideUntil.Remove(soldierId);
             ReleaseDefensiveCoverHold(state, soldierId);
             state.HoldCoverUntil = 0f;
             state.ManeuverCoverMinimumHoldUntil = 0f;
@@ -500,37 +499,7 @@ internal static partial class ContactResponse
     }
 
     private static bool IsPlayerLedSquad(Squad squad)
-    {
-        try
-        {
-            if (squad.IsPlayerInSquad())
-                return true;
-
-            for (var index = 0; index < squad.CountMembers; index++)
-            {
-                var member = squad.GetMember(index);
-                var sync = member?.GetComponent<SyncSoldier>();
-                if (sync != null && sync.IsControlledByAPlayer())
-                    return true;
-            }
-
-            return false;
-        }
-        catch (ObjectCollectedException)
-        {
-            // A disappearing squad must never cause us to overwrite what may be a
-            // player command during the teardown frame.
-            return true;
-        }
-        catch (NullReferenceException)
-        {
-            return false;
-        }
-        catch (Il2CppException)
-        {
-            return false;
-        }
-    }
+        => AiOwnership.IsPlayerSquad(squad);
 
     private static bool IsFinite(Vector3 value)
         => !float.IsNaN(value.x) && !float.IsInfinity(value.x) &&
@@ -791,11 +760,13 @@ internal static partial class ContactResponse
 
             if (state.ManeuverCoverAnchorId != cover.Pointer)
             {
-                // D5 (plan 015): an attacker with a live attack route rearms this
-                // hold on a short assault tempo; everyone else (defenders with no
-                // route) keeps the long hold.
-                var hasAttackRoute = TryGetAttackWaypoint(soldier, out _);
-                var holdSeconds = hasAttackRoute
+                // D5 (plan 015): a soldier with a live movement order rearms this
+                // hold on a short assault tempo; everyone else (defenders, and anyone
+                // whose squad has stopped) keeps the long hold. Plan 028: keyed on the
+                // movement order rather than the attackFromSide waypoint, so a soldier
+                // whose squad is walking away is not parked here for 18 s.
+                var hasMovementOrder = HasMovingSquadOrder(soldier);
+                var holdSeconds = hasMovementOrder
                     ? InfantryCoverPolicy.MinimumAttackCoverHoldSeconds
                     : InfantryCoverPolicy.MinimumManeuverCoverHoldSeconds;
                 state.ManeuverCoverAnchorId = cover.Pointer;
@@ -808,8 +779,8 @@ internal static partial class ContactResponse
                 state.ManeuverCoverReleaseUntil = 0f;
                 state.ManeuverCoverReleasedId = IntPtr.Zero;
                 AiState.Trace(
-                    hasAttackRoute
-                        ? $"Cover hold: attacker {soldierId} reached a fighting position and will wait for covering fire"
+                    hasMovementOrder
+                        ? $"Cover hold: soldier {soldierId} reached a fighting position and will wait for covering fire"
                         : $"Cover hold: soldier {soldierId} reached a fighting position for {holdSeconds:0}s");
             }
 

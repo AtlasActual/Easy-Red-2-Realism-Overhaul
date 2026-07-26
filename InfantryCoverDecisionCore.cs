@@ -671,42 +671,6 @@ internal static class CoverSearchBackoffCore
     }
 }
 
-/// <summary>
-/// Bounds the tank-fear "no reachable cover" wait. A soldier who conclusively cannot
-/// reach tank-masked cover must resume his orders instead of freezing prone in the
-/// open indefinitely. The streak counts only conclusive urgent-search misses; a gap
-/// wider than one search cycle between misses means the soldier stopped open-field
-/// waiting (reached cover, the tank left, the order changed), so the next miss starts
-/// a fresh streak. That self-reset re-arms the hide automatically on a materially new
-/// situation, and a successful cover commit re-arms it explicitly — no external reset
-/// plumbing, so the whole decision stays pure and testable.
-/// </summary>
-internal static class TankCoverWaitCore
-{
-    // Two conclusive urgent-search misses (~one full urgent reassessment cycle of
-    // prone waiting) is enough to establish that no tank-masked cover is reachable.
-    internal const int MaxConsecutiveFailuresBeforeResume = 2;
-
-    // A gap wider than this between misses means the soldier was not continuously
-    // open-field waiting; the next miss starts a fresh streak. Must exceed the urgent
-    // reassessment interval so consecutive real searches keep accumulating.
-    internal const float FailureStreakResetSeconds = 6f;
-
-    internal static int RecordFailure(int previousFailures, float lastFailureAt, float now)
-    {
-        if (previousFailures <= 0 || lastFailureAt <= 0f ||
-            !float.IsFinite(lastFailureAt) || now - lastFailureAt > FailureStreakResetSeconds)
-        {
-            return 1;
-        }
-
-        return previousFailures + 1;
-    }
-
-    internal static bool ShouldResumeOrders(int consecutiveFailures)
-        => consecutiveFailures >= MaxConsecutiveFailuresBeforeResume;
-}
-
 internal static class PlayerHoldPositionCore
 {
     internal const float CenterChangeToleranceMeters = 1f;

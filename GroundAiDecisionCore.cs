@@ -287,14 +287,11 @@ internal enum PoseOwner
     // it, which is exactly where the two ladders meet: see PoseMovementContractCore.
     MovementPose = 6,
 
-    // c: tank-hide danger prone / owned cover hide (plan 013 bounded owner).
-    TankHide = 7,
-
     // b: pinned / on-fire / flame safety (SuppressionPose) - instant.
-    Suppression = 8,
+    Suppression = 7,
 
     // a: required-action safety (exposed reload / bandage prone).
-    RequiredAction = 9
+    RequiredAction = 8
 }
 
 /// <summary>
@@ -311,7 +308,6 @@ internal enum PoseOwner
 /// SAFETY the movement ladder is already halting -
 ///   RequiredAction (ExposedReloadProneOwned) -> MovementOwner.SafetyHalt,
 ///   Suppression    (pinned / on fire)        -> MovementOwner.PinnedHold / SafetyHalt,
-///   TankHide       (IsHidingFromTank)        -> MovementOwner.TankHide,
 /// each of which <see cref="MovementArbiterCore.Halts"/> reports as halting. The single
 /// exception is <see cref="MovementOwner.HazardEscape"/>, the one GRANT above the halts: a
 /// man leaving a flame keeps running, so the pose ranks above this one carry the same
@@ -517,20 +513,17 @@ internal enum MovementOwner
     // bounded by HaltSpacingMoveUntil so it can never become a movement mode.
     HaltSpacing = 5,
 
-    // Infantry holding still to stay masked from armor (AiState.TankCoverHideUntil).
-    TankHide = 6,
-
     // Pinned: suppression owns locomotion (SuppressionMovementOwned).
-    PinnedHold = 7,
+    PinnedHold = 6,
 
     // Evading an active flame - the ONE owner above the halts that GRANTS movement. A
     // soldier inside the beaten zone of a flamethrower leaves it even while pinned, which
     // is why the halt sites used to be individually guarded by !flameEvading.
-    HazardEscape = 8,
+    HazardEscape = 7,
 
     // Burning, a required action (reload/bandage), a grenade-safety halt, or the movement
     // watchdog's stall recovery hold. Nothing moves through this.
-    SafetyHalt = 9
+    SafetyHalt = 8
 }
 
 /// <summary>
@@ -549,7 +542,6 @@ internal static class MovementArbiterCore
         bool safetyHalt,
         bool hazardEscape,
         bool pinnedHold,
-        bool tankHide,
         bool haltSpacing,
         bool engagementHold,
         bool coverHold,
@@ -564,8 +556,6 @@ internal static class MovementArbiterCore
             resolved = MovementOwner.EngagementHold;
         if (haltSpacing)
             resolved = MovementOwner.HaltSpacing;
-        if (tankHide)
-            resolved = MovementOwner.TankHide;
         if (pinnedHold)
             resolved = MovementOwner.PinnedHold;
         if (hazardEscape)
@@ -577,8 +567,7 @@ internal static class MovementArbiterCore
 
     internal static bool Halts(MovementOwner owner)
         => owner is MovementOwner.SafetyHalt or MovementOwner.PinnedHold or
-                    MovementOwner.TankHide or MovementOwner.EngagementHold or
-                    MovementOwner.CoverHold;
+                    MovementOwner.EngagementHold or MovementOwner.CoverHold;
 
     internal static bool Grants(MovementOwner owner)
         => owner is MovementOwner.HazardEscape or MovementOwner.HaltSpacing or
@@ -803,8 +792,7 @@ internal readonly record struct SoldierTacticalSnapshot(
     ContactMovementSensor ContactMovement = default,
     bool Autonomous = false,
     bool HasPlayerHoldOrder = false,
-    bool HasProtectedAssignment = false,
-    bool TankThreat = false);
+    bool HasProtectedAssignment = false);
 
 /// <summary>
 /// Identifies which system submitted a tactical proposal. Member order IS the
@@ -823,7 +811,6 @@ internal enum ProposalSource
     DefensivePosition,
     CoverHold,
     Contact,
-    TankFear,
     Native
 }
 
@@ -1158,8 +1145,7 @@ internal static class ExternalMovementPolicyCore
 /// is represented here so ProposalGenerationCore stays pure.
 /// </summary>
 internal readonly record struct TacticalPolicyOptions(
-    bool ContactResponseEnabled,
-    bool TankFearEnabled);
+    bool ContactResponseEnabled);
 
 /// <summary>
 /// Pure per-soldier movement/pose/fire-permission proposal generator. A
@@ -1175,9 +1161,6 @@ internal static class ProposalGenerationCore
         List<TacticalProposal> destination)
     {
         destination.Clear();
-        // A mounted crewman is inside the tank, not a foot soldier fleeing one — the
-        // proposal would otherwise pull his own vehicle's crew out of their seats.
-        var tankThreat = options.TankFearEnabled && snapshot.TankThreat && !snapshot.Mounted;
         destination.Add(new TacticalProposal(
             TacticalChannel.Movement, TacticalAction.Native, CommandAuthority.NativeFallback,
             ProposalSource.Native, default, string.Empty));
@@ -1242,7 +1225,7 @@ internal static class ProposalGenerationCore
                 "take one useful defensive position and remain there"));
         }
 
-        if (options.ContactResponseEnabled && !tankThreat &&
+        if (options.ContactResponseEnabled &&
             CombatMovementPolicyCore.NeedsProtectedCoverControl(snapshot.ContactMovement))
         {
             destination.Add(new TacticalProposal(
@@ -1251,7 +1234,7 @@ internal static class ProposalGenerationCore
                 ProposalSource.CoverHold, snapshot.Position, "retain reached fortified cover"));
         }
 
-        if (options.ContactResponseEnabled && !tankThreat &&
+        if (options.ContactResponseEnabled &&
             CombatMovementPolicyCore.NeedsLocalCombatControl(snapshot.ContactMovement))
         {
             destination.Add(new TacticalProposal(
@@ -1259,13 +1242,6 @@ internal static class ProposalGenerationCore
                 CombatMovementPolicyCore.SelectLocalAction(snapshot.ContactMovement),
                 CommandAuthority.ImmediateCombat,
                 ProposalSource.Contact, snapshot.ThreatPosition, "contact response"));
-        }
-
-        if (tankThreat)
-        {
-            destination.Add(new TacticalProposal(
-                TacticalChannel.Movement, TacticalAction.Move, CommandAuthority.ImmediateCombat,
-                ProposalSource.TankFear, snapshot.ThreatPosition, "armor threat"));
         }
 
         if (snapshot.Suppressed)

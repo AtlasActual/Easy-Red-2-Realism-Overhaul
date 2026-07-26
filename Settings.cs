@@ -79,10 +79,6 @@ internal static class Settings
     internal static ConfigEntry<float> GrenadeFriendlySafetyRadius = null!;
     internal static ConfigEntry<float> GrenadeCooldownSeconds = null!;
 
-    internal static ConfigEntry<bool> TankFearEnabled = null!;
-    internal static ConfigEntry<float> TankAwarenessDistance = null!;
-    internal static ConfigEntry<float> TankRetreatDistance = null!;
-    internal static ConfigEntry<float> TankEscapeDistance = null!;
     internal static ConfigEntry<float> LauncherMaximumEngagementDistance = null!;
 
     internal static ConfigEntry<bool> TankTacticsEnabled = null!;
@@ -139,6 +135,41 @@ internal static class Settings
     internal static ConfigEntry<int> AircraftBombSuppression = null!;
     internal static ConfigEntry<float> BlastCoverEffectMultiplier = null!;
 
+    internal static ConfigEntry<bool> AircraftFreeLookSteeringEnabled = null!;
+    internal static ConfigEntry<bool> AircraftFlightPhysicsEnabled = null!;
+    internal static ConfigEntry<bool> AircraftPhysicsApplyToOfflinePlayers = null!;
+    internal static ConfigEntry<bool> AircraftPhysicsApplyToMultiplayerPlayers = null!;
+    internal static ConfigEntry<bool> AircraftAdvancedTuningEnabled = null!;
+    internal static ConfigEntry<float> AircraftPhysicsStrength = null!;
+    internal static ConfigEntry<float> AircraftWorldSpeedScale = null!;
+    internal static ConfigEntry<float> AircraftFighterSpeedMultiplier = null!;
+    internal static ConfigEntry<float> AircraftBomberSpeedMultiplier = null!;
+    internal static ConfigEntry<float> AircraftControlResponseMultiplier = null!;
+    internal static ConfigEntry<float> AircraftEngineResponseMultiplier = null!;
+    internal static ConfigEntry<float> AircraftEnginePowerMultiplier = null!;
+    internal static ConfigEntry<bool> AircraftThrottleControlsEnginePower = null!;
+    internal static ConfigEntry<float> AircraftThrottleReductionResponseMultiplier = null!;
+    internal static ConfigEntry<float> AircraftEnergyLossMultiplier = null!;
+    internal static ConfigEntry<bool> AircraftEnergyRetentionEnabled = null!;
+    internal static ConfigEntry<float> AircraftNativeCoastDragMultiplier = null!;
+    internal static ConfigEntry<float> AircraftNativeVelocityLossMultiplier = null!;
+    internal static ConfigEntry<float> AircraftGlideEnergyLossMultiplier = null!;
+    internal static ConfigEntry<float> AircraftMaximumEnergyRetentionAcceleration = null!;
+    internal static ConfigEntry<bool> AircraftStallPhysicsEnabled = null!;
+    internal static ConfigEntry<float> AircraftStallRecoveryPitchAuthority = null!;
+    internal static ConfigEntry<float> AircraftStallRecoveryRollAuthority = null!;
+    internal static ConfigEntry<float> AircraftStallNoseDropStrength = null!;
+    internal static ConfigEntry<float> AircraftSpinStrength = null!;
+    internal static ConfigEntry<float> AircraftSpinRecoverySpeedMultiplier = null!;
+    internal static ConfigEntry<bool> AircraftDamagePhysicsEnabled = null!;
+    internal static ConfigEntry<bool> AircraftPhysicsTelemetryEnabled = null!;
+    internal static ConfigEntry<float> AircraftPhysicsTelemetryInterval = null!;
+
+    internal static ConfigEntry<bool> AircraftInstrumentHudEnabled = null!;
+    internal static ConfigEntry<float> AircraftInstrumentHudScale = null!;
+    internal static ConfigEntry<bool> AircraftInstrumentUseImperialUnits = null!;
+    internal static ConfigEntry<bool> AircraftInstrumentShowAgl = null!;
+
     internal static ConfigEntry<bool> BulletPenetrationEnabled = null!;
     internal static ConfigEntry<float> OrdinaryRoundPenetrationStrength = null!;
     internal static ConfigEntry<float> ArmorPiercingPropPenetrationStrength = null!;
@@ -175,11 +206,6 @@ internal static class Settings
     internal static ConfigEntry<float> TankTrackVolumeMultiplier = null!;
     internal static ConfigEntry<float> WeaponFireVolumeMultiplier = null!;
     internal static ConfigEntry<float> TankGunVolumeMultiplier = null!;
-    internal static ConfigEntry<bool> DistantSoundShapingEnabled = null!;
-    internal static ConfigEntry<float> DistantSoundStartDistance = null!;
-    internal static ConfigEntry<float> DistantSoundFullEffectDistance = null!;
-    internal static ConfigEntry<float> DistantSoundMinimumCutoff = null!;
-    internal static ConfigEntry<float> DistantReverbAmount = null!;
     internal static ConfigEntry<float> PlayerFootstepVolumeMultiplier = null!;
 
     internal static ConfigEntry<bool> FirstPersonPlayerShadowEnabled = null!;
@@ -193,6 +219,7 @@ internal static class Settings
     internal static ConfigEntry<bool> CompassAlwaysVisible = null!;
     internal static ConfigEntry<KeyCode> CompassKey = null!;
     internal static ConfigEntry<bool> CompassUseMils = null!;
+    internal static ConfigEntry<bool> HeadshotDeathBlackoutEnabled = null!;
 
     internal static ConfigEntry<bool> KeepMultiplayerPlayerNamesWithHudDisabled = null!;
 
@@ -200,6 +227,10 @@ internal static class Settings
     internal static ConfigEntry<string> DisabledSwitchSnapshot = null!;
 
     internal static ConfigEntry<bool> StutterProbeEnabled = null!;
+    internal static ConfigEntry<bool> InstallGameplayPatches = null!;
+    internal static ConfigEntry<bool> DeferredInteropHandleCleanupEnabled = null!;
+    internal static ConfigEntry<bool> IncrementalGarbageCollectionEnabled = null!;
+    internal static ConfigEntry<int> IncrementalGarbageCollectionSliceMicroseconds = null!;
 
     internal static ConfigEntry<bool> AiDebugOverlayStartEnabled = null!;
     internal static ConfigEntry<KeyCode> AiDebugOverlayToggleKey = null!;
@@ -258,7 +289,7 @@ internal static class Settings
         ContactEngagementHaltDistance = config.Bind("AI - Infantry tactics - Contact response", "EngagementHaltDistanceMeters", 196.449f,
             new ConfigDescription("Inside this distance, visible contact overrides ordinary attack waypoints and the soldier establishes a firing halt. A charge keeps moving except when a non-SMG soldier meets an immediate close threat.", new AcceptableValueRange<float>(40f, 300f)));
         MaximumAttackCombatHaltSeconds = config.Bind("AI - Infantry tactics - Contact response", "MaximumAttackCombatHaltSeconds", 12f,
-            new ConfigDescription("Maximum continuous firing halt for a squad on an attack order before exposed troops resume forward progress. Heavily pinned attackers crawl; troops still seek forward cover and immediate close threats remain higher priority.", new AcceptableValueRange<float>(6f, 30f)));
+            new ConfigDescription("Maximum continuous firing halt before a soldier whose squad is still moving resumes progress. It applies to any squad with a live move order (attack, charge or ordinary follow), so a rifleman who takes cover cannot sit there for as long as he can see an enemy while his squad walks away; a soldier on cover gets 2.5x this before he bounds. Squads on a defend order and squads that have stopped are not capped. Heavily pinned troops crawl; troops still seek forward cover and immediate close threats remain higher priority.", new AcceptableValueRange<float>(6f, 30f)));
         KnownTargetSuppressionEnabled = config.Bind("AI - Infantry tactics - Contact response", "SuppressKnownTargets", true,
             "Allows a stationary on-foot machine gunner to fire one bounded burst at a fresh, personally confirmed last-seen enemy position after sight is lost. It uses real ammunition and never tracks an unseen target.");
 
@@ -269,6 +300,8 @@ internal static class Settings
             new ConfigDescription("Maximum visible-target distance at which a rifle or carbine may be fired while moving. 0 disables rifle moving fire entirely, which is the doctrine default: riflemen halt and shoot (see the contact-response immediate-fire distance). Raise it only if you want hip-fire while advancing. Machine guns and launchers never fire while moving.", new AcceptableValueRange<float>(0f, 25f)));
         SmgMaximumEngagementDistance = config.Bind("AI - Infantry tactics - Moving fire", "SmgMaximumEngagementDistanceMeters", 80f,
             new ConfigDescription("Maximum distance at which AI may fire a submachine gun, whether stationary or moving.", new AcceptableValueRange<float>(30f, 180f)));
+        LauncherMaximumEngagementDistance = config.Bind("AI - Infantry tactics - Moving fire", "LauncherMaximumEngagementDistanceMeters", 90f,
+            new ConfigDescription("Maximum distance at which AI may fire a low-velocity handheld anti-tank launcher. High-velocity anti-tank rifles retain their native range.", new AcceptableValueRange<float>(40f, 160f)));
         PreventReloadingAndBandagingWhileCrawling = config.Bind("AI - Infantry tactics - Movement", "PreventReloadingAndBandagingWhileCrawling", true,
             "Players must stop crawling before reloading or bandaging. AI soldiers automatically stop their crawl and then perform the action; stationary prone soldiers are unaffected.");
         ImprovedMeleeHitRegistrationEnabled = config.Bind("2d. Melee combat", "ImprovedHitRegistration", true,
@@ -344,17 +377,6 @@ internal static class Settings
             new ConfigDescription("Required friendly clearance around the intended grenade impact.", new AcceptableValueRange<float>(4f, 25f)));
         GrenadeCooldownSeconds = config.Bind("AI - Infantry tactics - Combat safety", "GrenadeCooldownSeconds", 18f,
             new ConfigDescription("Minimum time between explosive-grenade throws by one AI soldier.", new AcceptableValueRange<float>(5f, 90f)));
-
-        TankFearEnabled = config.Bind("AI - Infantry tactics - Armor response", "Enabled", true,
-            "Makes non-AT infantry hide from nearby hostile tanks. Troops already in cover stay hidden; exposed troops seek one tank-masked position instead of repeatedly retreating.");
-        TankAwarenessDistance = config.Bind("AI - Infantry tactics - Armor response", "AwarenessDistanceMeters", 120f,
-            new ConfigDescription("Range at which infantry react to a hostile tank.", new AcceptableValueRange<float>(15f, 180f)));
-        TankRetreatDistance = config.Bind("AI - Infantry tactics - Armor response", "RetreatDistanceMeters", 90f,
-            new ConfigDescription("Range at which exposed non-AT infantry urgently seek tank-masked cover. The legacy setting name is retained for config compatibility.", new AcceptableValueRange<float>(5f, 140f)));
-        TankEscapeDistance = config.Bind("AI - Infantry tactics - Armor response", "EscapeMoveMeters", 18f,
-            new ConfigDescription("Minimum local search radius for tank-masked cover. The legacy setting name is retained for config compatibility.", new AcceptableValueRange<float>(4f, 35f)));
-        LauncherMaximumEngagementDistance = config.Bind("AI - Infantry tactics - Armor response", "LauncherMaximumEngagementDistanceMeters", 90f,
-            new ConfigDescription("Maximum distance at which AI may fire a low-velocity handheld anti-tank launcher. High-velocity anti-tank rifles retain their native range.", new AcceptableValueRange<float>(40f, 160f)));
 
         TankTacticsEnabled = config.Bind("AI - Vehicle tactics", "Enabled", true,
             "Makes AI tanks establish standoff and reverse when too close to an enemy tank or badly damaged, while tanks on attack orders keep pressure against infantry.");
@@ -461,6 +483,77 @@ internal static class Settings
         BlastCoverEffectMultiplier = config.Bind("6. Ordnance effects", "BlastCoverEffectMultiplier", 0.3f,
             new ConfigDescription("Outer-ring injury and suppression retained when terrain or a structure obstructs the blast.", new AcceptableValueRange<float>(0f, 1f)));
 
+        AircraftFlightPhysicsEnabled = config.Bind("6c. Aircraft flight physics", "Enabled", false,
+            "Adds energy loss, speed-dependent control authority, progressive stalls, aerodynamic damping, and damage-sensitive handling while preserving the native vehicle controller. Off by default; opt in if you want a heavier flight model. Applies to player-flown aircraft only; AI aircraft always fly the vanilla flight model.");
+        AircraftPhysicsApplyToOfflinePlayers = config.Bind("6c. Aircraft flight physics", "ApplyToPlayerAircraftOffline", true,
+            "Applies the flight model to player-controlled aircraft while the game is offline.");
+        AircraftPhysicsApplyToMultiplayerPlayers = config.Bind("6c. Aircraft flight physics", "ApplyToPlayerAircraftMultiplayer", true,
+            "Experimental: applies the flight model to human-controlled aircraft on the multiplayer master client. Leave disabled until network synchronization has been tested with unmodified clients.");
+        // Bound after Enabled so the section's master switch keeps the Quick Setup slot, which
+        // goes to the first primary bool in the section. This one works whether or not the flight
+        // model is on, since it only restores input the game discards during freelook.
+        AircraftFreeLookSteeringEnabled = config.Bind("6c. Aircraft flight physics", "FreeLookSteering", true,
+            "Puts pitch and roll on the left stick while the vehicle freelook button is held, instead of the aircraft being limited to rudder for as long as you look around. The freelook camera is always the right stick, so the left one is free to fly in either stick layout. Rudder yields for the duration of the hold when it shares that stick, and the throttle is held steady while you are actually pitching so the same stick cannot do both at once.");
+        AircraftAdvancedTuningEnabled = config.Bind("6c. Aircraft flight physics", "UseAdvancedConfigTuning", true,
+            "Uses the low-level aircraft values grouped in the in-game Advanced tab. Leave disabled for the coherent built-in flight preset so detailed values cannot counteract one another accidentally.");
+        AircraftPhysicsStrength = config.Bind("6c. Aircraft flight physics", "RealismStrength", 1.128f,
+            new ConfigDescription("Overall strength of corrective aerodynamic forces and control-rate limits. Zero leaves only the native model; one applies the original built-in strength.", new AcceptableValueRange<float>(0f, 2f)));
+        AircraftWorldSpeedScale = config.Bind("6c. Aircraft flight physics", "WorldSpeedScale", 1.1f,
+            new ConfigDescription("Scales aircraft propulsion and the full flight-speed envelope. Lower this when aircraft cross the map too quickly for its apparent scale.", new AcceptableValueRange<float>(0.65f, 1.35f)));
+        AircraftFighterSpeedMultiplier = config.Bind("6c. Aircraft flight physics", "FighterSpeedMultiplier", 1f,
+            new ConfigDescription("Additional speed-envelope multiplier for fighters.", new AcceptableValueRange<float>(0.75f, 1.25f)));
+        AircraftBomberSpeedMultiplier = config.Bind("6c. Aircraft flight physics", "BomberSpeedMultiplier", 1f,
+            new ConfigDescription("Additional speed-envelope multiplier for bombers.", new AcceptableValueRange<float>(0.75f, 1.25f)));
+        AircraftControlResponseMultiplier = config.Bind("6c. Aircraft flight physics", "NativeControlResponseMultiplier", 0.771f,
+            new ConfigDescription("Multiplier applied once to the native control-response coefficient. Lower values make rotation less immediate.", new AcceptableValueRange<float>(0.45f, 1f)));
+        AircraftEngineResponseMultiplier = config.Bind("6c. Aircraft flight physics", "EngineResponseTimeMultiplier", 1.25f,
+            new ConfigDescription("Multiplier for the native zero-to-maximum-thrust response time.", new AcceptableValueRange<float>(1f, 2.5f)));
+        AircraftEnginePowerMultiplier = config.Bind("6c. Aircraft flight physics", "EnginePowerMultiplier", 3.669f,
+            new ConfigDescription("Multiplier for physically available propulsive power. Higher values improve acceleration, climb, and sustained-turn performance, while the propeller curve remains power-limited at speed and below aircraft weight at low speed.", new AcceptableValueRange<float>(0.5f, 4f)));
+        AircraftThrottleControlsEnginePower = config.Bind("6c. Aircraft flight physics", "ThrottleControlsEnginePower", true,
+            "Treats throttle as an engine-power command instead of a target airspeed. Propulsive force remains available above the native throttle-proportional speed limit, while aerodynamic drag determines the resulting speed.");
+        AircraftThrottleReductionResponseMultiplier = config.Bind("6c. Aircraft flight physics", "ThrottleReductionResponseMultiplier", 1.8f,
+            new ConfigDescription("Additional smoothing applied only when commanded thrust is decreasing. Higher values make power reduction and the transition into a glide less abrupt; engine shutdown and propeller loss bypass it.", new AcceptableValueRange<float>(1f, 4f)));
+        AircraftEnergyLossMultiplier = config.Bind("6c. Aircraft flight physics", "ManeuverEnergyLossMultiplier", 0.976f,
+            new ConfigDescription("Scales parasite, induced, sideslip, landing-gear, and overspeed drag added by the flight model.", new AcceptableValueRange<float>(0f, 2f)));
+        AircraftEnergyRetentionEnabled = config.Bind("6c. Aircraft flight physics", "EnergyRetentionEnabled", true,
+            "Prevents the native controller from bleeding implausible amounts of total energy as soon as the throttle is reduced, while preserving configured maneuver, stall, gear, and damage drag.");
+        AircraftNativeCoastDragMultiplier = config.Bind("6c. Aircraft flight physics", "NativeCoastDragMultiplier", 0.525f,
+            new ConfigDescription("Multiplier for the native aircraft fall/coast drag. Lower values retain speed longer after reducing throttle; the realism model continues to supply aerodynamic drag.", new AcceptableValueRange<float>(0f, 1f)));
+        AircraftNativeVelocityLossMultiplier = config.Bind("6c. Aircraft flight physics", "NativeVelocityLossMultiplier", 0.488f,
+            new ConfigDescription("Fraction of the native per-tick velocity subtraction retained in addition to force-based aerodynamic drag. Zero removes the artificial speed rewrite; one restores the stock rewrite.", new AcceptableValueRange<float>(0f, 1f)));
+        AircraftGlideEnergyLossMultiplier = config.Bind("6c. Aircraft flight physics", "GlideEnergyLossMultiplier", 1.448f,
+            new ConfigDescription("Scales the permitted clean power-off glide energy loss. Lower values retain more speed and altitude; higher values produce a steeper glide.", new AcceptableValueRange<float>(0.25f, 2.5f)));
+        AircraftMaximumEnergyRetentionAcceleration = config.Bind("6c. Aircraft flight physics", "MaximumEnergyRetentionAcceleration", 3.364f,
+            new ConfigDescription("Maximum non-propulsive acceleration used to cancel excessive native energy loss after reducing throttle. It fades out near full throttle and is disabled during stalls, overspeed, and discontinuities.", new AcceptableValueRange<float>(0f, 12f)));
+        AircraftStallPhysicsEnabled = config.Bind("6c. Aircraft flight physics", "ProgressiveStalls", true,
+            "Reduces low-speed control authority and adds progressive drag, nose drop, and recoverable autorotation beyond the aircraft profile's critical angle of attack.");
+        AircraftStallRecoveryPitchAuthority = config.Bind("6c. Aircraft flight physics", "StallRecoveryPitchAuthority", 0.741f,
+            new ConfigDescription("Minimum pitch authority retained in a developed stall so the nose can be unloaded for recovery.", new AcceptableValueRange<float>(0.35f, 1f)));
+        AircraftStallRecoveryRollAuthority = config.Bind("6c. Aircraft flight physics", "StallRecoveryRollAuthority", 0.801f,
+            new ConfigDescription("Minimum roll authority retained in a developed stall, including inverted-stall recovery.", new AcceptableValueRange<float>(0.40f, 1f)));
+        AircraftStallNoseDropStrength = config.Bind("6c. Aircraft flight physics", "StallNoseDropStrength", 0.715f,
+            new ConfigDescription("Strength of the aerodynamic pitching moment that forces the nose toward the flight path during a developed stall, including inverted stalls.", new AcceptableValueRange<float>(0f, 2f)));
+        AircraftSpinStrength = config.Bind("6c. Aircraft flight physics", "SpinStrength", 0.762f,
+            new ConfigDescription("Strength of coupled yaw and roll autorotation in a developed stall. Zero disables forced spin moments without disabling the rest of the stall model.", new AcceptableValueRange<float>(0f, 2f)));
+        AircraftSpinRecoverySpeedMultiplier = config.Bind("6c. Aircraft flight physics", "SpinRecoverySpeedMultiplier", 1.179f,
+            new ConfigDescription("Forward airspeed, as a multiple of stall speed, required before an unloaded aircraft can stop autorotating.", new AcceptableValueRange<float>(1.05f, 1.60f)));
+        AircraftDamagePhysicsEnabled = config.Bind("6c. Aircraft flight physics", "DamageAffectsHandling", true,
+            "Makes detached wings, tails, and propellers produce asymmetric lift, instability, drag, and power loss.");
+        AircraftPhysicsTelemetryEnabled = config.Bind("6c. Aircraft flight physics", "TelemetryLogging", false,
+            "Writes rate-limited aircraft speed, angle-of-attack, sideslip, control-authority, stall, damage, and altitude data to the BepInEx log.");
+        AircraftPhysicsTelemetryInterval = config.Bind("6c. Aircraft flight physics", "TelemetryIntervalSeconds", 1f,
+            new ConfigDescription("Time between telemetry lines for each active aircraft.", new AcceptableValueRange<float>(0.25f, 10f)));
+
+        AircraftInstrumentHudEnabled = config.Bind("6d. Aircraft instruments", "Enabled", false,
+            "Shows compact airspeed and altitude instruments on the left side of the screen while piloting an aircraft. Off by default.");
+        AircraftInstrumentHudScale = config.Bind("6d. Aircraft instruments", "HudScale", 1f,
+            new ConfigDescription("Scale of the left-side aircraft instrument cards.", new AcceptableValueRange<float>(0.65f, 1.50f)));
+        AircraftInstrumentUseImperialUnits = config.Bind("6d. Aircraft instruments", "UseKnotsAndFeet", false,
+            "Displays airspeed in knots and altitude in feet instead of kilometres per hour and metres.");
+        AircraftInstrumentShowAgl = config.Bind("6d. Aircraft instruments", "ShowAltitudeAboveGround", true,
+            "Adds radar-style height above the terrain or structure directly below the aircraft to the altitude card.");
+
         BulletPenetrationEnabled = config.Bind("6e. Bullet penetration", "Enabled", true,
             "Lets player and AI small-arms projectiles continue through penetrable props. Native armor hits, terrain, water, bodies, bunkers, reinforced fortifications, and ricochets keep their base-game handling.");
         OrdinaryRoundPenetrationStrength = config.Bind("6e. Bullet penetration", "OrdinaryRoundPenetrationStrength", 1f,
@@ -526,16 +619,6 @@ internal static class Settings
             new ConfigDescription("Multiplier for handheld and ordinary mounted weapon fire loudness.", new AcceptableValueRange<float>(0.5f, 3f)));
         TankGunVolumeMultiplier = config.Bind("7d. Audio balance", "TankGunVolumeMultiplier", 3f,
             new ConfigDescription("Multiplier for tank-mounted cannon fire of 20 mm caliber or larger. This is a total multiplier, not an additional multiplier on top of weapon fire.", new AcceptableValueRange<float>(0.5f, 4f)));
-        DistantSoundShapingEnabled = config.Bind("7d. Audio balance", "DistantSoundShapingEnabled", true,
-            "Adds progressive high-frequency air absorption to distant weapon fire, explosions, ground-vehicle engines, and tank tracks while preserving the game's original volume rolloff.");
-        DistantSoundStartDistance = config.Bind("7d. Audio balance", "DistantSoundStartDistanceMeters", 10f,
-            new ConfigDescription("Distance where high-frequency absorption begins.", new AcceptableValueRange<float>(0f, 250f)));
-        DistantSoundFullEffectDistance = config.Bind("7d. Audio balance", "DistantSoundFullEffectDistanceMeters", 1000f,
-            new ConfigDescription("Distance where the configured maximum distant filtering is reached.", new AcceptableValueRange<float>(100f, 2000f)));
-        DistantSoundMinimumCutoff = config.Bind("7d. Audio balance", "DistantSoundMinimumCutoffHz", 2326.169f,
-            new ConfigDescription("Low-pass cutoff reached at the full-effect distance. Lower values sound more muffled; higher values retain more crack and detail.", new AcceptableValueRange<float>(1000f, 12000f)));
-        DistantReverbAmount = config.Bind("7d. Audio balance", "DistantReverbAmount", 0.558f,
-            new ConfigDescription("Additional distant open-air reverb intensity for weapon fire and explosions. Zero disables the effect; one is the strongest mix.", new AcceptableValueRange<float>(0f, 1f)));
         PlayerFootstepVolumeMultiplier = config.Bind("7d. Audio balance", "PlayerFootstepVolumeMultiplier", 0.485f,
             new ConfigDescription("Volume multiplier for the locally controlled player's footsteps only. AI footsteps are unchanged.", new AcceptableValueRange<float>(0f, 2f)));
 
@@ -561,6 +644,8 @@ internal static class Settings
             "Key that shows the scrolling compass for five seconds. Rebind it from the F10 settings menu.");
         CompassUseMils = config.Bind("7e. First-person view", "CompassUseMils", true,
             "Uses NATO angular mils (0-6400) on the scrolling compass. Disable this option to show 0-360 degree bearings instead.");
+        HeadshotDeathBlackoutEnabled = config.Bind("7e. First-person view", "HeadshotDeathBlackout", true,
+            "Cuts the screen to black and drops all sound to zero the instant a bullet to the head kills you, instead of the death camera lingering on your body. Other deaths are unchanged, and the view and sound always return when you take control of a soldier again, or within a few seconds at the latest.");
 
         KeepMultiplayerPlayerNamesWithHudDisabled = config.Bind("7f. Multiplayer nameplates", "KeepPlayerNamesWithHudDisabled", true,
             "Keeps names above living allied remote players in multiplayer when the base-game HUD is disabled. Enemy and local-player names remain hidden.");
@@ -587,7 +672,21 @@ internal static class Settings
             "Writes rate-limited tactical decisions to the BepInEx log for tuning.");
 
         StutterProbeEnabled = config.Bind("AI - Diagnostics", "StutterProbeEnabled", false,
-            "Logs one line whenever a frame takes far longer than the recent average, recording which mod systems coincided with the spike. Diagnostic-only; disable once stutter hunting is finished.");
+            "Logs one line whenever a frame takes far longer than the recent average, recording which mod systems coincided with the spike, plus a frame-time distribution every 30 seconds. Diagnostic-only; disable once stutter hunting is finished.");
+
+        DeferredInteropHandleCleanupEnabled = config.Bind(
+            "AI - Diagnostics",
+            "DeferredInteropHandleCleanup",
+            true,
+            "Prevents large battles from putting hundreds of thousands of transient IL2CPP wrappers on .NET's finalizer queue. Native handles are reclaimed incrementally on a background worker after collection instead of contending with the game thread. Requires a game restart to take effect; disable only as a compatibility fallback.");
+
+        IncrementalGarbageCollectionEnabled = config.Bind("AI - Diagnostics", "IncrementalGarbageCollection", true,
+            "Uses measured spare time after fast frames to keep both garbage collectors out of the visible tail: it advances Unity's incremental collector and requests a small managed Gen0 collection before interop weak handles accumulate into a long scan. Unity work stands down under VSync, and neither collector is invoked after a frame that is already busy. Has no effect if this game build does not support incremental collection.");
+        IncrementalGarbageCollectionSliceMicroseconds = config.Bind("AI - Diagnostics", "IncrementalGarbageCollectionSliceMicroseconds", 3000,
+            new ConfigDescription("Maximum length of Unity's automatic garbage-collection step, in microseconds. The default 3000 microseconds is recommended. The adaptive assist leaves this engine setting intact and caps its own extra steps at 1000 microseconds after fast frames. Setting the engine slice too short can prevent the collector from keeping up and make it fall back to a long full pass.", new AcceptableValueRange<int>(1000, 5000)));
+
+        InstallGameplayPatches = config.Bind("AI - Diagnostics", "InstallGameplayPatches", true,
+            "Master switch. Set to false to make the mod load but install no gameplay patches at all, so it cannot affect performance or behavior. Turning individual systems off still leaves their patches installed, so this is the only way to rule the mod out as a stutter cause without uninstalling it. Requires a game restart to take effect.");
     }
 
     private static ConfigEntry<float> BindMeleeAdditionalReach(ConfigFile config)

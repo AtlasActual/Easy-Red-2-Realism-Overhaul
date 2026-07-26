@@ -133,11 +133,50 @@ internal static class PlayerSuppressionNearMissRadiusPatch
     private const float ExpandedFlybyCooldownMinSeconds = 0.1f;
     private const float ExpandedFlybyCooldownMaxSeconds = 0.22f;
 
-    private static readonly MethodInfo? FlybyRadiusGetter =
-        AccessTools.PropertyGetter(typeof(BulletInstance), "flybyDistanceThreshold");
-    private static readonly MethodInfo? PlayFlybySoundMethod =
-        AccessTools.Method(typeof(BulletInstance), "PlayFlybySound", new[] { typeof(float), typeof(float) });
+    // Bound once as delegates rather than invoked reflectively. This postfix runs for
+    // every bullet in flight on every frame, and MethodInfo.Invoke allocates on each
+    // call — a box for the returned float, and an object[] plus a box per argument for
+    // the sound call — on top of dispatch that is an order of magnitude slower than a
+    // direct call. Per-bullet-per-frame is the highest-volume path in this mod, well
+    // above anything per-soldier, so allocation here is multiplied by the number of
+    // rounds in the air rather than the number of soldiers.
+    private static readonly Func<BulletInstance, float>? FlybyRadiusOf =
+        BindFlybyRadiusGetter();
+    private static readonly Action<BulletInstance, float, float>? PlayFlybySound =
+        BindPlayFlybySound();
     private static bool _loggedReflectionFailure;
+
+    private static Func<BulletInstance, float>? BindFlybyRadiusGetter()
+    {
+        try
+        {
+            var getter = AccessTools.PropertyGetter(typeof(BulletInstance), "flybyDistanceThreshold");
+            return getter == null
+                ? null
+                : AccessTools.MethodDelegate<Func<BulletInstance, float>>(getter);
+        }
+        catch (Exception)
+        {
+            // Falls back to the native behaviour through the null checks below.
+            return null;
+        }
+    }
+
+    private static Action<BulletInstance, float, float>? BindPlayFlybySound()
+    {
+        try
+        {
+            var method = AccessTools.Method(
+                typeof(BulletInstance), "PlayFlybySound", new[] { typeof(float), typeof(float) });
+            return method == null
+                ? null
+                : AccessTools.MethodDelegate<Action<BulletInstance, float, float>>(method);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
 
     [HarmonyPostfix]
     private static void Postfix(BulletInstance __instance, Camera cam)
@@ -161,7 +200,7 @@ internal static class PlayerSuppressionNearMissRadiusPatch
                 return;
             }
 
-            if (FlybyRadiusGetter == null || PlayFlybySoundMethod == null)
+            if (FlybyRadiusOf == null || PlayFlybySound == null)
             {
                 LogReflectionFailure("native flyby methods were not found");
                 return;
@@ -186,8 +225,8 @@ internal static class PlayerSuppressionNearMissRadiusPatch
             var along = Mathf.Clamp01(Vector3.Dot(towardCamera, segment) / segmentLengthSqr);
             var closestPosition = segmentStart + segment * along;
             var closestDistance = Vector3.Distance(cameraPosition, closestPosition);
-            var nativeRadiusObject = FlybyRadiusGetter.Invoke(__instance, null);
-            if (nativeRadiusObject is not float nativeRadius || nativeRadius <= 0f)
+            var nativeRadius = FlybyRadiusOf(__instance);
+            if (nativeRadius <= 0f)
                 return;
 
             var expandedRadius = nativeRadius * radiusMultiplier;
@@ -202,9 +241,7 @@ internal static class PlayerSuppressionNearMissRadiusPatch
             if (__instance.bulletData.IsHighCaliber())
                 BulletInstance.nextPossibleBulletCrack += UnityEngine.Random.Range(0f, 1f);
 
-            PlayFlybySoundMethod.Invoke(
-                __instance,
-                new object[] { distanceFromShooter, closestDistance });
+            PlayFlybySound(__instance, distanceFromShooter, closestDistance);
             __instance.hasPlayedFlyby = true;
         }
         catch (Exception ex)

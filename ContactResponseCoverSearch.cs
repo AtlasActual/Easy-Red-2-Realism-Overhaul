@@ -761,8 +761,15 @@ internal static partial class ContactResponse
             defensiveOccupation
                 ? InfantryCoverPolicy.DefensiveNearestDetailedCandidateCount
                 : InfantryCoverPolicy.NearestDetailedCandidateCount);
+        var detailedEvaluated = 0;
         foreach (var detailedIndex in detailedIndices)
         {
+            // Stop scoring once this frame's geometry allowance is gone, keeping whatever
+            // is best so far. The candidates are distance-sorted, so the ones dropped are
+            // the furthest — the least likely to win anyway.
+            if (detailedEvaluated >= MinimumDetailedCandidates && SearchGeometryBudgetSpent())
+                break;
+
             try
             {
                 var coarse = coarseCandidates[detailedIndex];
@@ -778,6 +785,7 @@ internal static partial class ContactResponse
 
                 var geometry = EvaluateCoverGeometry(
                     coverPosition, targetPosition, evaluateFiringQuality);
+                detailedEvaluated++;
                 var selectedPosture = geometry.Selected;
                 var usesStandingPose = geometry.Choice == CoverPostureChoice.Standing;
                 var posePenalty = usesStandingPose
@@ -916,11 +924,50 @@ internal static partial class ContactResponse
         threats.Add(position);
     }
 
+    /// <summary>
+    /// Full ballistic geometry costs ~5.6ms measured — 12 penetration lines plus 3
+    /// fire-lane casts. The detailed cover search runs one per CANDIDATE, up to 12
+    /// (20 for defensive occupation), all inside a single frame: 67-112ms of raycasting
+    /// for one soldier looking for cover. That is the largest single-frame cost in this
+    /// mod, and it is event-driven rather than headcount-driven — which is why it shows
+    /// up the same at maximum AI as in a small battle. It depends on somebody needing
+    /// cover, not on how many soldiers exist.
+    /// </summary>
+    private const int SearchGeometryBudgetPerFrame = 5;
+
+    // Never choose cover from one or two candidates just because the frame was busy; a
+    // search that scored six good positions instead of twelve picks slightly worse cover,
+    // which is a far better outcome than a 112ms stall.
+    private const int MinimumDetailedCandidates = 3;
+
+    private static int _geometryFrame = -1;
+    private static int _geometryRunsThisFrame;
+
+    private static bool SearchGeometryBudgetSpent()
+    {
+        var frame = Time.frameCount;
+        if (frame != _geometryFrame)
+        {
+            _geometryFrame = frame;
+            _geometryRunsThisFrame = 0;
+        }
+
+        return _geometryRunsThisFrame >= SearchGeometryBudgetPerFrame;
+    }
+
     private static CoverGeometryEvaluation EvaluateCoverGeometry(
         Vector3 coverPosition,
         Vector3 threatPosition,
         bool evaluateFiringQuality)
     {
+        var frame = Time.frameCount;
+        if (frame != _geometryFrame)
+        {
+            _geometryFrame = frame;
+            _geometryRunsThisFrame = 0;
+        }
+
+        _geometryRunsThisFrame++;
         ModTimeProbe.CountCoverGeometryRun();
         var __t = ModTimeProbe.Begin();
         try
@@ -1459,7 +1506,7 @@ internal static partial class ContactResponse
         try
         {
             return soldier.joinedSquad != null &&
-                   GroundAiDirector.IsAttackingFaction(soldier.faction);
+                   GroundAiDirector.IsAttackingFaction(AiState.FactionOf(soldier));
         }
         catch (NullReferenceException)
         {
@@ -1523,9 +1570,13 @@ internal static partial class ContactResponse
         state.RelocateDestinationPosition = default;
         if (completedMove)
         {
-            var hasAttackRoute = TryGetAttackWaypoint(soldier, out _);
+            // Plan 028: keyed on "his squad is going somewhere", not on the attackFromSide
+            // waypoint. The ORDER-only form is deliberate here - he has just arrived, so
+            // his destination reads as reached and the committed-destination form would
+            // hand every arriving soldier the long defender hold.
+            var hasMovementOrder = HasMovingSquadOrder(soldier);
             state.AttackProgressForced = false;
-            state.AttackHaltStartedAt = hasAttackRoute ? Mathf.Max(now, 0.0001f) : 0f;
+            state.AttackHaltStartedAt = hasMovementOrder ? Mathf.Max(now, 0.0001f) : 0f;
             if (state.ReservedCoverId != IntPtr.Zero)
             {
                 state.ManeuverCoverAnchorId = state.ReservedCoverId;
@@ -1540,9 +1591,9 @@ internal static partial class ContactResponse
                     // Attackers still wait for covering fire before the next bound —
                     // that gate is enforced by ShouldAuthorizeAttackBound after this
                     // hold expires, not by an unreachable +inf timer (plan 012). D5
-                    // (plan 015): an attacker rearms this on a short assault tempo;
-                    // a soldier with no attack route keeps the long defender hold.
-                    state.HoldCoverUntil = now + (hasAttackRoute
+                    // (plan 015): a soldier with somewhere to be rearms this on a short
+                    // assault tempo; one who is staying put keeps the long defender hold.
+                    state.HoldCoverUntil = now + (hasMovementOrder
                         ? InfantryCoverPolicy.MinimumAttackCoverHoldSeconds
                         : InfantryCoverPolicy.MinimumManeuverCoverHoldSeconds);
                 }

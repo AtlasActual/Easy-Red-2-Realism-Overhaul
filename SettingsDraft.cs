@@ -294,12 +294,6 @@ internal sealed class SettingsDraft
             return false;
         }
 
-        if (!Less(parsed, "7d. Audio balance", "DistantSoundStartDistanceMeters", "DistantSoundFullEffectDistanceMeters"))
-        {
-            error = "Distant-sound start distance must be lower than its full-effect distance.";
-            return false;
-        }
-
         error = string.Empty;
         return true;
     }

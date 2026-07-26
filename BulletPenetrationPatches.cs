@@ -1540,11 +1540,39 @@ internal static class BulletInstancePenetrationRicochetPatch
 [HarmonyPatch(typeof(BulletInstance), nameof(BulletInstance.ProcessFrame))]
 internal static class BulletInstancePenetrationLifecyclePatch
 {
+    // Runs once per bullet per frame on both sides, so its call volume scales with the
+    // framerate AND with how much lead is in the air. It went unmeasured while the probe
+    // reported only the soldier pipeline, which made every earlier modMs figure an
+    // undercount during firefights.
     [HarmonyPrefix]
-    private static void Prefix(BulletInstance __instance) =>
-        BulletPenetration.BeginProcessFrame(__instance);
+    private static void Prefix(BulletInstance __instance)
+    {
+        var __t = ModTimeProbe.Begin();
+        var __a = ModTimeProbe.BeginAlloc();
+        try
+        {
+            BulletPenetration.BeginProcessFrame(__instance);
+        }
+        finally
+        {
+            ModTimeProbe.EndSiteAlloc(ModTimeSite.Projectile, __a);
+            ModTimeProbe.End(ModTimeSite.Projectile, __t);
+        }
+    }
 
     [HarmonyPostfix]
-    private static void Postfix(BulletInstance __instance, bool __result) =>
-        BulletPenetration.ProjectileFinished(__instance, __result);
+    private static void Postfix(BulletInstance __instance, bool __result)
+    {
+        var __t = ModTimeProbe.Begin();
+        var __a = ModTimeProbe.BeginAlloc();
+        try
+        {
+            BulletPenetration.ProjectileFinished(__instance, __result);
+        }
+        finally
+        {
+            ModTimeProbe.EndSiteAlloc(ModTimeSite.Projectile, __a);
+            ModTimeProbe.End(ModTimeSite.Projectile, __t);
+        }
+    }
 }

@@ -28,7 +28,7 @@ internal static partial class ContactResponse
         var watchdogMayOwnMovement =
             movementAction is TacticalAction.Move or TacticalAction.Native &&
             movementSource is not (ProposalSource.External or ProposalSource.Hazard or
-                ProposalSource.TankFear or ProposalSource.ActionSafety);
+                ProposalSource.ActionSafety);
         if (!watchdogMayOwnMovement)
         {
             ResetMovementWatch(state);

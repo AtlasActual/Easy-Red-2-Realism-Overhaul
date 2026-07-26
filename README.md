@@ -6,17 +6,19 @@ ER2RealismOverhaul is built around the rough edges that become hard to ignore af
 
 The goal is to fix those moments without replacing the game underneath them. This is not a health or damage multiplier mod; Easy Red 2's missions, armour system, and basic damage model remain intact.
 
-> **Current release:** 1.0.4
+> **Current release:** 1.0.5
 >
 > **Compatibility:** Tested with Easy Red 2 Steam public-branch build `24246380` (July 20, 2026)
 
-## What's new in 1.0.4
+## What's new in 1.0.5
 
-- **The aircraft systems are gone.** AI attack safety, threat evasion, autonomous target hunting, patrol re-centering, the flight model, and the instrument HUD have all been removed along with their settings. Planes fly and fight exactly as they do in vanilla Easy Red 2. Aircraft-bomb blast, crater, and suppression tuning stays in the ordnance system.
-- **The experimental AI commander is gone.** Easy Red 2's maps are balanced around continuous frontal pressure, and the commander's staged gating made attacks stall. Squads and vehicles now attack and defend under the game's own routing, with the infantry tactical layer unchanged.
-- **Close-quarters fights are deadlier.** Point-blank threats are identified faster than merely close ones, AI weapon spread tightens as the target gets closer, and heavy suppression can no longer shrink a soldier's awareness of an immediate threat below a configurable minimum.
-- **Shaped-charge warheads detonate on first contact.** Bazooka, Panzerschreck, Panzerfaust, and PIAT rounds no longer punch through fences and thin walls and re-appear as a fresh projectile on the far side.
-- **AI defenders man abandoned vehicle guns.** A soldier will take the gunner seat of an empty armed transport parked in their defend area, and give it up as soon as a player claims the vehicle.
+- **Large battles no longer accumulate the mod's catastrophic managed-GC stalls.** Short-lived interop objects are reclaimed progressively, expensive AI work is bounded and spread across frames, and both collectors use measured headroom instead of surprising a busy frame. The final maximum-AI validation contained none of the original 200-500 ms managed stalls and only 0.57 frames above 33 ms per 30 seconds.
+- **AI in your own squad is completely native again.** Every overhaul AI system now leaves player squadmates to Easy Red 2 and your orders, including when you switch soldiers or ride in an AI-driven tank. Other allied squads and enemy AI retain the overhaul.
+- **The optional flight model is strictly player-only and off by default.** It adds momentum, stalls, spins, energy loss, speed-dependent controls, damage-sensitive handling, and optional instruments only to aircraft you personally fly with realistic controls. AI and simplified controls remain native.
+- **Aircraft freelook keeps you in control.** While the right stick moves your view, the left stick can continue pitching and rolling the aircraft; low-speed rudder authority now also reflects propeller slipstream while becoming appropriately heavy at high speed.
+- **A lethal headshot now cuts immediately to black and silence.** The death panel and skip prompt remain visible, other deaths are unchanged, and the view and sound restore automatically when you regain control.
+- **Moving squads no longer abandon soldiers indefinitely in cover.** Combat halts are bounded whenever the squad still has somewhere to go, while genuine defensive holds remain indefinite.
+- **Multiplayer clients now receive the host's settings and complete destroyed-soldier cleanup correctly**, avoiding silent local-setting divergence and stale client squad members.
 
 ## What it fixes and improves
 
@@ -41,8 +43,11 @@ The goal is to fix those moments without replacing the game underneath them. Thi
 
 - **AI has better fire discipline.** Handheld and mounted weapons check for friendlies in the firing lane. Grenades require sensible range, a clear target area, and a per-soldier cooldown.
 - **Tanks behave more like armoured vehicles.** They hold useful fighting distances, reverse without exposing their rear, avoid pointless hull pivots, accelerate with more weight, and keep attacking when their orders call for pressure.
-- **Infantry respond more sensibly to armour.** Exposed riflemen can seek tank-masked cover, anti-tank troops hold their ground and wait for a practical launcher shot, and crews on valid defensive gun assignments do not abandon their weapons because a separate suppression reaction tried to dismount them.
+- **Infantry respond more sensibly to armour.** Riflemen hold their small-arms fire against a tank instead of plinking at it, anti-tank troops wait for a practical launcher shot rather than firing a rocket across the map, and crews on valid defensive gun assignments do not abandon their weapons because a separate suppression reaction tried to dismount them.
 - **Thin cover is no longer automatically bulletproof.** Material-aware penetration measures cover thickness and resistance, carries reduced projectile energy through suitable props, and preserves entry, exit, tracer, decal, and ricochet feedback. Terrain, bunkers, vehicle armour, and native armour penetration remain meaningful.
+- **Optional flight physics for your own aircraft.** Off by default. When enabled, planes you fly gain momentum, progressive stalls and spins, energy loss through hard manoeuvring, speed-dependent control authority, and damage-sensitive handling, with an optional compact instrument HUD. AI aircraft are never affected.
+- **Soldiers flinch when they shoot.** The game's own recoil system was never fed for anyone but the soldier you control, so riflemen fired without their posture moving at all. Every other soldier now takes a weapon kick scaled from that weapon's recoil stat. Cosmetic by default; an optional switch also lets recoil disturb their aim.
+- **Freelook no longer costs you the turn.** Holding the vehicle freelook button used to leave your aircraft with rudder only. The left stick now flies the plane for as long as you look — pitch and roll — while the right stick moves your head. Works in either stick layout and whether or not the flight model is enabled; rudder and throttle stand down on that stick only while you are actually manoeuvring.
 - **Explosions have more presence without simply inflating every damage value.** Artillery missions, bomb effects, fragmentation, suppression, smoke, dust, craters, and small-explosion ragdoll force are reworked separately so each can be tuned on its own.
 
 ### Smaller fixes and presentation options
@@ -51,6 +56,7 @@ The goal is to fix those moments without replacing the game underneath them. Thi
 - Allied multiplayer infantry can deliberately form one squad: open the player list, select a player, and choose **Join [player]'s squad**. Joining is per life and never happens automatically on spawn or respawn.
 - Configurable impact-decal lifetime, tracer frequency, battle chatter, distant sound shaping, weapon audio, tank engines, tracks, player footsteps, and rain/snow particle size, amount, and fall speed.
 - Adjustable player suppression effects—including a larger near-miss radius and optional depth-of-field blur—plus true 10x Caps Lock binocular zoom with the weapon model hidden, 200-degree hold-Alt freelook, first-person shadows, and allied multiplayer names when the rest of the HUD is hidden.
+- A bullet to the head that kills you cuts to black and silence instantly instead of leaving the death camera on your body, with the death panel still readable over it; every other death is unchanged, and sight and sound always return when you take control of a soldier again.
 - A map-north-aligned scrolling bottom-screen compass tape shown for five seconds with **K**, using NATO mils by default with optional degree bearings, tapered fading edges, and an option to keep it permanently visible.
 - A built-in settings menu with Apply, Cancel, reset controls, individual switches for nearly every system, and one-click Enable All / Disable All system kill switches.
 
@@ -76,7 +82,7 @@ The complete layer and marker reference is in [`docs/AI_VISUAL_DEBUG.md`](docs/A
 
 ## Coming soon
 
-Tank combat is the next major area being rebuilt. Tank ballistics, armour values, and internal vehicle subsystems are all being reworked for a future release. These changes are still work in progress and are not part of v1.0.4; for now, the mod leaves Easy Red 2's existing tank ballistics and armour model alone.
+Tank combat is the next major area being rebuilt. Tank ballistics, armour values, and internal vehicle subsystems are all being reworked for a future release. These changes are still work in progress and are not part of v1.0.5; for now, the mod leaves Easy Red 2's existing tank ballistics and armour model alone.
 
 ## Installation
 

@@ -26,7 +26,7 @@ internal static partial class ContactResponse
     /// the pose is decided. Every writer applies this result instead of proposing its
     /// own pose, so two systems can no longer disagree through the shared latch (the
     /// structural generator of the prone&lt;-&gt;crouch loops and blocked-upgrade stalls of
-    /// plans 004/008/012/013). The safety owners (required action, pinned/fire, tank-hide)
+    /// plans 004/008/012/013). The safety owners (required action, pinned/fire)
     /// are always recomputed; the interop-heavy DECISION tail (cover clearance/evaluation,
     /// suppression recovery, crouch owners) is resolved fresh when
     /// <paramref name="resolveDecisionTail"/> is true and otherwise reused from the
@@ -68,14 +68,7 @@ internal static partial class ContactResponse
             return SoldierPose.Prone;
         }
 
-        // c. Tank-hide danger prone / owned-cover hide (plan 013 bounded owner).
-        if (AiState.IsHidingFromTank(id, now) && !flameEvading)
-        {
-            owner = PoseOwner.TankHide;
-            return IsOnUsableCover(soldier) ? StationaryHoldPose(soldier) : SoldierPose.Prone;
-        }
-
-        // c2. The movement contract (plan 019). The committed movement decision from the
+        // c. The movement contract (plan 019). The committed movement decision from the
         // single movement write site is an INPUT here: when it is actually moving this
         // soldier, the pose is the movement pose and can never be Prone. This is resolved
         // ABOVE the stagger cache deliberately - it is two managed field reads, and a
@@ -209,7 +202,6 @@ internal static partial class ContactResponse
         {
             PoseOwner.RequiredAction => "required-action",
             PoseOwner.Suppression => "pinned-fire",
-            PoseOwner.TankHide => "tank-hide",
             PoseOwner.MovementPose => "movement",
             PoseOwner.CoverClearance => "cover-clearance",
             PoseOwner.CoverEvaluation => "cover-eval",

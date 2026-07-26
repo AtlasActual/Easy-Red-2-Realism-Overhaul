@@ -37,7 +37,6 @@ internal static partial class ContactResponse
              (state.ExposedReloadProneOwned || now < state.MovementStallHoldUntil)),
             flameEvading,
             state.SuppressionMovementOwned,
-            AiState.IsHidingFromTank(soldierId, now),
             now < state.HaltSpacingMoveUntil,
             // Deliberately NOT gated on ContactResponseEnabled: defensive-position control
             // (UpdateDefensivePosition / ShouldHoldDefensivePosition) runs its halts with
@@ -171,7 +170,26 @@ internal static partial class ContactResponse
             pose = state.HasLatchedTacticalPose ? state.LatchedTacticalPose : OwnerlessHaltPose;
         }
 
-        soldier.StopMove(pose, deltaTime);
+        // Idempotent within a frame: StopMove applies a deltaTime-scaled stop, so issuing
+        // it several times for one soldier in one frame is not just wasted native work,
+        // it applies that stop repeatedly. Re-write only when the frame or the pose
+        // actually changes — every distinct decision still reaches the game.
+        var frame = Time.frameCount;
+        if (state.LastStopMoveFrame != frame || state.LastStopMovePose != pose)
+        {
+            state.LastStopMoveFrame = frame;
+            state.LastStopMovePose = pose;
+            var __t = ModTimeProbe.Begin();
+            try
+            {
+                soldier.StopMove(pose, deltaTime);
+            }
+            finally
+            {
+                ModTimeProbe.EndSub(ModSubSite.StopMove, __t);
+            }
+        }
+
         return owner;
     }
 
@@ -180,8 +198,8 @@ internal static partial class ContactResponse
     /// long cooldown, a soldier about to freeze on top of an already-halted friendly
     /// takes one bounded lateral step off the threat axis first. An unreachable step
     /// means he halts anyway: this must never become a loop, and it must never become a
-    /// formation manager. Safety halts (burning, pinned, tank-hide) are deliberately
-    /// excluded - a man under armour or a burst does not walk sideways - and a soldier
+    /// formation manager. Safety halts (burning, pinned) are deliberately
+    /// excluded - a man under a burst does not walk sideways - and a soldier
     /// already committed to a cover route is excluded so the step cannot replace his
     /// destination.
     /// </summary>
@@ -305,7 +323,6 @@ internal static partial class ContactResponse
             MovementOwner.SafetyHalt => "safety-halt",
             MovementOwner.HazardEscape => "hazard-escape",
             MovementOwner.PinnedHold => "pinned-hold",
-            MovementOwner.TankHide => "tank-hide",
             MovementOwner.HaltSpacing => "halt-spacing",
             MovementOwner.EngagementHold => "engagement-hold",
             MovementOwner.CoverHold => "cover-hold",

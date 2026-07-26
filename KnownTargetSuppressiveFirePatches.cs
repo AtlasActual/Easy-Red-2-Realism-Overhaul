@@ -237,6 +237,15 @@ internal static class KnownTargetSuppressiveFire
             return;
         }
 
+        // Being granted locomotion is not the same as moving. This runs on the
+        // non-halted tail, so a soldier standing still there had his burst cancelled
+        // every frame while the FixedUpdate scheduler restarted it 50 times a second —
+        // and each cancel/restart pair is two native aim writes on a soldier who never
+        // actually went anywhere. Gate on the same predicate CanStart uses so the two
+        // sides cannot fight over one soldier.
+        if (!soldier.IsMoving(0.2f))
+            return;
+
         // This behavior owns a stationary machine-gun burst. Once locomotion
         // resumes, release its body-facing latch before native movement runs so
         // the soldier turns into the path instead of sliding sideways.

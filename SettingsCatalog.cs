@@ -17,6 +17,7 @@ internal enum SettingsMenuCategory
     BalanceAndAi,
     Infantry,
     Vehicles,
+    Aircraft,
     Battlefield,
     Audio,
     PlayerExperience,
@@ -75,10 +76,14 @@ internal static class SettingsCatalog
     {
         // These govern menu availability, diagnostic output, or presentation format;
         // they are not overhaul systems and must remain usable after Disable All.
+        "6c. Aircraft flight physics\u001fTelemetryLogging",
+        "6d. Aircraft instruments\u001fUseKnotsAndFeet",
+        "6d. Aircraft instruments\u001fShowAltitudeAboveGround",
         "7e. First-person view\u001fCompassUseMils",
         "7i. Settings menu\u001fShowLauncherButton",
         "AI - Diagnostics\u001fVisualDebugStartEnabled",
-        "AI - Diagnostics\u001fVerboseLogging"
+        "AI - Diagnostics\u001fVerboseLogging",
+        "AI - Diagnostics\u001fIncrementalGarbageCollection"
     };
 
     // Config-only knobs: bound so they are saved/loadable from the config file, but
@@ -87,7 +92,11 @@ internal static class SettingsCatalog
     private static readonly HashSet<string> ConfigOnlyIds = new(StringComparer.Ordinal)
     {
         "AI - Infantry tactics - Danger\u001fMaximumPinnedSeconds",
-        "AI - Infantry tactics - Danger\u001fPinnedImmunitySeconds"
+        "AI - Infantry tactics - Danger\u001fPinnedImmunitySeconds",
+        // Only meaningful at load time, so it must never look like a live toggle:
+        // keeping it out of All also keeps it out of Disable All and settings sync.
+        "AI - Diagnostics\u001fInstallGameplayPatches",
+        "AI - Diagnostics\u001fDeferredInteropHandleCleanup"
     };
 
     private static readonly Regex SectionPrefix = new(@"^\d+[a-z]?\.\s*", RegexOptions.Compiled);
@@ -115,6 +124,7 @@ internal static class SettingsCatalog
 
         "AI - Infantry tactics - Moving fire\u001fRestrictMovingFire",
         "AI - Infantry tactics - Moving fire\u001fSmgMaximumEngagementDistanceMeters",
+        "AI - Infantry tactics - Moving fire\u001fLauncherMaximumEngagementDistanceMeters",
 
         "AI - Infantry tactics - Suppression\u001fEnabled",
 
@@ -138,10 +148,6 @@ internal static class SettingsCatalog
         "2d. Melee combat\u001fImprovedHitRegistration",
         "2d. Melee combat\u001fForwardReachExtensionMeters",
         "2d. Melee combat\u001fMinimumSweepRadiusMeters",
-
-        "AI - Infantry tactics - Armor response\u001fEnabled",
-        "AI - Infantry tactics - Armor response\u001fRetreatDistanceMeters",
-        "AI - Infantry tactics - Armor response\u001fLauncherMaximumEngagementDistanceMeters",
 
         "AI - Vehicle tactics\u001fEnabled",
         "AI - Vehicle tactics\u001fStopAndEngageDistanceMeters",
@@ -169,6 +175,20 @@ internal static class SettingsCatalog
         "6. Ordnance effects\u001fEnhancedFragmentation",
         "6. Ordnance effects\u001fSmallExplosionAiThrowForceMultiplier",
 
+        "6c. Aircraft flight physics\u001fFreeLookSteering",
+        "6c. Aircraft flight physics\u001fEnabled",
+        "6c. Aircraft flight physics\u001fRealismStrength",
+        "6c. Aircraft flight physics\u001fWorldSpeedScale",
+        "6c. Aircraft flight physics\u001fEnginePowerMultiplier",
+        "6c. Aircraft flight physics\u001fEnergyRetentionEnabled",
+        "6c. Aircraft flight physics\u001fProgressiveStalls",
+        "6c. Aircraft flight physics\u001fDamageAffectsHandling",
+
+        "6d. Aircraft instruments\u001fEnabled",
+        "6d. Aircraft instruments\u001fHudScale",
+        "6d. Aircraft instruments\u001fUseKnotsAndFeet",
+        "6d. Aircraft instruments\u001fShowAltitudeAboveGround",
+
         "6e. Bullet penetration\u001fEnabled",
         "6e. Bullet penetration\u001fOrdinaryRoundPenetrationStrength",
         "6e. Bullet penetration\u001fArmorPiercingPropPenetrationStrength",
@@ -188,6 +208,7 @@ internal static class SettingsCatalog
 
         "7b. AI animation restraint\u001fLeaderOnlyOrderGestures",
 
+
         "AI - Infantry tactics - Battle chatter\u001fEnabled",
 
         "7d. Audio balance\u001fEnabled",
@@ -195,7 +216,6 @@ internal static class SettingsCatalog
         "7d. Audio balance\u001fTankTrackVolumeMultiplier",
         "7d. Audio balance\u001fWeaponFireVolumeMultiplier",
         "7d. Audio balance\u001fTankGunVolumeMultiplier",
-        "7d. Audio balance\u001fDistantSoundShapingEnabled",
         "7d. Audio balance\u001fPlayerFootstepVolumeMultiplier",
 
         "7e. First-person view\u001fPlayerShadowEnabled",
@@ -209,6 +229,7 @@ internal static class SettingsCatalog
         "7e. First-person view\u001fCompassAlwaysVisible",
         "7e. First-person view\u001fCompassKey",
         "7e. First-person view\u001fCompassUseMils",
+        "7e. First-person view\u001fHeadshotDeathBlackout",
 
         "7f. Multiplayer nameplates\u001fKeepPlayerNamesWithHudDisabled",
 
@@ -269,6 +290,7 @@ internal static class SettingsCatalog
         SettingsMenuCategory.BalanceAndAi => "Balance & AI",
         SettingsMenuCategory.Infantry => "Infantry",
         SettingsMenuCategory.Vehicles => "Vehicles",
+        SettingsMenuCategory.Aircraft => "Aircraft",
         SettingsMenuCategory.Battlefield => "Battlefield",
         SettingsMenuCategory.Audio => "Audio",
         SettingsMenuCategory.PlayerExperience => "Player Experience",
@@ -334,8 +356,6 @@ internal static class SettingsCatalog
 
     internal static string InferUnit(string key)
     {
-        if (key is "DistantReverbAmount")
-            return "0-1";
         if (key is "VehicleEngineSound")
             return "x";
         if (key.Contains("Seconds", StringComparison.OrdinalIgnoreCase))
@@ -468,6 +488,27 @@ internal static class SettingsCatalog
         "AircraftBombOuterDamage" => ("less outer damage", "more outer damage"),
         "BlastCoverEffectMultiplier" => ("cover protects more", "cover protects less"),
 
+        "RealismStrength" => ("more native handling", "stronger realism forces"),
+        "WorldSpeedScale" => ("slower aircraft", "faster aircraft"),
+        "FighterSpeedMultiplier" => ("slower fighters", "faster fighters"),
+        "BomberSpeedMultiplier" => ("slower bombers", "faster bombers"),
+        "NativeControlResponseMultiplier" => ("slower controls", "more immediate controls"),
+        "EngineResponseTimeMultiplier" => ("faster thrust response", "slower thrust response"),
+        "EnginePowerMultiplier" => ("less engine thrust", "more engine thrust"),
+        "ThrottleReductionResponseMultiplier" => ("quicker power reduction", "slower power reduction"),
+        "ManeuverEnergyLossMultiplier" => ("retain more energy", "lose more energy"),
+        "NativeCoastDragMultiplier" => ("coast longer", "slow down faster"),
+        "NativeVelocityLossMultiplier" => ("preserve physical momentum", "restore stock speed loss"),
+        "GlideEnergyLossMultiplier" => ("flatter glide", "steeper glide"),
+        "MaximumEnergyRetentionAcceleration" => ("weaker retention correction", "stronger retention correction"),
+        "StallRecoveryPitchAuthority" => ("less pitch control", "more pitch control"),
+        "StallRecoveryRollAuthority" => ("less roll control", "more roll control"),
+        "StallNoseDropStrength" => ("gentler nose drop", "stronger nose drop"),
+        "SpinStrength" => ("weaker spin forces", "stronger spin forces"),
+        "SpinRecoverySpeedMultiplier" => ("recover at lower speed", "need more recovery speed"),
+        "TelemetryIntervalSeconds" => ("log more often", "log less often"),
+        "HudScale" => ("smaller instrument HUD", "larger instrument HUD"),
+
         "MachineGunTracerRetention" => ("fewer tracers", "more tracers"),
         "HitDecalDurationSeconds" => ("decals clear sooner", "decals stay longer"),
         "VignetteMultiplier" => ("weaker dark vignette", "stronger dark vignette"),
@@ -488,10 +529,6 @@ internal static class SettingsCatalog
         "TankTrackVolumeMultiplier" => ("quieter tank tracks", "louder tank tracks"),
         "WeaponFireVolumeMultiplier" => ("quieter weapon fire", "louder weapon fire"),
         "TankGunVolumeMultiplier" => ("quieter tank guns", "louder tank guns"),
-        "DistantSoundStartDistanceMeters" => ("muffling starts closer", "muffling starts farther"),
-        "DistantSoundFullEffectDistanceMeters" => ("full muffling closer", "full muffling farther"),
-        "DistantSoundMinimumCutoffHz" => ("more muffled", "more crack and detail"),
-        "DistantReverbAmount" => ("drier distant sound", "more distant reverb"),
         "PlayerFootstepVolumeMultiplier" => ("quieter player footsteps", "louder player footsteps"),
         "HoldBreathZoomMultiplier" => ("weaker hold-breath zoom", "stronger hold-breath zoom"),
         "BinocularZoomMultiplier" => ("wider binocular view", "stronger binocular zoom"),
@@ -521,6 +558,9 @@ internal static class SettingsCatalog
             return SettingsMenuCategory.Infantry;
         if (section.StartsWith("4", StringComparison.Ordinal))
             return SettingsMenuCategory.Vehicles;
+        if (section.StartsWith("6c.", StringComparison.Ordinal) ||
+            section.StartsWith("6d.", StringComparison.Ordinal))
+            return SettingsMenuCategory.Aircraft;
         if (section.StartsWith("5", StringComparison.Ordinal) || section.StartsWith("6", StringComparison.Ordinal))
             return SettingsMenuCategory.Battlefield;
         if (section.StartsWith("7c.", StringComparison.Ordinal) ||

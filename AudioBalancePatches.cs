@@ -5,28 +5,6 @@ using UnityEngine;
 
 namespace ER2RealismOverhaul;
 
-[HarmonyPatch(typeof(ResourcesManager), nameof(ResourcesManager.SetUpDisabledReverbFilter))]
-internal static class ExistingReverbFilterSetupPatch
-{
-    [HarmonyPrefix]
-    private static bool Prefix(GameObject filterPos, ref AudioReverbFilter __result)
-    {
-        if (filterPos == null)
-            return true;
-
-        var existing = filterPos.GetComponent<AudioReverbFilter>();
-        if (existing == null)
-            return true;
-
-        // Unity permits only one AudioReverbFilter per GameObject. Distant sound
-        // shaping can create it before Easy Red 2 initializes the gun's native
-        // reverb, so return that component instead of letting the game attempt a
-        // duplicate AddComponent and then dereference its null result.
-        __result = existing;
-        return false;
-    }
-}
-
 [HarmonyPatch(typeof(AudioSource), nameof(AudioSource.Play), new Type[] { })]
 internal static class InvalidFirePositionAudioPlayPatch
 {
@@ -135,7 +113,6 @@ internal static class VehicleAudioBalance
 
         // Track loops use the same distant air absorption as engines, but
         // remain dry so continuous vehicle noise does not develop reverb.
-        DistantSoundShaper.Apply(source, false, false);
     }
 
     internal static void RestoreEngineVolume(MovableVehicle? vehicle)
@@ -153,7 +130,6 @@ internal static class VehicleAudioBalance
             vehicle.engine_source,
             EngineSources,
             Settings.VehicleEngineSound.Value);
-        DistantSoundShaper.Apply(vehicle.engine_source, false, false);
     }
 
     internal static void RefreshTrackedSources()
@@ -304,8 +280,6 @@ internal static class HandheldGunVolumePatch
             __instance.audioSource.volume = Mathf.Clamp01(
                 __instance.audioSource.volume * Settings.WeaponFireVolumeMultiplier.Value);
         }
-
-        DistantSoundShaper.Apply(__instance.audioSource);
     }
 }
 
@@ -338,8 +312,6 @@ internal static class TankGunVolumePatch
                     __instance.audioSource.volume * Settings.WeaponFireVolumeMultiplier.Value);
             }
         }
-
-        DistantSoundShaper.Apply(__instance.audioSource);
     }
 }
 
@@ -439,7 +411,6 @@ internal static class TankCannonAudioGain
         // companion in the same frame keeps both voices sample-close and makes
         // the slider's 1x-2x range audible instead of flattening at 1x.
         supplement.Play();
-        DistantSoundShaper.Apply(supplement);
     }
 
     private static SourceState GetState(AudioSource source)
@@ -489,347 +460,14 @@ internal static class TankCannonAudioGain
         supplement.maxDistance = source.maxDistance;
     }
 }
-
-[HarmonyPatch(typeof(ExplosionManager), "OnEnable")]
-internal static class ExplosionDistanceSoundPatch
-{
-    [HarmonyPostfix]
-    private static void Postfix(ExplosionManager __instance)
-    {
-        DistantSoundShaper.TrackExplosion(__instance);
-    }
-}
-
-internal static class DistantSoundShaper
-{
-    private const float NeutralCutoffHz = 22000f;
-    private const float ContinuousUpdateInterval = 0.25f;
-    // Explosion audio sources are static for the life of the pooled effect.  A
-    // full child-component walk ten times per second per explosion becomes very
-    // costly during artillery barrages, so refresh them at a human-inaudible
-    // cadence and spread concurrent effects across frames.
-    private const float ExplosionScanInterval = 0.35f;
-    private const int MaxExplosionAudioScansPerFrame = 2;
-    private static readonly Dictionary<int, AudioLowPassFilter> Filters = new();
-    private static readonly Dictionary<int, AudioReverbFilter> ReverbFilters = new();
-    private static bool _reverbFilterAvailable = true;
-    private static readonly Dictionary<int, float> NextUpdates = new();
-    private static readonly Dictionary<int, TrackedExplosion> TrackedExplosions = new();
-    private static readonly List<int> CompletedExplosions = new();
-    private static Camera? _listenerCamera;
-
-    private sealed class TrackedExplosion
-    {
-        internal ExplosionManager Manager = null!;
-        internal float ExpiresAt;
-        internal float NextScanAt;
-    }
-
-    internal static void TrackExplosion(ExplosionManager? manager)
-    {
-        if (manager == null)
-            return;
-
-        var duration = Mathf.Clamp(manager.max_distance / 300f + 1f, 4f, 15f);
-        TrackedExplosions[manager.GetInstanceID()] = new TrackedExplosion
-        {
-            Manager = manager,
-            ExpiresAt = Time.unscaledTime + duration,
-            NextScanAt = 0f
-        };
-    }
-
-    internal static void UpdateTrackedExplosions()
-    {
-        if (TrackedExplosions.Count == 0)
-            return;
-
-        var now = Time.unscaledTime;
-        var scansThisFrame = 0;
-        CompletedExplosions.Clear();
-        foreach (var pair in TrackedExplosions)
-        {
-            var tracked = pair.Value;
-            var manager = tracked.Manager;
-            if (manager == null || now >= tracked.ExpiresAt)
-            {
-                CompletedExplosions.Add(pair.Key);
-                continue;
-            }
-
-            if (now < tracked.NextScanAt || scansThisFrame >= MaxExplosionAudioScansPerFrame)
-                continue;
-            tracked.NextScanAt = now + ExplosionScanInterval;
-            scansThisFrame++;
-
-            try
-            {
-                var sources = manager.gameObject.GetComponentsInChildren<AudioSource>(true);
-                foreach (var source in sources)
-                    Apply(source);
-            }
-            catch (Exception ex)
-            {
-                Plugin.LogSource.LogWarning($"Explosion distance-audio scan failed: {ex.Message}");
-                CompletedExplosions.Add(pair.Key);
-            }
-        }
-
-        foreach (var id in CompletedExplosions)
-            TrackedExplosions.Remove(id);
-    }
-
-    internal static void Apply(
-        AudioSource? source,
-        bool forceUpdate = true,
-        bool addReflections = true)
-    {
-        if (source == null)
-            return;
-
-        var id = source.GetInstanceID();
-        if (!forceUpdate && NextUpdates.TryGetValue(id, out var nextUpdate) &&
-            Time.unscaledTime < nextUpdate)
-        {
-            return;
-        }
-
-        NextUpdates[id] = Time.unscaledTime + ContinuousUpdateInterval;
-
-        if (!Settings.AudioBalanceEnabled.Value || !Settings.DistantSoundShapingEnabled.Value)
-        {
-            DisableOwnedEffects(id);
-            return;
-        }
-
-        if (_listenerCamera == null)
-            _listenerCamera = Camera.main;
-        if (_listenerCamera == null)
-        {
-            DisableOwnedEffects(id);
-            return;
-        }
-
-        var startDistance = Settings.DistantSoundStartDistance.Value;
-        var fullEffectDistance = Mathf.Max(
-            startDistance + 1f,
-            Settings.DistantSoundFullEffectDistance.Value);
-        var distance = Vector3.Distance(
-            source.transform.position,
-            _listenerCamera.transform.position);
-        var amount = Mathf.InverseLerp(startDistance, fullEffectDistance, distance);
-        amount = amount * amount * (3f - 2f * amount);
-
-        if (amount <= 0.001f)
-        {
-            DisableOwnedEffects(id);
-            return;
-        }
-
-        if (!Filters.TryGetValue(id, out var filter) || filter == null)
-        {
-            filter = source.gameObject
-                .AddComponent(Il2CppType.Of<AudioLowPassFilter>())
-                .Cast<AudioLowPassFilter>();
-            Filters[id] = filter;
-        }
-
-        // Logarithmic interpolation gives audible air absorption through the
-        // middle distance without abruptly muffling sounds at the threshold.
-        var minimumCutoff = Settings.DistantSoundMinimumCutoff.Value;
-        filter.cutoffFrequency = Mathf.Exp(Mathf.Lerp(
-            Mathf.Log(NeutralCutoffHz),
-            Mathf.Log(minimumCutoff),
-            amount));
-        filter.lowpassResonanceQ = 1f;
-        filter.enabled = true;
-
-        ConfigureReflections(source, id, amount, addReflections);
-    }
-
-    private static void ConfigureReflections(
-        AudioSource source,
-        int sourceId,
-        float distanceAmount,
-        bool addReflections)
-    {
-        var reverbAmount = addReflections
-            ? Settings.DistantReverbAmount.Value * distanceAmount
-            : 0f;
-        if (reverbAmount > 0.001f && _reverbFilterAvailable)
-        {
-            try
-            {
-                if (!ReverbFilters.TryGetValue(sourceId, out var reverb) || reverb == null)
-                {
-                    reverb = source.gameObject.GetComponent<AudioReverbFilter>();
-                    if (reverb == null)
-                    {
-                        reverb = source.gameObject
-                            .AddComponent(Il2CppType.Of<AudioReverbFilter>())
-                            .Cast<AudioReverbFilter>();
-                    }
-
-                    reverb.reverbPreset = AudioReverbPreset.User;
-                    reverb.dryLevel = 0f;
-                    reverb.room = -700f;
-                    reverb.roomHF = -2800f;
-                    reverb.roomLF = -300f;
-                    reverb.decayTime = 2.2f;
-                    reverb.decayHFRatio = 0.55f;
-                    reverb.reflectionsLevel = -1800f;
-                    reverb.reflectionsDelay = 0.04f;
-                    reverb.reverbDelay = 0.06f;
-                    reverb.diffusion = 65f;
-                    reverb.density = 45f;
-                    reverb.hfReference = 5000f;
-                    reverb.lfReference = 250f;
-                    ReverbFilters[sourceId] = reverb;
-                }
-
-                reverb.reverbLevel = Mathf.Lerp(
-                    -3500f,
-                    -500f,
-                    Mathf.Sqrt(reverbAmount));
-                reverb.enabled = true;
-            }
-            catch (Exception)
-            {
-                // Reverb is optional as well and can be absent from stripped players.
-                _reverbFilterAvailable = false;
-                ReverbFilters.Clear();
-            }
-        }
-        else
-        {
-            DisableReverb(sourceId);
-        }
-    }
-
-    private static void DisableOwnedEffects(int sourceId)
-    {
-        if (Filters.TryGetValue(sourceId, out var filter) && filter != null)
-            filter.enabled = false;
-
-        DisableReverb(sourceId);
-    }
-
-    private static void DisableReverb(int sourceId)
-    {
-        if (ReverbFilters.TryGetValue(sourceId, out var reverb) && reverb != null)
-            reverb.enabled = false;
-    }
-
-    internal static int FilterCount => Filters.Count;
-    internal static int ReverbFilterCount => ReverbFilters.Count;
-    internal static int NextUpdateCount => NextUpdates.Count;
-
-    // NextUpdates stores only a throttle timestamp (last apply + interval) per source
-    // id; an entry not refreshed for this long belongs to a despawned source.
-    private const float StaleNextUpdateSeconds = 30f;
-    private static readonly List<int> StaleAudioIds = new();
-
-    // Filters/ReverbFilters attach mod-created AudioLowPassFilter/AudioReverbFilter
-    // components to per-source (per-weapon, per-vehicle, per-explosion) GameObjects and
-    // key them by the source instance id. Nothing removed them when the source
-    // despawned, so every audio source ever heard near the listener pinned a filter
-    // wrapper for the whole session. Sweep the ones whose native component is gone.
-    internal static void SweepStaleSources(float now)
-    {
-        SweepDeadFilters();
-        SweepDeadReverbFilters();
-
-        StaleAudioIds.Clear();
-        foreach (var pair in NextUpdates)
-        {
-            if (now - pair.Value > StaleNextUpdateSeconds)
-                StaleAudioIds.Add(pair.Key);
-        }
-
-        foreach (var id in StaleAudioIds)
-            NextUpdates.Remove(id);
-    }
-
-    internal static void ClearSources()
-    {
-        Filters.Clear();
-        ReverbFilters.Clear();
-        NextUpdates.Clear();
-    }
-
-    private static void SweepDeadFilters()
-    {
-        StaleAudioIds.Clear();
-        foreach (var pair in Filters)
-        {
-            // pair.Value's static type is AudioLowPassFilter, so == uses Unity's
-            // destroyed-object overload (a generic helper would not).
-            var dead = true;
-            try
-            {
-                dead = pair.Value == null;
-            }
-            catch (NullReferenceException)
-            {
-            }
-            catch (Il2CppInterop.Runtime.Il2CppException)
-            {
-            }
-            catch (Il2CppInterop.Runtime.ObjectCollectedException)
-            {
-            }
-
-            if (dead)
-                StaleAudioIds.Add(pair.Key);
-        }
-
-        foreach (var id in StaleAudioIds)
-            Filters.Remove(id);
-    }
-
-    private static void SweepDeadReverbFilters()
-    {
-        StaleAudioIds.Clear();
-        foreach (var pair in ReverbFilters)
-        {
-            var dead = true;
-            try
-            {
-                dead = pair.Value == null;
-            }
-            catch (NullReferenceException)
-            {
-            }
-            catch (Il2CppInterop.Runtime.Il2CppException)
-            {
-            }
-            catch (Il2CppInterop.Runtime.ObjectCollectedException)
-            {
-            }
-
-            if (dead)
-                StaleAudioIds.Add(pair.Key);
-        }
-
-        foreach (var id in StaleAudioIds)
-            ReverbFilters.Remove(id);
-    }
-}
-
-/// <summary>
-/// Bounds native-heap growth from the audio-source-keyed caches in this file. Each is
-/// keyed by an AudioSource/gun/vehicle instance id that respawns constantly (dead
-/// soldiers, destroyed vehicles), and several store managed wrappers (AudioSource,
-/// AudioLowPassFilter, AudioReverbFilter) that pin the native object via GCHandle.
-/// Without pruning they accumulate one pinned wrapper per entity ever heard, driving
-/// the monotonic IL2CPP heap growth. A periodic liveness sweep (driven every frame by
-/// AtmosphericParticlePersistenceController, gated to a coarse cadence) drops entries
-/// whose wrapper was destroyed; battle reset clears everything.
-/// </summary>
 internal static class AudioSourceCacheMaintenance
 {
     private const float SweepIntervalSeconds = 10f;
     private static float _nextSweepAt;
+
+    // Slow enough to matter is anything a player could perceive as a hitch; the sweep is
+    // supposed to be bookkeeping over a few hundred cache entries.
+    private const float SlowSweepMs = 5f;
 
     internal static void Update(float now)
     {
@@ -837,9 +475,37 @@ internal static class AudioSourceCacheMaintenance
             return;
         _nextSweepAt = now + SweepIntervalSeconds;
 
+        // This runs from a MonoBehaviour rather than a Harmony patch, so it never landed
+        // in the probe's mod total: a periodic all-at-once sweep of every cached audio
+        // source was invisible in every measurement taken so far. It walks hundreds of
+        // entries and each liveness test is an interop call, and it fires on ONE frame
+        // every SweepIntervalSeconds — exactly the shape of a stutter that recurs on a
+        // fixed period.
+        var begin = System.Diagnostics.Stopwatch.GetTimestamp();
+
         VehicleAudioBalance.SweepStaleSources();
         TankCannonAudioGain.SweepStaleSources();
-        DistantSoundShaper.SweepStaleSources(now);
+        // Weapon-trait cache: keyed by pointer, so it is dropped on the same cadence to
+        // bound how long a reused address could carry a stale classification.
+        HandheldWeaponClassifier.ClearCache();
+        // Vehicle tank/faction caches, keyed by instance id. These had no eviction at all
+        // and grew for the whole battle as vehicles were destroyed and replaced.
+        SoldierSequentialUpdatePatch.ClearVehicleCaches();
+        // Pooled-object decal lookups, also keyed by instance id.
+        HitDecalPoolDurationPatch.ClearCache();
+
+        if (!Settings.StutterProbeEnabled.Value)
+            return;
+
+        var elapsedMs = (System.Diagnostics.Stopwatch.GetTimestamp() - begin) *
+                        (1000f / System.Diagnostics.Stopwatch.Frequency);
+        if (elapsedMs >= SlowSweepMs)
+        {
+            Plugin.LogSource.LogWarning(
+                $"Audio cache sweep took {elapsedMs:F1}ms (every {SweepIntervalSeconds:F0}s): " +
+                $"vehTrack={VehicleAudioBalance.TrackSourceCount}, " +
+                $"vehEngine={VehicleAudioBalance.EngineSourceCount}, cannon={TankCannonAudioGain.SourceCount}.");
+        }
     }
 
     internal static void ResetBattle()
@@ -847,7 +513,7 @@ internal static class AudioSourceCacheMaintenance
         _nextSweepAt = 0f;
         VehicleAudioBalance.ClearSources();
         TankCannonAudioGain.ClearSources();
-        DistantSoundShaper.ClearSources();
+        HandheldWeaponClassifier.ClearCache();
     }
 }
 
