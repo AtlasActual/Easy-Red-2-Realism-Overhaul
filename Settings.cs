@@ -228,7 +228,6 @@ internal static class Settings
 
     internal static ConfigEntry<bool> StutterProbeEnabled = null!;
     internal static ConfigEntry<bool> InstallGameplayPatches = null!;
-    internal static ConfigEntry<bool> DeferredInteropHandleCleanupEnabled = null!;
     internal static ConfigEntry<bool> IncrementalGarbageCollectionEnabled = null!;
     internal static ConfigEntry<int> IncrementalGarbageCollectionSliceMicroseconds = null!;
 
@@ -648,7 +647,7 @@ internal static class Settings
             "Cuts the screen to black and drops all sound to zero the instant a bullet to the head kills you, instead of the death camera lingering on your body. Other deaths are unchanged, and the view and sound always return when you take control of a soldier again, or within a few seconds at the latest.");
 
         KeepMultiplayerPlayerNamesWithHudDisabled = config.Bind("7f. Multiplayer nameplates", "KeepPlayerNamesWithHudDisabled", true,
-            "Keeps names above living allied remote players in multiplayer when the base-game HUD is disabled. Enemy and local-player names remain hidden.");
+            "Keeps names above living allied remote players in multiplayer when the base-game HUD or 3D markers are disabled. Enemy and local-player names remain hidden.");
 
         KeepHighQualityDistantAnimations = config.Bind("7h. Animation quality", "KeepHighQualityDistantAnimations", true,
             "Keeps visible distant soldiers at the full animation refresh rate instead of using distance-based animation throttling. This can reduce performance in large battles.");
@@ -674,16 +673,10 @@ internal static class Settings
         StutterProbeEnabled = config.Bind("AI - Diagnostics", "StutterProbeEnabled", false,
             "Logs one line whenever a frame takes far longer than the recent average, recording which mod systems coincided with the spike, plus a frame-time distribution every 30 seconds. Diagnostic-only; disable once stutter hunting is finished.");
 
-        DeferredInteropHandleCleanupEnabled = config.Bind(
-            "AI - Diagnostics",
-            "DeferredInteropHandleCleanup",
-            true,
-            "Prevents large battles from putting hundreds of thousands of transient IL2CPP wrappers on .NET's finalizer queue. Native handles are reclaimed incrementally on a background worker after collection instead of contending with the game thread. Requires a game restart to take effect; disable only as a compatibility fallback.");
-
-        IncrementalGarbageCollectionEnabled = config.Bind("AI - Diagnostics", "IncrementalGarbageCollection", true,
-            "Uses measured spare time after fast frames to keep both garbage collectors out of the visible tail: it advances Unity's incremental collector and requests a small managed Gen0 collection before interop weak handles accumulate into a long scan. Unity work stands down under VSync, and neither collector is invoked after a frame that is already busy. Has no effect if this game build does not support incremental collection.");
-        IncrementalGarbageCollectionSliceMicroseconds = config.Bind("AI - Diagnostics", "IncrementalGarbageCollectionSliceMicroseconds", 3000,
-            new ConfigDescription("Maximum length of Unity's automatic garbage-collection step, in microseconds. The default 3000 microseconds is recommended. The adaptive assist leaves this engine setting intact and caps its own extra steps at 1000 microseconds after fast frames. Setting the engine slice too short can prevent the collector from keeping up and make it fall back to a long full pass.", new AcceptableValueRange<int>(1000, 5000)));
+        IncrementalGarbageCollectionEnabled = config.Bind("AI - Diagnostics", "IncrementalGarbageCollection", false,
+            "Asks the game engine to collect garbage in small timed slices rather than in one pass. The engine's own memory cleanup is the largest remaining source of frame hitches in long or very large battles, and a single pass can pause the game for tens of milliseconds. Slicing it trades a little overall throughput for a much shorter worst-case pause. Has no effect if the game was not built with incremental collection; the log says which on the first battle.");
+        IncrementalGarbageCollectionSliceMicroseconds = config.Bind("AI - Diagnostics", "IncrementalGarbageCollectionSliceMicroseconds", 400,
+            new ConfigDescription("How long the engine may spend reclaiming memory each frame, in microseconds, when incremental collection is on. Judge it against your frame time, not in isolation: at 200 frames per second a frame lasts only 5000 microseconds, so a 3000 microsecond slice spends more than half of every frame collecting and makes the game jerkier overall even though it removes the large pauses. Raise it only if memory still builds up faster than it is reclaimed.", new AcceptableValueRange<int>(100, 10000)));
 
         InstallGameplayPatches = config.Bind("AI - Diagnostics", "InstallGameplayPatches", true,
             "Master switch. Set to false to make the mod load but install no gameplay patches at all, so it cannot affect performance or behavior. Turning individual systems off still leaves their patches installed, so this is the only way to rule the mod out as a stutter cause without uninstalling it. Requires a game restart to take effect.");

@@ -1,24 +1,25 @@
 namespace ER2RealismOverhaul;
 
-using UnityEngine;
-
 internal static class MultiplayerAuthority
 {
     private static bool _loggedFailure;
-    private static bool _cachedAuthority;
-    private static float _nextCheckAt = -1f;
 
     internal static bool CanMutateGameplay()
     {
         try
         {
-            var now = Time.unscaledTime;
-            if (now < _nextCheckAt)
-                return _cachedAuthority;
-
-            _nextCheckAt = now + 0.25f;
-            _cachedAuthority = !Lua_API.isOnline() || Lua_API.isMasterClient();
-            return _cachedAuthority;
+            // Lua_API.isOnline() is only PhotonNetwork.InRoom. During a real
+            // multiplayer battle load it therefore reports "offline" while Photon
+            // is still joining, which used to authorize every gameplay patch on a
+            // remote client. MatchData records the multiplayer intent before that
+            // transition starts, so fail closed until the room is established and
+            // then permit only its master client.
+            var matchData = MatchData.data;
+            var multiplayerIntent = matchData != null && matchData.isMultiplayer;
+            return GroundAuthorityCore.CanMutate(
+                multiplayerIntent,
+                Photon.Pun.PhotonNetwork.InRoom,
+                Photon.Pun.PhotonNetwork.IsMasterClient);
         }
         catch (Exception ex)
         {

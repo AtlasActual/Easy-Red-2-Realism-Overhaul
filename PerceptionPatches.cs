@@ -356,8 +356,6 @@ internal static class GunfireAwarenessBattleResetPatch
     [HarmonyPrefix]
     private static void Prefix()
     {
-        InteropWrapperLifetime.ResetBattle();
-        AiOwnership.ResetBattle();
         GunfireAwareness.ResetBattle();
         MountedGunnerSuppression.ResetBattle();
         KnownTargetSuppressiveFire.ResetBattle();
@@ -652,7 +650,6 @@ internal static class IncomingFireOrientationPatch
     [HarmonyPostfix]
     private static void Postfix(SoldierAI __instance)
     {
-        InteropWrapperLifetime.Retain(__instance);
         var __t = ModTimeProbe.Begin();
         var __a = ModTimeProbe.BeginAlloc();
         try
@@ -863,7 +860,6 @@ internal static class SoldierSequentialUpdatePatch
     [HarmonyPrefix]
     private static void Prefix(SoldierAI __instance)
     {
-        InteropWrapperLifetime.Retain(__instance);
         var __t = ModTimeProbe.Begin();
         try
         {

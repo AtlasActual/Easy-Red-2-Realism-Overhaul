@@ -95,8 +95,7 @@ internal static class SettingsCatalog
         "AI - Infantry tactics - Danger\u001fPinnedImmunitySeconds",
         // Only meaningful at load time, so it must never look like a live toggle:
         // keeping it out of All also keeps it out of Disable All and settings sync.
-        "AI - Diagnostics\u001fInstallGameplayPatches",
-        "AI - Diagnostics\u001fDeferredInteropHandleCleanup"
+        "AI - Diagnostics\u001fInstallGameplayPatches"
     };
 
     private static readonly Regex SectionPrefix = new(@"^\d+[a-z]?\.\s*", RegexOptions.Compiled);

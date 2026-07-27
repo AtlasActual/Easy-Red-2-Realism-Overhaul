@@ -244,7 +244,6 @@ internal static class SoldierTacticalSprintPatch
         ref bool sprint,
         bool updateFireInhibitionOnPass)
     {
-        InteropWrapperLifetime.Retain(ai);
         ModTimeProbe.Stage(TacticalStage.PrefixEntry);
         // Measures only the opening block — the instance marshalling this method was
         // entered with, GetSoldier, and the ownership tests. Compared against the
@@ -277,7 +276,7 @@ internal static class SoldierTacticalSprintPatch
         {
             ModTimeProbe.Stage(TacticalStage.FireDanger);
             sprint = false;
-            soldier.StopFire();
+            ContactResponse.ExecuteStopFire(soldier);
             ContactResponse.StopDangerMovement(ai, soldier, deltaTime);
             return false;
         }
@@ -563,7 +562,6 @@ internal static class SoldierAiDestroyPatch
     {
         try
         {
-            InteropWrapperLifetime.Release(__instance);
             var soldier = __instance.GetSoldier();
             if (soldier != null)
                 AiState.RemoveSoldier(soldier);

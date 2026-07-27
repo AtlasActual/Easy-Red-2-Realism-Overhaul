@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Reflection;
 using System.Text;
 using HarmonyLib;
 using Il2CppInterop.Runtime;
@@ -89,13 +88,7 @@ internal enum SequentialStage
     DirectorSuppressionReaction,
     DirectorSuppressiveSchedule,
     DirectorMovementExecutor,
-    DirectorHazard,
-    DirectorMovementWatchdog,
-    DirectorPose,
-    DirectorAntiArmor,
-    DirectorWeaponRange,
-    DirectorFireDecision,
-    DirectorBattleChatter
+    DirectorHazard
 }
 
 internal enum ModSubSite
@@ -554,11 +547,10 @@ internal static class StutterProbe
     private static float _nextLogAllowedAt;
     private static float _nextCacheCensusAt;
     private static int _lastSoldierCount = -1;
-    private static long _lastIl2CppUsedBytes = -1;
-    // Managed bytes allocated on the game thread. The game itself is IL2CPP/native, so
-    // nearly all of this is the mod or Il2CppInterop marshalling on its behalf. The
-    // collection counters and GCMemoryInfo below establish whether a hitch actually
-    // coincided with managed collection; allocation volume alone does not establish cause.
+    // Managed bytes allocated on the game thread. The game itself is il2cpp/native, so
+    // essentially every managed allocation here is the mod or Il2CppInterop marshalling
+    // on its behalf — which makes this the direct measure of what feeds the gen0
+    // collections that every observed spike frame coincides with.
     private static long _lastAllocatedBytes = -1;
     private static double _intervalAllocBytes;
 
@@ -569,42 +561,28 @@ internal static class StutterProbe
     private static float _lastSpikeAt = -1f;
     private static int _intervalSpikes;
 
-    // Managed exceptions THROWN, caught or not. Several hot paths deliberately recover
-    // from disappearing native objects, so log output alone cannot show whether an
-    // exception storm coincided with a hitch. This counter is installed only while the
-    // probe is enabled because FirstChanceException is process-wide diagnostic overhead.
+    // Managed exceptions THROWN, caught or not. Unwinding one back through il2cpp frames
+    // costs far more than a normal return and allocates the exception plus its stack
+    // trace — which is exactly the observed spike shape: every site slowed, no single
+    // call catastrophic, and allocation an order of magnitude over baseline (44-62KB
+    // against 3.5KB). Every hot path here swallows its own NullReference/Il2Cpp/
+    // ObjectCollected exceptions, so nothing else would ever reveal them.
     private static long _exceptionsTotal;
     private static long _lastFrameExceptionTotal;
     private static long _intervalExceptions;
-    private static bool _exceptionCounterInstalled;
-    private static bool _exceptionCounterUnavailable;
-    private static readonly EventHandler<System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs>
-        ExceptionCounter = (_, _) => Interlocked.Increment(ref _exceptionsTotal);
 
-    private static void SetExceptionCounterEnabled(bool enabled)
+    internal static void InstallExceptionCounter()
     {
-        if (_exceptionCounterUnavailable || enabled == _exceptionCounterInstalled)
-            return;
-
         try
         {
-            if (enabled)
-                AppDomain.CurrentDomain.FirstChanceException += ExceptionCounter;
-            else
-                AppDomain.CurrentDomain.FirstChanceException -= ExceptionCounter;
-            _exceptionCounterInstalled = enabled;
+            AppDomain.CurrentDomain.FirstChanceException += (_, _) => _exceptionsTotal++;
         }
         catch (Exception ex)
         {
-            _exceptionCounterUnavailable = true;
-            Plugin.LogSource.LogWarning($"Could not change exception counter state: {ex.Message}");
+            Plugin.LogSource.LogWarning($"Could not install exception counter: {ex.Message}");
         }
     }
-
     private static readonly int[] LastGcCounts = new int[3];
-    private static readonly object? InteropObjectPoolCache = ResolveInteropObjectPoolCache();
-    private static readonly PropertyInfo? InteropObjectPoolCount =
-        InteropObjectPoolCache?.GetType().GetProperty("Count", BindingFlags.Instance | BindingFlags.Public);
 
     // Reused every frame by ModTimeProbe.Drain so the drain never allocates. Length
     // matches the site-tick buffer; the string breakdown is built only on spike frames.
@@ -693,9 +671,7 @@ internal static class StutterProbe
         var hitches = FramesAtLeast(hitchFloorMs);
 
         var sb = new StringBuilder();
-        sb.Append("Frame census: utc=").Append(DateTime.UtcNow.ToString("O"))
-            .Append("; qpc=").Append(Stopwatch.GetTimestamp())
-            .Append("; ").Append(_intervalFrames).Append(" frames in ")
+        sb.Append("Frame census: ").Append(_intervalFrames).Append(" frames in ")
             .Append(_intervalSeconds.ToString("F1")).Append("s (avg ")
             .Append((_intervalSeconds * 1000f / _intervalFrames).ToString("F1")).Append("ms); p50 ")
             .Append(median.ToString("F1")).Append("ms; p95 ")
@@ -752,21 +728,12 @@ internal static class StutterProbe
     private static void LogCacheCensus()
     {
         var il2cppUsed = IL2CPP.il2cpp_gc_get_used_size();
-        var gcInfo = GC.GetGCMemoryInfo();
         Plugin.LogSource.LogInfo(
             "Cache census: il2cppHeap " + (il2cppUsed / 1048576f).ToString("F1") + "MB; " +
             "managedHeap " + (GC.GetTotalMemory(false) / 1048576f).ToString("F1") + "MB; " +
-            "gcMode " + System.Runtime.GCSettings.LatencyMode +
-            " server=" + System.Runtime.GCSettings.IsServerGC + "; " +
-            "lastGc index=" + gcInfo.Index +
-            " gen=" + gcInfo.Generation +
-            " finalizers=" + gcInfo.FinalizationPendingCount +
-            " pinned=" + gcInfo.PinnedObjectsCount + "; " +
+            "gcMode " + System.Runtime.GCSettings.LatencyMode + "; " +
             "engineGc " + IncrementalGarbageCollection.DescribeState() + "; " +
             ModTimeProbe.DescribeAllocation() + "; caches: " +
-            "interopPool=" + GetInteropObjectPoolCount() +
-            ",retainedInterop=" + InteropWrapperLifetime.Count +
-            ",deferredInterop=" + InteropFinalizerReaper.DescribeState() +
             ",vehTrack=" + VehicleAudioBalance.TrackSourceCount +
             ",vehEngine=" + VehicleAudioBalance.EngineSourceCount +
             ",cannon=" + TankCannonAudioGain.SourceCount +
@@ -776,9 +743,7 @@ internal static class StutterProbe
 
     internal static void Update()
     {
-        var enabled = Settings.StutterProbeEnabled.Value;
-        SetExceptionCounterEnabled(enabled);
-        if (!enabled)
+        if (!Settings.StutterProbeEnabled.Value)
         {
             _lastFrameAt = -1f;
             return;
@@ -813,9 +778,8 @@ internal static class StutterProbe
         var allocDelta = _lastAllocatedBytes >= 0 ? allocatedBytes - _lastAllocatedBytes : 0;
         _lastAllocatedBytes = allocatedBytes;
 
-        var exceptionsTotal = Interlocked.Read(ref _exceptionsTotal);
-        var frameExceptions = exceptionsTotal - _lastFrameExceptionTotal;
-        _lastFrameExceptionTotal = exceptionsTotal;
+        var frameExceptions = _exceptionsTotal - _lastFrameExceptionTotal;
+        _lastFrameExceptionTotal = _exceptionsTotal;
         _intervalExceptions += frameExceptions;
 
         RecordFrame(frameSeconds, modMs, modCalls, allocDelta);
@@ -862,13 +826,6 @@ internal static class StutterProbe
         var soldiersDelta = _lastSoldierCount >= 0 ? soldiers - _lastSoldierCount : 0;
         _lastSoldierCount = soldiers;
 
-        // The game-side IL2CPP (Boehm) collector is invisible to System.GC — its
-        // world-stop pauses are the one stutter source no managed counter shows.
-        // A used-size DROP across a spike frame means it collected during it.
-        var il2cppUsed = IL2CPP.il2cpp_gc_get_used_size();
-        var il2cppDelta = _lastIl2CppUsedBytes >= 0 ? il2cppUsed - _lastIl2CppUsedBytes : 0;
-        _lastIl2CppUsedBytes = il2cppUsed;
-
         var spike = frameSeconds >= Mathf.Max(MinimumSpikeSeconds, _smoothedFrameSeconds * SpikeFactor);
         // Spikes are excluded from the average so one hitch cannot raise the
         // baseline and hide the next one.
@@ -904,18 +861,10 @@ internal static class StutterProbe
         var staggerSkips = frame - ContactResponse.LastStaggerSkipFrame <= 1
             ? ContactResponse.LastStaggerSkipCount
             : 0;
-        var managedGc = gcDelta0 + gcDelta1 + gcDelta2 > 0
-            ? DescribeLatestManagedCollection()
-            : "none this frame";
 
         Plugin.LogSource.LogInfo(
-            $"Stutter probe: utc={DateTime.UtcNow:O}; qpc={Stopwatch.GetTimestamp()}; " +
-            $"frame {frameSeconds * 1000f:F0}ms (recent avg {_smoothedFrameSeconds * 1000f:F1}ms); " +
-            $"GC {gcDelta0}/{gcDelta1}/{gcDelta2} [{managedGc}]; " +
-            $"engineGcAssist=[{IncrementalGarbageCollection.DescribeFrameAssist()}]; " +
-            $"il2cppHeap {il2cppUsed / 1048576f:F1}MB (delta {il2cppDelta / 1048576f:+0.0;-0.0;0}MB); " +
-            $"interopPool={GetInteropObjectPoolCount()}; retainedInterop={InteropWrapperLifetime.Count}; " +
-            $"deferredInterop={InteropFinalizerReaper.DescribeState()}; " +
+            $"Stutter probe: frame {frameSeconds * 1000f:F0}ms (recent avg {_smoothedFrameSeconds * 1000f:F1}ms); " +
+            $"GC {gcDelta0}/{gcDelta1}/{gcDelta2}; " +
             $"coverSearch={coverSearchCoincided}; " +
             $"casualtyBatch={casualtyBatch}; explosions={explosions}; " +
             $"postureEvals={postureEvals}; " +
@@ -927,56 +876,6 @@ internal static class StutterProbe
             $"modMs={modMs:F1} (sites: {BuildSiteBreakdown(SiteMsScratch)}; " +
             $"maxSoldier={maxTacticalCallMs:F1}ms; maxSeq={maxSequentialCallMs:F1}ms; " +
             $"sub: {modSubTop}={modSubTopMs:F1}ms)");
-    }
-
-    private static object? ResolveInteropObjectPoolCache()
-    {
-        try
-        {
-            return typeof(Il2CppInterop.Runtime.Runtime.Il2CppObjectPool)
-                .GetField("s_cache", BindingFlags.NonPublic | BindingFlags.Static)
-                ?.GetValue(null);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static int GetInteropObjectPoolCount()
-    {
-        try
-        {
-            return InteropObjectPoolCache != null && InteropObjectPoolCount != null
-                ? (int)(InteropObjectPoolCount.GetValue(InteropObjectPoolCache) ?? -1)
-                : -1;
-        }
-        catch
-        {
-            return -1;
-        }
-    }
-
-    private static string DescribeLatestManagedCollection()
-    {
-        try
-        {
-            var info = GC.GetGCMemoryInfo();
-            var pauses = info.PauseDurations;
-            var pauseMs = 0d;
-            for (var index = 0; index < pauses.Length; index++)
-                pauseMs += pauses[index].TotalMilliseconds;
-
-            return $"index={info.Index},gen={info.Generation},pause={pauseMs:F1}ms," +
-                   $"finalizers={info.FinalizationPendingCount},pinned={info.PinnedObjectsCount}," +
-                   $"promoted={info.PromotedBytes / 1048576d:F1}MB," +
-                   $"heap={info.HeapSizeBytes / 1048576d:F1}MB," +
-                   $"concurrent={info.Concurrent}";
-        }
-        catch (Exception ex)
-        {
-            return "unavailable:" + ex.GetType().Name;
-        }
     }
 }
 

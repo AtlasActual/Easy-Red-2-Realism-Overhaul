@@ -128,7 +128,6 @@ internal static class AiState
     /// </summary>
     internal static void RemoveSoldierById(int id, IntPtr soldierToken)
     {
-        InteropWrapperLifetime.Release(soldierToken);
         BattleChatterStates.Remove(id);
         SoldierFactions.Remove(id);
         GunfireAwareness.RemoveShooter(id, soldierToken);

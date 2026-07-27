@@ -6,19 +6,23 @@ ER2RealismOverhaul is built around the rough edges that become hard to ignore af
 
 The goal is to fix those moments without replacing the game underneath them. This is not a health or damage multiplier mod; Easy Red 2's missions, armour system, and basic damage model remain intact.
 
-> **Current release:** 1.0.5
+> **Current development version:** 1.0.6
+>
+> **Latest public release:** 1.0.5
 >
 > **Compatibility:** Tested with Easy Red 2 Steam public-branch build `24246380` (July 20, 2026)
 
-## What's new in 1.0.5
+## What's new in 1.0.6
 
-- **Large battles no longer accumulate the mod's catastrophic managed-GC stalls.** Short-lived interop objects are reclaimed progressively, expensive AI work is bounded and spread across frames, and both collectors use measured headroom instead of surprising a busy frame. The final maximum-AI validation contained none of the original 200-500 ms managed stalls and only 0.57 frames above 33 ms per 30 seconds.
-- **AI in your own squad is completely native again.** Every overhaul AI system now leaves player squadmates to Easy Red 2 and your orders, including when you switch soldiers or ride in an AI-driven tank. Other allied squads and enemy AI retain the overhaul.
-- **The optional flight model is strictly player-only and off by default.** It adds momentum, stalls, spins, energy loss, speed-dependent controls, damage-sensitive handling, and optional instruments only to aircraft you personally fly with realistic controls. AI and simplified controls remain native.
-- **Aircraft freelook keeps you in control.** While the right stick moves your view, the left stick can continue pitching and rolling the aircraft; low-speed rudder authority now also reflects propeller slipstream while becoming appropriately heavy at high speed.
-- **A lethal headshot now cuts immediately to black and silence.** The death panel and skip prompt remain visible, other deaths are unchanged, and the view and sound restore automatically when you regain control.
-- **Moving squads no longer abandon soldiers indefinitely in cover.** Combat halts are bounded whenever the squad still has somewhere to go, while genuine defensive holds remain indefinite.
-- **Multiplayer clients now receive the host's settings and complete destroyed-soldier cleanup correctly**, avoiding silent local-setting divergence and stale client squad members.
+- **Mixed-mod compatibility is restored.** Realism Overhaul no longer changes the lifetime of Unity objects belonging to other BepInEx plugins. This removes the global cleanup from early 1.0.5 builds that could cause `ObjectCollectedException` errors and prevent another mod from loading.
+
+## What's new in 1.0.4
+
+- **The AI aircraft systems are gone; the flight model is now yours alone.** AI attack safety, threat evasion, autonomous target hunting, patrol re-centering, and AI energy management are removed — AI planes fly and fight exactly as they do in vanilla Easy Red 2, under every setting. The flight model and instrument HUD survive as opt-in features for aircraft *you* pilot, both off by default. Aircraft-bomb blast, crater, and suppression tuning stays in the ordnance system.
+- **The experimental AI commander is gone.** Easy Red 2's maps are balanced around continuous frontal pressure, and the commander's staged gating made attacks stall. Squads and vehicles now attack and defend under the game's own routing, with the infantry tactical layer unchanged.
+- **Close-quarters fights are deadlier.** Point-blank threats are identified faster than merely close ones, AI weapon spread tightens as the target gets closer, and heavy suppression can no longer shrink a soldier's awareness of an immediate threat below a configurable minimum.
+- **Shaped-charge warheads detonate on first contact.** Bazooka, Panzerschreck, Panzerfaust, and PIAT rounds no longer punch through fences and thin walls and re-appear as a fresh projectile on the far side.
+- **AI defenders man abandoned vehicle guns.** A soldier will take the gunner seat of an empty armed transport parked in their defend area, and give it up as soon as a player claims the vehicle.
 
 ## What it fixes and improves
 
@@ -82,7 +86,7 @@ The complete layer and marker reference is in [`docs/AI_VISUAL_DEBUG.md`](docs/A
 
 ## Coming soon
 
-Tank combat is the next major area being rebuilt. Tank ballistics, armour values, and internal vehicle subsystems are all being reworked for a future release. These changes are still work in progress and are not part of v1.0.5; for now, the mod leaves Easy Red 2's existing tank ballistics and armour model alone.
+Tank combat is the next major area being rebuilt. Tank ballistics, armour values, and internal vehicle subsystems are all being reworked for a future release. These changes are still work in progress and are not part of v1.0.6; for now, the mod leaves Easy Red 2's existing tank ballistics and armour model alone.
 
 ## Installation
 

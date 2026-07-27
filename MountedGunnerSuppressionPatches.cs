@@ -150,10 +150,13 @@ internal static class MountedGunnerSuppression
 
         ai.allowFireAtEnemy = allowed;
         if (allowed)
+        {
+            ContactResponse.ReleaseStopFire(soldier);
             return;
+        }
 
         ai.aimingEnemy = false;
-        soldier.StopFire();
+        ContactResponse.ExecuteStopFire(soldier);
     }
 
     private static void ReleaseFireInhibition(SoldierAI ai, Soldier soldier, State state)

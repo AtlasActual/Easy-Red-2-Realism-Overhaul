@@ -453,6 +453,9 @@ internal enum FireBlocker
 /// </summary>
 internal static class FireArbiterCore
 {
+    internal static bool ShouldIssueStopFire(bool stopAlreadyIssued)
+        => !stopAlreadyIssued;
+
     internal static FireBlocker Resolve(
         bool nativeControlled,
         bool requiredAction,
@@ -1083,6 +1086,17 @@ internal static class CombatMovementPolicyCore
            now - candidateLastShotAt <= freshnessSeconds;
 }
 
+internal static class SquadOrderMovementCore
+{
+    /// <summary>
+    /// A defend order is stationary only after the soldier reaches its assigned
+    /// area. Until then it is a real reinforcement route and needs the same bounded
+    /// combat-halt liveness as any other squad movement order.
+    /// </summary>
+    internal static bool ShouldTreatAsMoving(bool isDefendOrder, bool isInsideDefendArea)
+        => !isDefendOrder || !isInsideDefendArea;
+}
+
 internal readonly record struct PinnedReleaseDecision(bool Released, bool GrantsImmunity);
 
 internal static class PinnedReleaseCore
@@ -1341,8 +1355,8 @@ internal static class DefensivePositionOwnershipCore
 
 internal static class GroundAuthorityCore
 {
-    internal static bool CanMutate(bool multiplayerActive, bool isHost)
-        => !multiplayerActive || isHost;
+    internal static bool CanMutate(bool multiplayerIntent, bool inRoom, bool isHost)
+        => (!multiplayerIntent && !inRoom) || (inRoom && isHost);
 }
 
 internal static class StaticWeaponAssignmentCore

@@ -22,8 +22,6 @@ internal static class AiOwnership
 
     private static readonly Dictionary<IntPtr, bool> SquadVerdicts = new();
     private static float _squadVerdictsExpireAt = -1f;
-    private static readonly Dictionary<IntPtr, bool> AutonomousVerdicts = new();
-    private static int _autonomousVerdictFrame = -1;
 
     /// <summary>
     /// True when the game's AI controller drives this soldier rather than a human.
@@ -73,47 +71,7 @@ internal static class AiOwnership
     /// This is structural, not a setting.
     /// </summary>
     internal static bool IsAutonomous([NotNullWhen(true)] Soldier? soldier)
-    {
-        if (soldier == null)
-            return false;
-
-        try
-        {
-            var frame = Time.frameCount;
-            if (frame != _autonomousVerdictFrame)
-            {
-                AutonomousVerdicts.Clear();
-                _autonomousVerdictFrame = frame;
-            }
-
-            var pointer = soldier.Pointer;
-            InteropWrapperLifetime.Retain(soldier, pointer);
-            if (AutonomousVerdicts.TryGetValue(pointer, out var cached))
-                return cached;
-
-            var verdict = IsAiControlled(soldier) && !IsInPlayerSquad(soldier);
-            AutonomousVerdicts[pointer] = verdict;
-            return verdict;
-        }
-        catch (Il2CppInterop.Runtime.Il2CppException)
-        {
-            return false;
-        }
-        catch (Il2CppInterop.Runtime.ObjectCollectedException)
-        {
-            return false;
-        }
-    }
-
-    internal static void ResetBattle()
-    {
-        AutonomousVerdicts.Clear();
-        SquadVerdicts.Clear();
-        _autonomousVerdictFrame = -1;
-        _squadVerdictsExpireAt = -1f;
-        _localSoldierFrame = -1;
-        _localSoldierId = 0;
-    }
+        => IsAiControlled(soldier) && !IsInPlayerSquad(soldier);
 
     internal static bool IsInPlayerSquad(Soldier? soldier)
     {

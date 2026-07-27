@@ -382,7 +382,6 @@ internal static class GroundAiDirector
                 now);
         }
 
-        ModTimeProbe.Stage(SequentialStage.DirectorMovementWatchdog);
         ContactResponse.ApplyMovementProgressWatchdog(
             ai,
             soldier,
@@ -390,22 +389,15 @@ internal static class GroundAiDirector
             movement.Action,
             now);
 
-        ModTimeProbe.Stage(SequentialStage.DirectorPose);
         ContactResponse.MaintainOwnedPose(ai, soldier, now);
-        ModTimeProbe.Stage(SequentialStage.DirectorAntiArmor);
         InfantryAntiArmorFireDiscipline.Update(ai, soldier);
-        ModTimeProbe.Stage(SequentialStage.DirectorWeaponRange);
         HandheldWeaponClassifier.EnforceEngagementRange(soldier, ai);
         // Last word on the fire channel each authoritative tick, exactly as
         // MaintainOwnedPose is the last word on the pose channel.
-        ModTimeProbe.Stage(SequentialStage.DirectorFireDecision);
         ContactResponse.ApplyFireDecision(ai, soldier, now, authoritative: true);
 
         if (Settings.BattleChatterEnabled.Value)
-        {
-            ModTimeProbe.Stage(SequentialStage.DirectorBattleChatter);
             BattleChatter.Update(ai, soldier, now);
-        }
     }
 
     internal static void ReleaseSoldier(int soldierId)

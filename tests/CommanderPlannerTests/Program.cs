@@ -21,6 +21,7 @@ internal static class Program
             (nameof(CoverScoringSpreadsSoldiersWithoutOverridingProtection), CoverScoringSpreadsSoldiersWithoutOverridingProtection),
             (nameof(DispersionDegradesInsteadOfBlockingNearbyCover), DispersionDegradesInsteadOfBlockingNearbyCover),
             (nameof(AttackProgressHasMaximumCombatHalt), AttackProgressHasMaximumCombatHalt),
+            (nameof(DefendingReinforcementsKeepTheirMovementOrderUntilArrival), DefendingReinforcementsKeepTheirMovementOrderUntilArrival),
             (nameof(IdleSoldiersRemainUnderNativeControl), IdleSoldiersRemainUnderNativeControl),
             (nameof(ArrivedDefendersStayUnderPositionControl), ArrivedDefendersStayUnderPositionControl),
             (nameof(AutonomousDefendersSeekCoverEvenWithVisibleContact), AutonomousDefendersSeekCoverEvenWithVisibleContact),
@@ -50,6 +51,7 @@ internal static class Program
             (nameof(ClearanceStandIsGrantedWhileADefensiveHoldIsActive), ClearanceStandIsGrantedWhileADefensiveHoldIsActive),
             (nameof(OwnerHandoffHonorsTheAntiFlickerWindow), OwnerHandoffHonorsTheAntiFlickerWindow),
             (nameof(FireArbiterDefaultsToMayFire), FireArbiterDefaultsToMayFire),
+            (nameof(StopFireIsIssuedOncePerModFireHold), StopFireIsIssuedOncePerModFireHold),
             (nameof(RequiredActionAndHazardOutrankEveryLesserFireBlocker), RequiredActionAndHazardOutrankEveryLesserFireBlocker),
             (nameof(PinnedShockBlocksFireThenExpires), PinnedShockBlocksFireThenExpires),
             (nameof(MovingFireIsBoundedByWeaponRoleAndDistance), MovingFireIsBoundedByWeaponRoleAndDistance),
@@ -160,9 +162,12 @@ internal static class Program
     {
         var indices = CoverCandidateSamplingCore.SelectIndices(96, 12, 6);
         Equal(12, indices.Length, "Detailed cover work exceeded its fixed budget.");
-        SequenceEqual(Enumerable.Range(0, 6), indices.Take(6),
+        True(Enumerable.Range(0, 6).All(indices.Contains),
             "The nearest cover candidates were not retained.");
-        Equal(95, indices[^1], "The deepest candidate was omitted from broad sampling.");
+        True(indices.Contains(95), "The deepest candidate was omitted from broad sampling.");
+        True(indices.Take(5).Contains(0) && indices.Take(5).Contains(95) &&
+             indices.Take(5).Any(index => index > 5 && index < 48),
+            "The runtime geometry prefix did not compare nearby, intermediate, and deep cover.");
         Equal(indices.Length, indices.Distinct().Count(),
             "Cover sampling selected a candidate more than once.");
         True(indices.All(index => index >= 0 && index < 96),
@@ -177,10 +182,12 @@ internal static class Program
         var defensive = CoverCandidateSamplingCore.SelectIndices(192, 20, 3);
         Equal(20, defensive.Length,
             "Defensive building/trench sampling exceeded its bounded detail budget.");
-        SequenceEqual(Enumerable.Range(0, 3), defensive.Take(3),
+        True(Enumerable.Range(0, 3).All(defensive.Contains),
             "Defensive sampling did not retain its nearest candidates.");
-        Equal(191, defensive[^1],
+        True(defensive.Contains(191),
             "Defensive sampling failed to inspect deep building/trench candidates.");
+        True(defensive.Take(5).Contains(0) && defensive.Take(5).Contains(191),
+            "The defensive runtime prefix remained biased toward nearby cover.");
         True(defensive.Count(index => index >= 96) >= 8,
             "Defensive sampling remained biased toward nearby open-ground cover.");
     }
@@ -470,6 +477,14 @@ internal static class Program
             "A mounted/native soldier was not passed through.");
         False(FireArbiterCore.MayFire(ResolveFire(nativeControlled: true)),
             "A passthrough decision was treated as permission to fire.");
+    }
+
+    private static void StopFireIsIssuedOncePerModFireHold()
+    {
+        True(FireArbiterCore.ShouldIssueStopFire(stopAlreadyIssued: false),
+            "The first stop request in a mod fire hold was suppressed.");
+        False(FireArbiterCore.ShouldIssueStopFire(stopAlreadyIssued: true),
+            "An active mod fire hold would emit another SyncStopFire RPC.");
     }
 
     private static void RequiredActionAndHazardOutrankEveryLesserFireBlocker()
@@ -1502,6 +1517,22 @@ internal static class Program
         False(InfantryCoverDecisionCore.ShouldForceAttackProgress(
                 true, false, 10f, 40f, 12f),
             "An attacker without an objective route was forced to wander.");
+    }
+
+    private static void DefendingReinforcementsKeepTheirMovementOrderUntilArrival()
+    {
+        True(SquadOrderMovementCore.ShouldTreatAsMoving(
+                isDefendOrder: true,
+                isInsideDefendArea: false),
+            "A reinforcement outside its assigned defend area was treated as stationary.");
+        False(SquadOrderMovementCore.ShouldTreatAsMoving(
+                isDefendOrder: true,
+                isInsideDefendArea: true),
+            "A defender that reached its assigned area was forced back into movement.");
+        True(SquadOrderMovementCore.ShouldTreatAsMoving(
+                isDefendOrder: false,
+                isInsideDefendArea: true),
+            "A non-defend squad order lost its ordinary movement behavior.");
     }
 
     private static void DefensivePositionOwnershipStaysLatchedOutsideTheArrivalArea()
@@ -2696,9 +2727,20 @@ internal static class Program
 
     private static void GameplayMutationIsHostAuthoritative()
     {
-        True(GroundAuthorityCore.CanMutate(false, false), "Single-player mutation required a host flag.");
-        True(GroundAuthorityCore.CanMutate(true, true), "The multiplayer host could not mutate AI.");
-        False(GroundAuthorityCore.CanMutate(true, false), "A multiplayer client could mutate AI.");
+        True(GroundAuthorityCore.CanMutate(false, false, false),
+            "Single-player mutation required a room or host flag.");
+        False(GroundAuthorityCore.CanMutate(true, false, false),
+            "A multiplayer client could mutate gameplay before joining the room.");
+        False(GroundAuthorityCore.CanMutate(true, false, true),
+            "A pre-room multiplayer load trusted a meaningless master-client flag.");
+        True(GroundAuthorityCore.CanMutate(true, true, true),
+            "The established multiplayer host could not mutate AI.");
+        False(GroundAuthorityCore.CanMutate(true, true, false),
+            "An established multiplayer client could mutate AI.");
+        True(GroundAuthorityCore.CanMutate(false, true, true),
+            "Room authority was rejected when multiplayer metadata lagged behind Photon.");
+        False(GroundAuthorityCore.CanMutate(false, true, false),
+            "A Photon client was treated as offline when multiplayer metadata was absent.");
     }
 
     private static void DefenderAllocatorStaffsAllViableWeaponsInPriorityOrder()

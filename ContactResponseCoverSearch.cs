@@ -765,8 +765,9 @@ internal static partial class ContactResponse
         foreach (var detailedIndex in detailedIndices)
         {
             // Stop scoring once this frame's geometry allowance is gone, keeping whatever
-            // is best so far. The candidates are distance-sorted, so the ones dropped are
-            // the furthest — the least likely to win anyway.
+            // is best so far. The shortlist presents nearby and distributed candidates
+            // early, so this cutoff still compares local cover with deeper building and
+            // trench slots.
             if (detailedEvaluated >= MinimumDetailedCandidates && SearchGeometryBudgetSpent())
                 break;
 

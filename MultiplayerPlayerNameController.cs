@@ -15,6 +15,8 @@ internal sealed class MultiplayerPlayerNameController : MonoBehaviour
     private GUIStyle? _labelStyle;
     private GUIStyle? _shadowStyle;
     private string _lastErrorSignature = string.Empty;
+    private string _lastDiagnosticSignature = string.Empty;
+    private float _nextDiagnosticAt;
 
     private void Update()
     {
@@ -43,24 +45,75 @@ internal sealed class MultiplayerPlayerNameController : MonoBehaviour
             if (!ShouldDrawNames() || Event.current.type != EventType.Repaint)
                 return;
 
-            var camera = Camera.main;
+            if (Time.unscaledTime >= _nextPlayerRefreshAt)
+                RefreshPlayers();
+
+            var camera = ResourcesManager.mainCamera;
             var localPlayer = Soldier.CurrentControlledSoldierOrNull();
             if (camera == null || localPlayer == null)
+            {
+                ReportNoNamesDiagnostic(
+                    camera,
+                    localPlayer,
+                    activeRemote: 0,
+                    controlled: 0,
+                    identified: 0,
+                    living: 0,
+                    allied: 0,
+                    projected: 0);
                 return;
+            }
 
             EnsureStyles();
             RefreshStyleFont();
 
+            var activeRemote = 0;
+            var controlled = 0;
+            var identified = 0;
+            var living = 0;
+            var allied = 0;
+            var projected = 0;
             var previousDepth = GUI.depth;
             GUI.depth = -950;
             try
             {
                 foreach (var syncPlayer in _players)
-                    DrawPlayerName(syncPlayer, localPlayer, camera);
+                {
+                    TryDrawPlayerName(syncPlayer, localPlayer, camera, out var gate);
+                    if (gate >= 1)
+                        activeRemote++;
+                    if (gate >= 2)
+                        controlled++;
+                    if (gate >= 3)
+                        identified++;
+                    if (gate >= 4)
+                        living++;
+                    if (gate >= 5)
+                        allied++;
+                    if (gate >= 6)
+                        projected++;
+                }
             }
             finally
             {
                 GUI.depth = previousDepth;
+            }
+
+            if (projected == 0)
+            {
+                ReportNoNamesDiagnostic(
+                    camera,
+                    localPlayer,
+                    activeRemote,
+                    controlled,
+                    identified,
+                    living,
+                    allied,
+                    projected);
+            }
+            else
+            {
+                _lastDiagnosticSignature = string.Empty;
             }
         }
         catch (Exception ex)
@@ -82,7 +135,9 @@ internal sealed class MultiplayerPlayerNameController : MonoBehaviour
             return false;
 
         var settings = SavableData.Settings;
-        return settings != null && settings.system != null && !settings.system.enableGUI;
+        return settings != null &&
+               settings.system != null &&
+               (!settings.system.enableGUI || settings.system.disable3DMarkers);
     }
 
     [HideFromIl2Cpp]
@@ -99,31 +154,50 @@ internal sealed class MultiplayerPlayerNameController : MonoBehaviour
     }
 
     [HideFromIl2Cpp]
-    private void DrawPlayerName(SyncSoldier syncPlayer, Soldier localPlayer, Camera camera)
+    private bool TryDrawPlayerName(
+        SyncSoldier syncPlayer,
+        Soldier localPlayer,
+        Camera camera,
+        out int gate)
     {
-        if (syncPlayer == null || !syncPlayer.isActiveAndEnabled || syncPlayer.IsMine ||
-            !syncPlayer.IsControlledByAPlayer() || syncPlayer.Owner == null)
-        {
-            return;
-        }
+        gate = 0;
+        if (syncPlayer == null || !syncPlayer.isActiveAndEnabled)
+            return false;
 
+        var controllingPlayer = syncPlayer.Controller ?? syncPlayer.Owner;
+        var localPhotonPlayer = PhotonNetwork.LocalPlayer;
+        if (controllingPlayer != null &&
+            localPhotonPlayer != null &&
+            controllingPlayer.ActorNumber == localPhotonPlayer.ActorNumber)
+            return false;
+
+        gate = 1;
+        if (!syncPlayer.IsControlledByAPlayer())
+            return false;
+
+        gate = 2;
+        if (controllingPlayer == null)
+            return false;
+
+        gate = 3;
         var soldier = syncPlayer.soldier;
         if (soldier == null || soldier == localPlayer || !soldier.NotDeadAndSurrendered() ||
-            !string.Equals(soldier.faction, localPlayer.faction, StringComparison.Ordinal))
-        {
-            return;
-        }
+            !soldier.gameObject.activeInHierarchy)
+            return false;
 
-        var nickname = (string?)syncPlayer.Owner.NickName;
+        gate = 4;
+        if (!ResourcesManager.IsSameFaction(soldier.faction, localPlayer.faction))
+            return false;
+
+        gate = 5;
+        var nickname = ResourcesManager.FilterNickname((string?)controllingPlayer.NickName ?? string.Empty);
         if (string.IsNullOrWhiteSpace(nickname))
-            return;
+            return false;
 
-        var anchor = soldier.cameraPosition != null
-            ? soldier.cameraPosition.position + Vector3.up * 0.25f
-            : soldier.transform.position + Vector3.up * 2.1f;
+        var anchor = soldier.GetPosition() + Vector3.up * 2.1f;
         var screenPoint = camera.WorldToScreenPoint(anchor);
         if (screenPoint.z <= 0f)
-            return;
+            return false;
 
         var rect = new Rect(
             screenPoint.x - LabelWidth * 0.5f,
@@ -133,6 +207,38 @@ internal sealed class MultiplayerPlayerNameController : MonoBehaviour
         var shadowRect = new Rect(rect.x + 1f, rect.y + 1f, rect.width, rect.height);
         GUI.Label(shadowRect, nickname, _shadowStyle!);
         GUI.Label(rect, nickname, _labelStyle!);
+        gate = 6;
+        return true;
+    }
+
+    [HideFromIl2Cpp]
+    private void ReportNoNamesDiagnostic(
+        Camera? camera,
+        Soldier? localPlayer,
+        int activeRemote,
+        int controlled,
+        int identified,
+        int living,
+        int allied,
+        int projected)
+    {
+        if (PhotonNetwork.CurrentRoom == null || PhotonNetwork.CurrentRoom.PlayerCount < 2 ||
+            Time.unscaledTime < _nextDiagnosticAt)
+        {
+            return;
+        }
+
+        _nextDiagnosticAt = Time.unscaledTime + 10f;
+        var system = SavableData.Settings?.system;
+        var signature =
+            $"hud={system?.enableGUI},markersOff={system?.disable3DMarkers},camera={camera != null}," +
+            $"local={localPlayer != null},synchers={_players.Count},activeRemote={activeRemote}," +
+            $"controlled={controlled},identified={identified},living={living},allied={allied},projected={projected}";
+        if (string.Equals(signature, _lastDiagnosticSignature, StringComparison.Ordinal))
+            return;
+
+        _lastDiagnosticSignature = signature;
+        Plugin.LogSource.LogInfo($"Multiplayer nameplate diagnostic (no names drawn): {signature}");
     }
 
     [HideFromIl2Cpp]

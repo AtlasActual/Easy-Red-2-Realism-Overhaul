@@ -1,4 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="Version.props" />
+
   <PropertyGroup>
     <TargetFramework>net6.0</TargetFramework>
     <LangVersion>10.0</LangVersion>
@@ -7,9 +9,9 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>ER2RealismOverhaul</AssemblyName>
     <RootNamespace>ER2RealismOverhaul</RootNamespace>
-    <Version>1.0.5</Version>
-    <AssemblyVersion>1.0.5.0</AssemblyVersion>
-    <FileVersion>1.0.5.0</FileVersion>
+    <Version>$(ModVersion)</Version>
+    <AssemblyVersion>$(ModVersion).0</AssemblyVersion>
+    <FileVersion>$(ModVersion).0</FileVersion>
     <ER2GameDir Condition="'$(ER2GameDir)' == '' and '$(ER2_GAME_DIR)' != ''">$(ER2_GAME_DIR)</ER2GameDir>
     <BepInExCore>$(ER2GameDir)\BepInEx\core</BepInExCore>
     <ER2Interop>$(ER2GameDir)\BepInEx\interop</ER2Interop>
@@ -52,5 +54,24 @@
   <Target Name="ValidateER2GameDir" BeforeTargets="ResolveReferences"
           Condition="'$(ER2GameDir)' == '' or !Exists('$(ER2GameDir)')">
     <Error Text="Set ER2_GAME_DIR to the Easy Red 2 installation directory, or pass /p:ER2GameDir=&quot;path&quot;." />
+  </Target>
+
+  <Target Name="ValidateModVersion" BeforeTargets="PrepareForBuild"
+          Condition="'$(ModVersion)' == ''">
+    <Error Text="Version.props must define ModVersion." />
+  </Target>
+
+  <Target Name="GenerateModVersionSource" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <GeneratedModVersionFile>$(IntermediateOutputPath)ModVersion.g.cs</GeneratedModVersionFile>
+    </PropertyGroup>
+    <WriteLinesToFile
+      File="$(GeneratedModVersionFile)"
+      Lines="namespace ER2RealismOverhaul%3B internal static class ModVersionInfo { public const string Value = &quot;$(ModVersion)&quot;%3B }"
+      Overwrite="true"
+      Encoding="UTF-8" />
+    <ItemGroup>
+      <Compile Include="$(GeneratedModVersionFile)" />
+    </ItemGroup>
   </Target>
 </Project>

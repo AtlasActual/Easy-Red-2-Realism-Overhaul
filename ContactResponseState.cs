@@ -55,6 +55,11 @@ internal sealed class ContactResponseState
     // Last blocker the fire arbiter committed, so the verbose trace fires on the decision
     // FLIP instead of every frame. Replaces the deleted FireRestorePending handshake flag.
     internal FireBlocker LastFireBlocker;
+    // Soldier.StopFire sends a reliable SyncStopFire RPC on every invocation, while the
+    // game's LateUpdate can restore triggerState even though this mod still owns the same
+    // fire hold. Keep the network-active command edge-triggered until our policy releases
+    // fire permission; the native trigger enum is not a durable indication of that hold.
+    internal bool StopFireIssued;
     internal bool ContactResponseActive;
     internal bool MovementInhibitedByContactResponse;
     // Outputs of the movement arbiter (plan 018), not inputs. ApplyMovementDecision is the

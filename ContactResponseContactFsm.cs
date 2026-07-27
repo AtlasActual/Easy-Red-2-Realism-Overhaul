@@ -381,7 +381,7 @@ internal static partial class ContactResponse
             if (state.Relocating)
                 FinishRelocation(ai, soldier, state, id, now, false, false, false);
             state.EngagementHoldUntil = 0f;
-            soldier.StopFire();
+            ExecuteStopFire(soldier);
             StopDangerMovement(ai, soldier, Time.deltaTime);
             return;
         }
@@ -413,7 +413,7 @@ internal static partial class ContactResponse
             ApplyMovementDecision(
                 ai, soldier, Time.deltaTime, now, MovementOwner.Free,
                 "fsm-flame-evade");
-            soldier.StopFire();
+            ExecuteStopFire(soldier);
             return;
         }
 
@@ -1579,7 +1579,7 @@ internal static partial class ContactResponse
         // maintains the descriptive state other systems read.
         state.SuppressionFireInhibited = now < state.PinnedFireBlockedUntil;
         if (state.SuppressionFireInhibited)
-            soldier.StopFire();
+            ExecuteStopFire(soldier);
 
         ApplyMovementDecision(
             ai, soldier, deltaTime, now, MovementOwner.Free, "pinned");
@@ -1702,15 +1702,23 @@ internal static partial class ContactResponse
     /// order is exactly the case where a soldier is expected to keep up with his squad,
     /// and it used to be treated like a defender's standing order.
     ///
-    /// <c>defend</c> is excluded on purpose: a defender is supposed to stay put, and the
-    /// defensive-occupation path owns his release.
+    /// A <c>defend</c> order is stationary only after the soldier reaches its assigned
+    /// area. Before arrival it is a reinforcement route, so contact may interrupt it
+    /// briefly but must remain bounded by the same liveness rule.
     /// </summary>
     private static bool HasMovingSquadOrder(Soldier soldier)
     {
         try
         {
             var squad = soldier.joinedSquad;
-            return squad != null && squad.order != Order.defend;
+            if (squad == null)
+                return false;
+
+            var isDefendOrder = squad.order == Order.defend;
+            var isInsideDefendArea = isDefendOrder && IsInsideDefensiveArea(soldier);
+            return SquadOrderMovementCore.ShouldTreatAsMoving(
+                isDefendOrder,
+                isInsideDefendArea);
         }
         catch (NullReferenceException)
         {
@@ -1893,13 +1901,17 @@ internal static partial class ContactResponse
         TraceFireDecision(soldier, state, blocker, changed, now);
         state.FireInhibitedByMovement = blocker == FireBlocker.Moving;
         if (blocker == FireBlocker.NativeControl)
+        {
+            ReleaseStopFire(soldier);
             return;
+        }
 
         if (FireArbiterCore.MayFire(blocker))
         {
             // This is a permission flag, not a request to shoot. Releasing it without a
             // current target is necessary so a later native acquisition is not blocked by
             // a stale false value owned by this mod.
+            ReleaseStopFire(soldier);
             if (authoritative || changed)
                 ai.allowFireAtEnemy = true;
             return;
@@ -1914,7 +1926,7 @@ internal static partial class ContactResponse
             ai.aimingEnemy = false;
         if (blocker == FireBlocker.Range)
             ai.targetInWeaponRange = false;
-        soldier.StopFire();
+        ExecuteStopFire(soldier);
     }
 
     private static void TraceFireDecision(
@@ -2041,7 +2053,25 @@ internal static partial class ContactResponse
     // cannot independently fight over the same native state. Fire PERMISSION is not
     // among them any more: only ApplyFireDecision writes allowFireAtEnemy.
     internal static void ExecuteStopFire(Soldier soldier)
-        => soldier.StopFire();
+    {
+        // Soldier.StopFire is not idempotent on the network: every invocation sends a
+        // reliable SyncStopFire RPC. The native trigger state cannot deduplicate calls
+        // because Soldier.LateUpdate restores it during an ongoing mod fire hold.
+        var state = AiState.GetContactState(soldier.GetInstanceID());
+        if (!FireArbiterCore.ShouldIssueStopFire(state.StopFireIssued))
+            return;
+
+        soldier.StopFire();
+        state.StopFireIssued = true;
+    }
+
+    internal static void ReleaseStopFire(Soldier soldier)
+    {
+        if (soldier == null)
+            return;
+
+        AiState.GetContactState(soldier.GetInstanceID()).StopFireIssued = false;
+    }
 
     internal static void ExecuteAim(Soldier soldier, bool aiming)
         => soldier.SetAiming(aiming);

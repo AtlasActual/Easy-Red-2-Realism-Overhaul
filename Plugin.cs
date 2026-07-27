@@ -8,13 +8,7 @@ namespace ER2RealismOverhaul;
 
 internal static class RuntimeLifecycle
 {
-    private static int _isQuitting;
-
-    internal static bool IsQuitting
-    {
-        get => Volatile.Read(ref _isQuitting) != 0;
-        set => Volatile.Write(ref _isQuitting, value ? 1 : 0);
-    }
+    internal static bool IsQuitting { get; set; }
 }
 
 [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
@@ -22,7 +16,7 @@ public sealed class Plugin : BasePlugin
 {
     public const string PluginGuid = "ca.antoi.er2.tacticalai";
     public const string PluginName = "Easy Red 2 Realism Overhaul";
-    public const string PluginVersion = "1.0.5";
+    public const string PluginVersion = ModVersionInfo.Value;
 
     internal static ManualLogSource LogSource { get; private set; } = null!;
     private Harmony? _harmony;
@@ -38,22 +32,15 @@ public sealed class Plugin : BasePlugin
     private MultiplayerSharedSquadController? _multiplayerSharedSquadController;
     private BulletPenetrationController? _bulletPenetrationController;
     private AiDebugOverlayController? _aiDebugOverlayController;
-    private IncrementalGarbageCollectionController? _incrementalGarbageCollectionController;
 
     public override void Load()
     {
         LogSource = Log;
         StartupSplashSkipper.TrySkip();
         Settings.Bind(Config);
+        if (Settings.StutterProbeEnabled.Value)
+            StutterProbe.InstallExceptionCounter();
         SettingsCatalog.Initialize();
-
-        _harmony = new Harmony(PluginGuid);
-        if (Settings.InstallGameplayPatches.Value &&
-            Settings.DeferredInteropHandleCleanupEnabled.Value)
-        {
-            InteropFinalizerReaper.TryInstall(_harmony);
-        }
-
         _atmosphericParticlePersistenceController = AddComponent<AtmosphericParticlePersistenceController>();
         _settingsSyncController = AddComponent<SettingsSyncController>();
         _settingsMenuController = AddComponent<SettingsMenuController>();
@@ -66,8 +53,8 @@ public sealed class Plugin : BasePlugin
         _multiplayerSharedSquadController = AddComponent<MultiplayerSharedSquadController>();
         _bulletPenetrationController = AddComponent<BulletPenetrationController>();
         _aiDebugOverlayController = AddComponent<AiDebugOverlayController>();
-        _incrementalGarbageCollectionController = AddComponent<IncrementalGarbageCollectionController>();
 
+        _harmony = new Harmony(PluginGuid);
         PatchModules(_harmony, typeof(Plugin).Assembly);
 
         Log.LogInfo($"{PluginName} {PluginVersion} loaded. attackPostureBonus={Settings.AttackingForceBonusEnabled.Value}, " +
@@ -102,8 +89,7 @@ public sealed class Plugin : BasePlugin
                     $"compassUnits={(Settings.CompassUseMils.Value ? "mils" : "degrees")}, " +
                     $"namesWithHudDisabled={Settings.KeepMultiplayerPlayerNamesWithHudDisabled.Value}, " +
                     $"highQualityDistantAnimations={Settings.KeepHighQualityDistantAnimations.Value}, " +
-                    $"audioBalance={Settings.AudioBalanceEnabled.Value}, " +
-                    $"deferredInteropCleanup={Settings.DeferredInteropHandleCleanupEnabled.Value}");
+                    $"audioBalance={Settings.AudioBalanceEnabled.Value}");
     }
 
     // Patch modules that stay installed even when gameplay patching is switched off:
@@ -154,5 +140,4 @@ public sealed class Plugin : BasePlugin
                 "The mod is loaded but inert; set it back to true in the config to play with it.");
         }
     }
-
 }

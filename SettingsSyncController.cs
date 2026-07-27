@@ -1,8 +1,10 @@
 using System.Text;
 using ExitGames.Client.Photon;
+using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.Attributes;
 using Photon.Pun;
+using Photon.Realtime;
 using UnityEngine;
 
 namespace ER2RealismOverhaul;
@@ -11,6 +13,7 @@ internal sealed class SettingsSyncController : MonoBehaviour
 {
     private const string ProtocolMarker = "ER2RO_SETTINGS_1";
     private const string RoomPropertyKey = "er2ro.settings";
+    private const float RoomStabilityDelaySeconds = 1f;
 
     private static SettingsSyncController? _instance;
 
@@ -18,6 +21,8 @@ internal sealed class SettingsSyncController : MonoBehaviour
     private string? _publishedPayload;
     private string? _appliedPayload;
     private string? _roomName;
+    private BattleLoader? _deferredBattleLoader;
+    private float _roomObservedAt;
     private float _nextCheckAt;
     private float _nextFailureLogAt;
     private bool _clientOverrideActive;
@@ -45,6 +50,8 @@ internal sealed class SettingsSyncController : MonoBehaviour
 
     private void Update()
     {
+        ContinueDeferredBattleRoomConnect();
+
         if (Time.unscaledTime < _nextCheckAt)
             return;
 
@@ -56,16 +63,13 @@ internal sealed class SettingsSyncController : MonoBehaviour
         catch (Exception ex)
         {
             StatusLabel = "Settings sync temporarily unavailable";
-            if (Time.unscaledTime >= _nextFailureLogAt)
-            {
-                _nextFailureLogAt = Time.unscaledTime + 30f;
-                Plugin.LogSource.LogWarning($"Settings synchronization failed and will retry: {ex.Message}");
-            }
+            LogFailure($"Settings synchronization failed and will retry: {ex.Message}");
         }
     }
 
     private void OnDestroy()
     {
+        _deferredBattleLoader = null;
         RestoreLocalSettings();
         if (_instance == this)
             _instance = null;
@@ -87,12 +91,37 @@ internal sealed class SettingsSyncController : MonoBehaviour
 
         var room = PhotonNetwork.CurrentRoom;
         var currentRoomName = (string?)room.Name ?? string.Empty;
+
+        // ServerListMenu checks whether a room exists by joining it through
+        // MultiplayerAuthenticator and immediately leaving again. BattleLoader is
+        // absent during that probe, so do not publish or consume session state yet.
+        if (BattleLoader.instance == null)
+        {
+            StatusLabel = "Multiplayer - waiting for battle session";
+            return;
+        }
+
         if (!string.Equals(_roomName, currentRoomName, StringComparison.Ordinal))
         {
             _roomName = currentRoomName;
+            _roomObservedAt = Time.unscaledTime;
             _publishedPayload = null;
             _appliedPayload = null;
+            _clientOverrideActive = false;
+            _isRemoteClient = !PhotonNetwork.IsMasterClient;
+            StatusLabel = PhotonNetwork.IsMasterClient
+                ? "Host - waiting for stable session"
+                : "Client - waiting for stable session";
+            return;
         }
+
+        // MultiplayerAuthenticator temporarily joins a candidate room, invokes its
+        // room-check callback, and immediately calls LeaveRoom. Treating that probe
+        // as the gameplay session made a remote client deserialize and apply the
+        // entire host snapshot while the game was trying to leave and complete its
+        // real join. Only synchronize once the room has remained active.
+        if (Time.unscaledTime - _roomObservedAt < RoomStabilityDelaySeconds)
+            return;
 
         if (PhotonNetwork.IsMasterClient)
         {
@@ -108,6 +137,55 @@ internal sealed class SettingsSyncController : MonoBehaviour
             _isRemoteClient = true;
             ReadHostSettings(room);
         }
+    }
+
+    [HideFromIl2Cpp]
+    internal static bool IsBattleRoomHandoffState(ClientState state)
+    {
+        return state is ClientState.Leaving
+            or ClientState.DisconnectingFromGameServer
+            or ClientState.ConnectingToMasterServer;
+    }
+
+    [HideFromIl2Cpp]
+    internal static bool DeferBattleRoomConnect(BattleLoader battleLoader)
+    {
+        if (_instance == null)
+            return false;
+
+        _instance._deferredBattleLoader = battleLoader;
+        return true;
+    }
+
+    [HideFromIl2Cpp]
+    private void ContinueDeferredBattleRoomConnect()
+    {
+        var battleLoader = _deferredBattleLoader;
+        if (battleLoader == null || !PhotonNetwork.IsConnectedAndReady)
+            return;
+
+        _deferredBattleLoader = null;
+        try
+        {
+            Plugin.LogSource.LogInfo(
+                "Photon finished the previous room handoff; continuing the deferred next-battle connection.");
+            battleLoader.TryConnect();
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogSource.LogWarning(
+                $"Could not continue the deferred next-battle connection: {ex.Message}");
+        }
+    }
+
+    [HideFromIl2Cpp]
+    private void LogFailure(string message)
+    {
+        if (Time.unscaledTime < _nextFailureLogAt)
+            return;
+
+        _nextFailureLogAt = Time.unscaledTime + 30f;
+        Plugin.LogSource.LogWarning(message);
     }
 
     [HideFromIl2Cpp]
@@ -168,6 +246,7 @@ internal sealed class SettingsSyncController : MonoBehaviour
     {
         RestoreLocalSettings();
         _roomName = null;
+        _roomObservedAt = 0f;
         _publishedPayload = null;
         _appliedPayload = null;
         _clientOverrideActive = false;
@@ -272,5 +351,38 @@ internal sealed class SettingsSyncController : MonoBehaviour
         values = lines.Skip(3).ToArray();
         error = string.Empty;
         return true;
+    }
+}
+
+[HarmonyPatch(typeof(BattleLoader), nameof(BattleLoader.TryConnect))]
+internal static class BattleLoaderRoomHandoffPatch
+{
+    [HarmonyPrefix]
+    private static bool Prefix(BattleLoader __instance)
+    {
+        try
+        {
+            var matchData = MatchData.data;
+            var multiplayerIntent = matchData != null && matchData.isMultiplayer;
+            var state = PhotonNetwork.NetworkClientState;
+            if (!multiplayerIntent || PhotonNetwork.IsConnectedAndReady)
+                return true;
+
+            if (!SettingsSyncController.IsBattleRoomHandoffState(state))
+                return true;
+
+            if (!SettingsSyncController.DeferBattleRoomConnect(__instance))
+                return true;
+
+            Plugin.LogSource.LogInfo(
+                $"Deferred the next-battle room connection while Photon finishes the previous room handoff ({state}).");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogSource.LogWarning(
+                $"Battle room handoff guard failed safely; using the game's original connection path: {ex.Message}");
+            return true;
+        }
     }
 }
