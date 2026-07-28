@@ -21,3 +21,4 @@ BepInEx/LogOutput.log
 artifacts/
 releases/
 *.zip
+*.txt
