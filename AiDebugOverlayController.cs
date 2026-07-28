@@ -1038,7 +1038,7 @@ internal sealed class AiDebugOverlayController : MonoBehaviour
     [HideFromIl2Cpp]
     private void DrawFov(Camera camera, SoldierDebugSnapshot soldier)
     {
-        var halfAngle = Settings.HorizontalFov.Value * 0.5f;
+        var halfAngle = AiBehaviorTuning.HorizontalFov * 0.5f;
         var forward = soldier.Forward;
         forward.y = 0f;
         forward.Normalize();

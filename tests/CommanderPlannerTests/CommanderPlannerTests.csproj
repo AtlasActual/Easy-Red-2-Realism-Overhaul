@@ -11,6 +11,8 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="..\..\BallisticCoverDecisionCore.cs" Link="BallisticCoverDecisionCore.cs" />
+    <Compile Include="..\..\AiBehaviorTuningCore.cs" Link="AiBehaviorTuningCore.cs" />
+    <Compile Include="..\..\RememberedGrenadeDecisionCore.cs" Link="RememberedGrenadeDecisionCore.cs" />
     <Compile Include="..\..\InfantryCoverDecisionCore.cs" Link="InfantryCoverDecisionCore.cs" />
     <Compile Include="..\..\GroundAiDecisionCore.cs" Link="GroundAiDecisionCore.cs" />
     <Compile Include="..\..\TransportDismountDecisionCore.cs" Link="TransportDismountDecisionCore.cs" />
@@ -18,6 +20,9 @@
     <Compile Include="..\..\LauncherSelectionDecisionCore.cs" Link="LauncherSelectionDecisionCore.cs" />
     <Compile Include="..\..\ProjectilePenetrationEligibilityCore.cs" Link="ProjectilePenetrationEligibilityCore.cs" />
     <Compile Include="..\..\TargetConfirmationCore.cs" Link="TargetConfirmationCore.cs" />
+    <Compile Include="..\..\LocalTargetReportCore.cs" Link="LocalTargetReportCore.cs" />
     <Compile Include="..\..\TankEngagementDecisionCore.cs" Link="TankEngagementDecisionCore.cs" />
+    <Compile Include="..\..\TracerRetentionCore.cs" Link="TracerRetentionCore.cs" />
+    <Compile Include="..\..\PerformancePresetCore.cs" Link="PerformancePresetCore.cs" />
   </ItemGroup>
 </Project>

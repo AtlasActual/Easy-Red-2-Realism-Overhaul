@@ -6,9 +6,15 @@ internal static class Program
     {
         var tests = new (string Name, Action Run)[]
         {
+            (nameof(CoreAiTuningKeepsBaselineCenteredAndDirectional), CoreAiTuningKeepsBaselineCenteredAndDirectional),
+            (nameof(PerformancePresetsOnlyTouchKnownCostDrivers), PerformancePresetsOnlyTouchKnownCostDrivers),
+            (nameof(LargeBattlePresetIsStricterThanBalanced), LargeBattlePresetIsStricterThanBalanced),
+            (nameof(RememberedGrenadesRequireFreshSafeUnseenContacts), RememberedGrenadesRequireFreshSafeUnseenContacts),
+            (nameof(TracerRetentionHonorsMachineGunAndEndpointRules), TracerRetentionHonorsMachineGunAndEndpointRules),
             (nameof(CoverFsmHoldsUsefulCover), CoverFsmHoldsUsefulCover),
             (nameof(CoverFsmSuppressionOverridesUrgency), CoverFsmSuppressionOverridesUrgency),
             (nameof(CoverFsmUrgencyBypassesDeliberateWait), CoverFsmUrgencyBypassesDeliberateWait),
+            (nameof(DistantContactMovesExposedInfantryTowardCover), DistantContactMovesExposedInfantryTowardCover),
             (nameof(CoverSelectionRequiresProtectionAndSafeNormalRoute), CoverSelectionRequiresProtectionAndSafeNormalRoute),
             (nameof(DefensiveOccupationAllowsOneMoveFromOpenGround), DefensiveOccupationAllowsOneMoveFromOpenGround),
             (nameof(DeliberateCoverValuesFiringQualityMoreThanUrgency), DeliberateCoverValuesFiringQualityMoreThanUrgency),
@@ -17,7 +23,9 @@ internal static class Program
             (nameof(CoverPostureRequiresWholeBodyProtection), CoverPostureRequiresWholeBodyProtection),
             (nameof(BallisticCoverRatesMaterialAndThickness), BallisticCoverRatesMaterialAndThickness),
             (nameof(VisualObstructionAloneIsNotProtectiveCover), VisualObstructionAloneIsNotProtectiveCover),
+            (nameof(BarbedWireIsNeverBallisticCover), BarbedWireIsNeverBallisticCover),
             (nameof(ProtectionWeightedScorePrefersSurvivableCover), ProtectionWeightedScorePrefersSurvivableCover),
+            (nameof(DeliberateCoverPrefersNearbySaferPosition), DeliberateCoverPrefersNearbySaferPosition),
             (nameof(CoverScoringSpreadsSoldiersWithoutOverridingProtection), CoverScoringSpreadsSoldiersWithoutOverridingProtection),
             (nameof(DispersionDegradesInsteadOfBlockingNearbyCover), DispersionDegradesInsteadOfBlockingNearbyCover),
             (nameof(AttackProgressHasMaximumCombatHalt), AttackProgressHasMaximumCombatHalt),
@@ -43,6 +51,7 @@ internal static class Program
             (nameof(PlayerHoldCoverDoesNotTakeOverOtherExternalOrders), PlayerHoldCoverDoesNotTakeOverOtherExternalOrders),
             (nameof(WalkingInPlaceTriggersAQuietRecoveryHold), WalkingInPlaceTriggersAQuietRecoveryHold),
             (nameof(RealMovementAndPathChangesResetTheStallWatch), RealMovementAndPathChangesResetTheStallWatch),
+            (nameof(CoverRoutesRetryThenRejectEntranceStagnation), CoverRoutesRetryThenRejectEntranceStagnation),
             (nameof(TransportDismountsBeforeTakingFire), TransportDismountsBeforeTakingFire),
             (nameof(AttackCoverCorridorAllowsFlankingWithinBoundedBacktrack), AttackCoverCorridorAllowsFlankingWithinBoundedBacktrack),
             (nameof(FailedCoverSearchBacksOffProgressively), FailedCoverSearchBacksOffProgressively),
@@ -59,7 +68,7 @@ internal static class Program
             (nameof(CommittedCoverMoveSurvivesATransientContact), CommittedCoverMoveSurvivesATransientContact),
             (nameof(LapsedHoldsReturnTheSoldierToNativeMovement), LapsedHoldsReturnTheSoldierToNativeMovement),
             (nameof(HaltSpacingStepsOffTheThreatAxisOnlyWhenStacked), HaltSpacingStepsOffTheThreatAxisOnlyWhenStacked),
-            (nameof(AMovingSoldierIsNeverHeldProne), AMovingSoldierIsNeverHeldProne),
+            (nameof(ForcedSuppressedAdvancesCanCrawl), ForcedSuppressedAdvancesCanCrawl),
             (nameof(SafetyPosesOutrankTheMovementContract), SafetyPosesOutrankTheMovementContract),
             (nameof(AHaltedSoldierKeepsHisProneCoverSlot), AHaltedSoldierKeepsHisProneCoverSlot),
             (nameof(CommandLeasesAreStableAndRejectStaleWork), CommandLeasesAreStableAndRejectStaleWork),
@@ -88,6 +97,7 @@ internal static class Program
             (nameof(DefensiveAnchorsOnlyMoveAfterMaterialDegradation), DefensiveAnchorsOnlyMoveAfterMaterialDegradation),
             (nameof(CoverSamplingKeepsWorkBoundedAndIncludesDepth), CoverSamplingKeepsWorkBoundedAndIncludesDepth),
             (nameof(AuthoredCoverRemainsAFallbackWhenBallisticsCannotClassifyIt), AuthoredCoverRemainsAFallbackWhenBallisticsCannotClassifyIt),
+            (nameof(AuthoredFallbackRejectsClassifiedWeakObstacles), AuthoredFallbackRejectsClassifiedWeakObstacles),
             (nameof(ProtectedFiringLaneBeatsEquallyProtectedBlindSlot), ProtectedFiringLaneBeatsEquallyProtectedBlindSlot),
             (nameof(PostureThreatAxisStabilizesAcrossAlternatingBearings), PostureThreatAxisStabilizesAcrossAlternatingBearings),
             (nameof(CoverDowngradeToProneRequiresPersistence), CoverDowngradeToProneRequiresPersistence),
@@ -97,8 +107,11 @@ internal static class Program
             (nameof(SuppressionRecoveryKeepsAnAlreadyProneSoldierDownInTheOpen), SuppressionRecoveryKeepsAnAlreadyProneSoldierDownInTheOpen),
             (nameof(SuppressionRecoveryPreventsProneCrouchLoopOnRelease), SuppressionRecoveryPreventsProneCrouchLoopOnRelease),
             (nameof(SuppressionRecoveryDefersToAnOwnedProneCoverEvaluation), SuppressionRecoveryDefersToAnOwnedProneCoverEvaluation),
+            (nameof(IndoorSuppressionKeepsAFiringCrouch), IndoorSuppressionKeepsAFiringCrouch),
             (nameof(WrongSideAnchorReleasesForALiveEngagedThreat), WrongSideAnchorReleasesForALiveEngagedThreat),
             (nameof(TargetObservationAccruesOnlyDuringContinuousWatching), TargetObservationAccruesOnlyDuringContinuousWatching),
+            (nameof(DirectThreatMemoryOutlastsPreciseContactMemory), DirectThreatMemoryOutlastsPreciseContactMemory),
+            (nameof(LocalTargetReportsRespectRangeAndPreferTheNearestContact), LocalTargetReportsRespectRangeAndPreferTheNearestContact),
             (nameof(TankEngagementEntersAndReleasesHoldWithHysteresis), TankEngagementEntersAndReleasesHoldWithHysteresis),
             (nameof(TankEngagementLosFlickerGrantsGraceBeforeReleasingHold), TankEngagementLosFlickerGrantsGraceBeforeReleasingHold),
             (nameof(TankEngagementHoldAndReverseNeverDitherAroundTheirBoundaries), TankEngagementHoldAndReverseNeverDitherAroundTheirBoundaries),
@@ -124,6 +137,96 @@ internal static class Program
 
         Console.WriteLine($"{tests.Length - failures}/{tests.Length} deterministic scenarios passed.");
         return failures == 0 ? 0 : 1;
+    }
+
+    private static void PerformancePresetsOnlyTouchKnownCostDrivers()
+    {
+        Equal(3, PerformancePresetCore.Presets.Length,
+            "The menu did not expose the three intended performance tiers.");
+        Equal(
+            PerformancePresetCore.Targets.Length,
+            PerformancePresetCore.Targets.Select(target => target.Id).Distinct().Count(),
+            "A performance-sensitive setting appeared more than once in the preset.");
+        False(
+            PerformancePresetCore.Targets.Any(target =>
+                target.Section.StartsWith("AI - Infantry tactics", StringComparison.Ordinal)),
+            "A performance preset changed core infantry behavior or fire safety.");
+        True(
+            PerformancePresetCore.Targets.Any(target =>
+                target.Id == "7h. Animation quality\u001fKeepHighQualityDistantAnimations"),
+            "The known high-cost distant-animation option was not managed by performance presets.");
+    }
+
+    private static void LargeBattlePresetIsStricterThanBalanced()
+    {
+        var targets = PerformancePresetCore.Targets.ToDictionary(target => target.Id);
+        Equal("true", targets["6. Ordnance effects\u001fLayeredBlastEffects"].BalancedValue,
+            "Balanced unexpectedly removed layered blast gameplay.");
+        Equal("false", targets["6. Ordnance effects\u001fLayeredBlastEffects"].LargeBattleValue,
+            "Large Battle retained supplemental layered-blast work.");
+        Equal("2", targets["6. Ordnance effects\u001fExtraFragmentChecksPerTarget"].BalancedValue,
+            "Balanced did not reduce supplemental fragment samples.");
+        Equal("1", targets["6. Ordnance effects\u001fExtraFragmentChecksPerTarget"].LargeBattleValue,
+            "Large Battle did not minimize supplemental fragment samples.");
+        Equal("true", targets["AI - Diagnostics\u001fIncrementalGarbageCollection"].LargeBattleValue,
+            "Large Battle did not enable the mod's frame-sliced garbage collection option.");
+    }
+
+    private static void CoreAiTuningKeepsBaselineCenteredAndDirectional()
+    {
+        Near(20f, AiBehaviorTuningCore.ScaleUp(20f, 1f), 0.0001f,
+            "The 1.0x core-tuning midpoint changed its detailed baseline.");
+        Near(20f, AiBehaviorTuningCore.ScaleDown(20f, 1f), 0.0001f,
+            "The 1.0x inverse core-tuning midpoint changed its detailed baseline.");
+        Near(30f, AiBehaviorTuningCore.ScaleUp(20f, 1.5f), 0.0001f,
+            "A higher direct modifier did not increase its coordinated behavior.");
+        Near(20f / 1.5f, AiBehaviorTuningCore.ScaleDown(20f, 1.5f), 0.0001f,
+            "A higher speed modifier did not shorten its coordinated delay.");
+        Near(10f, AiBehaviorTuningCore.ScaleUp(20f, 0.1f), 0.0001f,
+            "Core tuning did not clamp values below the visible slider range.");
+        Equal(128, AiBehaviorTuningCore.ScaleThreshold(85, 1.5f, 2, 255),
+            "Suppression resistance did not raise the prone threshold predictably.");
+    }
+
+    private static void RememberedGrenadesRequireFreshSafeUnseenContacts()
+    {
+        var safeUnseenContact = new RememberedGrenadeDecisionInput(
+            true, true, true, true, true, true, true, true, true,
+            4f, 12f, false, true, true, true);
+        True(RememberedGrenadeDecisionCore.ShouldAttempt(safeUnseenContact),
+            "A stationary soldier rejected a fresh, safe remembered grenade opportunity.");
+
+        False(RememberedGrenadeDecisionCore.ShouldAttempt(
+                safeUnseenContact with { HasDirectSight = true }),
+            "Remembered grenade logic competed with a directly visible target.");
+        False(RememberedGrenadeDecisionCore.ShouldAttempt(
+                safeUnseenContact with { IsStationary = false }),
+            "A moving soldier was allowed to turn for a remembered grenade throw.");
+        False(RememberedGrenadeDecisionCore.ShouldAttempt(
+                safeUnseenContact with { ObservationAgeSeconds = 12.01f }),
+            "An expired last-known position remained valid for a grenade throw.");
+        False(RememberedGrenadeDecisionCore.ShouldAttempt(
+                safeUnseenContact with { IsBlastAreaClear = false }),
+            "A friendly inside the blast radius did not reject the remembered throw.");
+        False(RememberedGrenadeDecisionCore.ShouldAttempt(
+                safeUnseenContact with { HasClearThrowArc = false }),
+            "A blocked grenade arc was treated as clear.");
+    }
+
+    private static void TracerRetentionHonorsMachineGunAndEndpointRules()
+    {
+        False(TracerRetentionCore.ShouldKeep(true, true, 0f, 0f),
+            "Zero retention allowed a tracer through at the random endpoint.");
+        True(TracerRetentionCore.ShouldKeep(true, true, 1f, 0.999999f),
+            "Full retention removed a base-game machine-gun tracer.");
+        False(TracerRetentionCore.ShouldKeep(true, false, 1f, 0f),
+            "A non-machine-gun tracer bypassed the classifier.");
+        False(TracerRetentionCore.ShouldKeep(false, true, 1f, 0f),
+            "Retention created a tracer on a non-tracer base-game round.");
+        True(TracerRetentionCore.ShouldKeep(true, true, 0.35f, 0.349f),
+            "A sample below the configured retention was removed.");
+        False(TracerRetentionCore.ShouldKeep(true, true, 0.35f, 0.35f),
+            "A sample at the configured retention boundary was kept.");
     }
 
     private static void DetonatingProjectilesAreLeftToTheBaseGame()
@@ -708,7 +811,7 @@ internal static class Program
         bool requiredAction = false,
         bool pinnedOrBurning = false,
         bool flameEvading = false,
-        bool nativelyMoving = false)
+        bool suppressedForcedAdvance = false)
     {
         if (requiredAction && !flameEvading)
         {
@@ -721,22 +824,20 @@ internal static class Program
             return TacticalStance.Prone;
         }
         if (PoseMovementContractCore.MovementOwnsPose(
-                committedMovement, movementHalted, nativelyMoving))
+                committedMovement, movementHalted))
         {
             owner = PoseOwner.MovementPose;
-            return PoseMovementContractCore.MovementStance;
+            return PoseMovementContractCore.MovementStance(
+                committedMovement, suppressedForcedAdvance);
         }
 
         owner = PoseOwner.CoverEvaluation;
         return fightingStance;
     }
 
-    private static void AMovingSoldierIsNeverHeldProne()
+    private static void ForcedSuppressedAdvancesCanCrawl()
     {
-        // The reported bug: the movement arbiter authorized a bound while the pose arbiter
-        // independently held the soldier prone from a cover evaluation, so he crawled, made
-        // no progress, and the stall watchdog cycled him. Every owner that GRANTS movement
-        // now owns the pose, and the movement pose is not Prone.
+        // Ordinary mod-owned movement remains a crouch bound.
         foreach (var granting in new[]
                  {
                      MovementOwner.OrderedMove, MovementOwner.CommittedMove,
@@ -748,19 +849,47 @@ internal static class Program
             var stance = ResolvePoseWithMovementContract(
                 granting, movementHalted: false, TacticalStance.Prone, out var owner);
             Equal(PoseOwner.MovementPose, owner, "A granted move did not own the pose.");
-            False(stance == TacticalStance.Prone, "A soldier was told to bound while prone.");
             Equal(TacticalStance.Crouched, stance, "The movement pose was not the crouch bound.");
         }
 
-        // A native move this mod is not overriding counts too, but only while the soldier is
-        // actually moving - Free means nothing was written, not "he is running".
-        Equal(TacticalStance.Crouched,
+        // The deadline-forced attacker is the intentional crawl: both the objective route
+        // and an already selected cover route use OrderedMove / CommittedMove.
+        foreach (var advancing in new[]
+                 {
+                     MovementOwner.OrderedMove, MovementOwner.CommittedMove
+                 })
+        {
+            Equal(TacticalStance.Prone,
+                ResolvePoseWithMovementContract(
+                    advancing, movementHalted: false, TacticalStance.Crouched,
+                    out var crawlOwner, suppressedForcedAdvance: true),
+                "A forced suppressed advance was raised out of its crawl.");
+            Equal(PoseOwner.MovementPose, crawlOwner,
+                "The crawl did not remain owned by the movement contract.");
+        }
+
+        // Safety movement cannot accidentally inherit the crawl authorization.
+        foreach (var safetyMove in new[]
+                 {
+                     MovementOwner.HaltSpacing, MovementOwner.HazardEscape
+                 })
+        {
+            Equal(TacticalStance.Crouched,
+                ResolvePoseWithMovementContract(
+                    safetyMove, movementHalted: false, TacticalStance.Prone,
+                    out _, suppressedForcedAdvance: true),
+                "A safety move incorrectly became a crawl.");
+        }
+
+        // Free means the mod did not write locomotion. Leave the game's native favourite
+        // pose alone so a native prone move can remain a crawl.
+        Equal(TacticalStance.Prone,
             ResolvePoseWithMovementContract(
                 MovementOwner.Free, movementHalted: false, TacticalStance.Prone,
-                out var nativeOwner, nativelyMoving: true),
-            "A natively moving soldier kept a prone fighting pose.");
-        Equal(PoseOwner.MovementPose, nativeOwner,
-            "A native move did not hand the pose to the movement contract.");
+                out var nativeOwner),
+            "Native prone movement was raised into a crouch.");
+        Equal(PoseOwner.CoverEvaluation, nativeOwner,
+            "The movement contract claimed native locomotion.");
 
         // The rank placement itself: the movement pose outranks every FIGHTING pose, which
         // is what stops rank e/f from putting a bounding soldier back on his belly.
@@ -831,7 +960,7 @@ internal static class Program
                      MovementOwner.EngagementHold, MovementOwner.CoverHold
                  })
         {
-            False(PoseMovementContractCore.MovementOwnsPose(halting, true, false),
+            False(PoseMovementContractCore.MovementOwnsPose(halting, true),
                 "A halting owner claimed the pose.");
             Equal(TacticalStance.Prone,
                 ResolvePoseWithMovementContract(
@@ -843,9 +972,9 @@ internal static class Program
 
         // A stale grant cannot survive an actual halt, and Free without movement is not a
         // move: a stationary soldier the mod is not touching keeps his evaluated pose.
-        False(PoseMovementContractCore.MovementOwnsPose(MovementOwner.CommittedMove, true, false),
+        False(PoseMovementContractCore.MovementOwnsPose(MovementOwner.CommittedMove, true),
             "A halted soldier was still treated as moving.");
-        False(PoseMovementContractCore.MovementOwnsPose(MovementOwner.Free, false, false),
+        False(PoseMovementContractCore.MovementOwnsPose(MovementOwner.Free, false),
             "A stationary soldier under native control was treated as moving.");
         Equal(TacticalStance.Prone,
             ResolvePoseWithMovementContract(
@@ -894,6 +1023,37 @@ internal static class Program
             "Co-located soldiers produced no step at all.");
         True(float.IsFinite(degenerate.X) && float.IsFinite(degenerate.Z),
             "The degenerate step was not finite.");
+        const float configuredSeparation = 3.5f;
+        True(HaltSpacingCore.TryResolveStep(
+                self,
+                new MapPoint(13.25f, 10f),
+                threat,
+                true,
+                configuredSeparation,
+                out var configuredStep),
+            "The configurable separation distance did not widen the overlap check.");
+        Equal(
+            configuredSeparation,
+            MathF.Round(
+                MathF.Sqrt(
+                    configuredStep.X * configuredStep.X +
+                    configuredStep.Z * configuredStep.Z),
+                4),
+            "The configurable separation distance did not control the clearing step.");
+        False(HaltSpacingCore.TryResolveStep(
+                self,
+                new MapPoint(13.75f, 10f),
+                threat,
+                true,
+                configuredSeparation,
+                out _),
+            "The configured separation distance dispersed an adequately spaced soldier.");
+        False(HaltSpacingCore.StepDoesNotCloseGap(
+                self, new MapPoint(11f, 10f), new MapPoint(1f, 0f)),
+            "A blocked alternate step was allowed to move toward the neighbour.");
+        True(HaltSpacingCore.StepDoesNotCloseGap(
+                self, new MapPoint(11f, 10f), new MapPoint(-1f, 0f)),
+            "A safe alternate step away from the neighbour was rejected.");
         False(HaltSpacingCore.TryResolveStep(
                 new MapPoint(float.NaN, 10f), new MapPoint(10f, 10f), threat, true, out _),
             "A non-finite position produced a dispersion step.");
@@ -917,6 +1077,18 @@ internal static class Program
             "An unverified native slot displaced a measured protective position.");
         False(InfantryCoverDecisionCore.ShouldUseAuthoredFallback(false, false),
             "A fallback was fabricated without a valid authored cover node.");
+    }
+
+    private static void AuthoredFallbackRejectsClassifiedWeakObstacles()
+    {
+        True(InfantryCoverDecisionCore.IsAuthoredFallbackEligible(false, false, false),
+            "An unclassifiable authored trench/building slot lost its conservative fallback.");
+        False(InfantryCoverDecisionCore.IsAuthoredFallbackEligible(true, false, false),
+            "A classified weak standing obstruction was trusted as authored cover.");
+        False(InfantryCoverDecisionCore.IsAuthoredFallbackEligible(false, true, false),
+            "A classified weak crouched obstruction was trusted as authored cover.");
+        False(InfantryCoverDecisionCore.IsAuthoredFallbackEligible(false, false, true),
+            "A classified weak prone obstruction was trusted as authored cover.");
     }
 
     private static void ProtectedFiringLaneBeatsEquallyProtectedBlindSlot()
@@ -1108,23 +1280,28 @@ internal static class Program
         // that reaction and the on-cover fighting crouch must both survive the fix.
         Equal(TacticalStance.Prone,
             SuppressionRecoveryPoseCore.Resolve(
-                onUsableCover: false, current: TacticalStance.Prone, coverEvaluationOwnsProne: false),
+                hasOverheadProtection: false, onUsableCover: false,
+                current: TacticalStance.Prone, coverEvaluationOwnsProne: false),
             "A prone soldier in the open was raised to crouch by the suppression recovery rule.");
         Equal(TacticalStance.Crouched,
             SuppressionRecoveryPoseCore.Resolve(
-                onUsableCover: true, current: TacticalStance.Prone, coverEvaluationOwnsProne: false),
+                hasOverheadProtection: false, onUsableCover: true,
+                current: TacticalStance.Prone, coverEvaluationOwnsProne: false),
             "A prone soldier on usable cover with no owned prone evaluation was not allowed to rise to the fighting crouch.");
         Equal(TacticalStance.Crouched,
             SuppressionRecoveryPoseCore.Resolve(
-                onUsableCover: false, current: TacticalStance.Crouched, coverEvaluationOwnsProne: false),
+                hasOverheadProtection: false, onUsableCover: false,
+                current: TacticalStance.Crouched, coverEvaluationOwnsProne: false),
             "The already-crouched suppression reaction was lost off cover.");
         Equal(TacticalStance.Crouched,
             SuppressionRecoveryPoseCore.Resolve(
-                onUsableCover: false, current: TacticalStance.Standing, coverEvaluationOwnsProne: false),
+                hasOverheadProtection: false, onUsableCover: false,
+                current: TacticalStance.Standing, coverEvaluationOwnsProne: false),
             "The standing->crouch suppression reaction was lost off cover.");
         Equal(TacticalStance.Prone,
             SuppressionRecoveryPoseCore.Resolve(
-                onUsableCover: true, current: TacticalStance.Crouched, coverEvaluationOwnsProne: true),
+                hasOverheadProtection: false, onUsableCover: true,
+                current: TacticalStance.Crouched, coverEvaluationOwnsProne: true),
             "Suppression recovery fought an owned cover evaluation that already measured the slot as prone-only.");
     }
 
@@ -1154,7 +1331,8 @@ internal static class Program
             // Pin released; the suppression-recovery owner takes over. It keeps an
             // already-prone soldier down in the open, so the proposal stays Prone.
             var proposed = SuppressionRecoveryPoseCore.Resolve(
-                onUsableCover: false, latched, coverEvaluationOwnsProne: false);
+                hasOverheadProtection: false, onUsableCover: false,
+                latched, coverEvaluationOwnsProne: false);
             if (StepLatch(ref owner, ref latched, ref holdUntil,
                     PoseOwner.SuppressionRecovery, proposed, measuredStand: false, t) &&
                 reachedProne && proposed != TacticalStance.Prone)
@@ -1203,7 +1381,8 @@ internal static class Program
                 : PoseOwner.CoverEvaluation;
             var proposed = suppressionBandActive
                 ? SuppressionRecoveryPoseCore.Resolve(
-                    onUsableCover: true, latched, coverEvaluationOwnsProne: coverOwned)
+                    hasOverheadProtection: false, onUsableCover: true,
+                    latched, coverEvaluationOwnsProne: coverOwned)
                 : TacticalStance.Prone;
 
             if (StepLatch(ref owner, ref latched, ref holdUntil,
@@ -1218,6 +1397,38 @@ internal static class Program
             "Suppression recovery fought the owned cover evaluation and reopened the prone<->crouch loop.");
         Equal(TacticalStance.Prone, latched,
             "The latched pose did not stay converged on the protective stance under a flickering suppression band.");
+    }
+
+    private static void IndoorSuppressionKeepsAFiringCrouch()
+    {
+        Equal(TacticalStance.Crouched,
+            PinnedSuppressionPoseCore.Resolve(
+                hasOverheadProtection: true,
+                onUsableCover: false,
+                hasCoverEvaluation: false,
+                evaluatedCoverPose: TacticalStance.Crouched),
+            "A pinned soldier under a building ceiling went prone on the indoor floor.");
+        Equal(TacticalStance.Crouched,
+            PinnedSuppressionPoseCore.Resolve(
+                hasOverheadProtection: true,
+                onUsableCover: true,
+                hasCoverEvaluation: true,
+                evaluatedCoverPose: TacticalStance.Prone),
+            "A prone-only cover evaluation overrode the indoor suppression crouch.");
+        Equal(TacticalStance.Crouched,
+            SuppressionRecoveryPoseCore.Resolve(
+                hasOverheadProtection: true,
+                onUsableCover: false,
+                current: TacticalStance.Prone,
+                coverEvaluationOwnsProne: false),
+            "An indoor soldier remained prone after the hard pin released.");
+        Equal(TacticalStance.Prone,
+            PinnedSuppressionPoseCore.Resolve(
+                hasOverheadProtection: false,
+                onUsableCover: false,
+                hasCoverEvaluation: false,
+                evaluatedCoverPose: TacticalStance.Crouched),
+            "The indoor guard stopped an exposed outdoor soldier from going prone.");
     }
 
     private static void WrongSideAnchorReleasesForALiveEngagedThreat()
@@ -1290,6 +1501,51 @@ internal static class Program
             TargetConfirmationCore.AccrueObservation(
                 0f, 0f, TargetConfirmationCore.ContinuityBreakSeconds + 0.01f),
             "A gap just past the continuity boundary failed to reset the observed streak.");
+    }
+
+    private static void LocalTargetReportsRespectRangeAndPreferTheNearestContact()
+    {
+        True(LocalTargetReportCore.IsInsideSharingRadius(225f, 15f),
+            "A friendly exactly on the 15 m callout boundary did not receive the report.");
+        False(LocalTargetReportCore.IsInsideSharingRadius(225.01f, 15f),
+            "A friendly outside the configured callout radius received the report.");
+        False(LocalTargetReportCore.IsInsideSharingRadius(0f, 0f),
+            "A disabled/invalid callout radius still shared contact knowledge.");
+
+        True(LocalTargetReportCore.ShouldAcceptReport(
+                currentReportActive: false,
+                isSameTarget: false,
+                currentTargetDistanceSquared: 100f,
+                incomingTargetDistanceSquared: 400f),
+            "A recipient with no active report rejected its first callout.");
+        True(LocalTargetReportCore.ShouldAcceptReport(
+                currentReportActive: true,
+                isSameTarget: true,
+                currentTargetDistanceSquared: 100f,
+                incomingTargetDistanceSquared: 400f),
+            "A fresh observation failed to update the same reported target.");
+        True(LocalTargetReportCore.ShouldAcceptReport(
+                currentReportActive: true,
+                isSameTarget: false,
+                currentTargetDistanceSquared: 400f,
+                incomingTargetDistanceSquared: 100f),
+            "A nearer reported threat failed to replace a farther one.");
+        False(LocalTargetReportCore.ShouldAcceptReport(
+                currentReportActive: true,
+                isSameTarget: false,
+                currentTargetDistanceSquared: 100f,
+                incomingTargetDistanceSquared: 400f),
+            "A farther callout displaced a nearer active reported threat.");
+    }
+
+    private static void DirectThreatMemoryOutlastsPreciseContactMemory()
+    {
+        Equal(15f, DirectThreatMemoryCore.RetentionSeconds(0f),
+            "Direct hostile fire was remembered for less than the 15-second safety floor.");
+        Equal(20f, DirectThreatMemoryCore.RetentionSeconds(15f),
+            "The default precise target memory did not add five seconds of coarse danger memory.");
+        Equal(35f, DirectThreatMemoryCore.RetentionSeconds(30f),
+            "The configurable target-memory increase did not extend direct-threat memory.");
     }
 
     private static MapPoint DirectionAt(float degrees)
@@ -1403,6 +1659,18 @@ internal static class Program
             "A hard but narrow obstruction was allowed to leave half the body exposed.");
     }
 
+    private static void BarbedWireIsNeverBallisticCover()
+    {
+        True(BallisticCoverDecisionCore.IsNonProtectiveScreenDescription("BarbedWire_02 metal"),
+            "A barbed-wire prefab was not recognized as a non-protective screen.");
+        True(BallisticCoverDecisionCore.IsNonProtectiveScreenDescription("razor_wire fence"),
+            "Razor wire was not recognized as a non-protective screen.");
+        True(BallisticCoverDecisionCore.IsNonProtectiveScreenDescription("ChainLinkFence wire"),
+            "Chain-link wire was not recognized as a non-protective screen.");
+        False(BallisticCoverDecisionCore.IsNonProtectiveScreenDescription("steel bunker wall"),
+            "Solid steel cover was mistaken for a wire screen.");
+    }
+
     private static void ProtectionWeightedScorePrefersSurvivableCover()
     {
         var nearMarginal = new CoverScoreInput(
@@ -1422,6 +1690,24 @@ internal static class Program
              InfantryCoverDecisionCore.Score(
                  CoverSelectionMode.DefensiveOccupation, nearMarginal),
             "A nearby marginal obstruction beat substantially safer masonry cover.");
+    }
+
+    private static void DeliberateCoverPrefersNearbySaferPosition()
+    {
+        var closeMarginal = new CoverScoreInput(
+            25f, 0f, true, 0, true, true, 1f, 0.1f,
+            PrimaryProtectionFraction: 0.61f);
+        var nearbyTrench = closeMarginal with
+        {
+            DistanceSqr = 400f,
+            PrimaryProtectionFraction = 0.95f
+        };
+
+        True(InfantryCoverDecisionCore.Score(
+                 CoverSelectionMode.Normal, nearbyTrench) <
+             InfantryCoverDecisionCore.Score(
+                 CoverSelectionMode.Normal, closeMarginal),
+            "Deliberate movement chose a marginal obstacle over substantially safer nearby cover.");
     }
 
     private static void CoverScoringSpreadsSoldiersWithoutOverridingProtection()
@@ -1450,6 +1736,34 @@ internal static class Program
         True(InfantryCoverDecisionCore.Score(CoverSelectionMode.Normal, crowdedProtective) <
              InfantryCoverDecisionCore.Score(CoverSelectionMode.Normal, exposedEmpty),
             "Crowding pushed a soldier off protective cover toward exposed open ground.");
+
+        var nearCrowdedDefensive = uncrowded with
+        {
+            PreferProtectionOverFiringLine = true,
+            NearbyReservationCount = 1
+        };
+        var fartherEquivalentDefensive = nearCrowdedDefensive with
+        {
+            DistanceSqr = 625f,
+            NearbyReservationCount = 0
+        };
+        True(
+            InfantryCoverDecisionCore.Score(
+                CoverSelectionMode.DefensiveOccupation, fartherEquivalentDefensive) <
+            InfantryCoverDecisionCore.Score(
+                CoverSelectionMode.DefensiveOccupation, nearCrowdedDefensive),
+            "A defender clustered at the nearest slot despite equally protective cover elsewhere in the position.");
+
+        var nearSaferDefensive = nearCrowdedDefensive with
+        {
+            PrimaryProtectionFraction = 0.9f
+        };
+        True(
+            InfantryCoverDecisionCore.Score(
+                CoverSelectionMode.DefensiveOccupation, nearSaferDefensive) <
+            InfantryCoverDecisionCore.Score(
+                CoverSelectionMode.DefensiveOccupation, fartherEquivalentDefensive),
+            "Defensive dispersion overrode a material protection advantage.");
     }
 
     private static void DispersionDegradesInsteadOfBlockingNearbyCover()
@@ -2010,6 +2324,55 @@ internal static class Program
             "A stationary hold remained under the movement watchdog.");
     }
 
+    private static void CoverRoutesRetryThenRejectEntranceStagnation()
+    {
+        Equal(
+            CoverRouteRecoveryDecision.Continue,
+            CoverRouteRecoveryCore.Evaluate(
+                20f,
+                20f,
+                CoverRouteRecoveryCore.NoDestinationProgressSeconds - 0.01f,
+                pathRetryUsed: false,
+                waitingForPath: false),
+            "A trench-entry detour was interrupted before its bounded grace period.");
+        Equal(
+            CoverRouteRecoveryDecision.DestinationProgressed,
+            CoverRouteRecoveryCore.Evaluate(
+                19f,
+                20f,
+                CoverRouteRecoveryCore.NoDestinationProgressSeconds,
+                pathRetryUsed: false,
+                waitingForPath: false),
+            "Meaningful progress toward the selected trench slot did not reset the route watch.");
+        Equal(
+            CoverRouteRecoveryDecision.Continue,
+            CoverRouteRecoveryCore.Evaluate(
+                20f,
+                20f,
+                CoverRouteRecoveryCore.NoDestinationProgressSeconds,
+                pathRetryUsed: false,
+                waitingForPath: true),
+            "An in-flight native path request consumed the trench-route retry.");
+        Equal(
+            CoverRouteRecoveryDecision.RefreshPath,
+            CoverRouteRecoveryCore.Evaluate(
+                20f,
+                20f,
+                CoverRouteRecoveryCore.NoDestinationProgressSeconds,
+                pathRetryUsed: false,
+                waitingForPath: false),
+            "A route circling outside a trench did not refresh its native path once.");
+        Equal(
+            CoverRouteRecoveryDecision.Abandon,
+            CoverRouteRecoveryCore.Evaluate(
+                20f,
+                20f,
+                CoverRouteRecoveryCore.NoDestinationProgressSeconds,
+                pathRetryUsed: true,
+                waitingForPath: false),
+            "A trench route that still made no progress after retry was never rejected.");
+    }
+
     private static void TransportDismountsBeforeTakingFire()
     {
         True(TransportDismountDecisionCore.IsImminent(new TransportThreatInput(
@@ -2072,6 +2435,39 @@ internal static class Program
         True(decision.ShouldSearch, "Direct fire did not trigger an urgent cover assessment.");
         Equal(CoverSelectionMode.Urgent, decision.SelectionMode,
             "Direct fire used deliberate cover priorities.");
+    }
+
+    private static void DistantContactMovesExposedInfantryTowardCover()
+    {
+        var distant = InfantryCoverDecisionCore.EvaluateNeed(new CoverNeedInput(
+            HasUsableCover: false,
+            MayAdvanceFromCover: false,
+            CoverCompromised: false,
+            UnderDirectFire: false,
+            Suppressed: false,
+            CloseThreat: false,
+            AttackAdvanceBlocked: true,
+            NormalDecisionDue: false,
+            UrgentDecisionDue: true));
+        True(distant.ShouldSearch,
+            "An exposed soldier stayed in open ground after confirming a distant threat.");
+        Equal(CoverSelectionMode.Urgent, distant.SelectionMode,
+            "The move from open ground could not accept a bounded exposed dash to real cover.");
+
+        var close = InfantryCoverDecisionCore.EvaluateNeed(new CoverNeedInput(
+            HasUsableCover: false,
+            MayAdvanceFromCover: false,
+            CoverCompromised: false,
+            UnderDirectFire: false,
+            Suppressed: false,
+            CloseThreat: true,
+            AttackAdvanceBlocked: true,
+            NormalDecisionDue: true,
+            UrgentDecisionDue: true));
+        False(close.ShouldSearch,
+            "A soldier disengaged into a cover move while a close threat required immediate fire.");
+        Equal(InfantryCoverState.Holding, close.State,
+            "A close threat did not retain the fighting halt.");
     }
 
     private static void CoverSelectionRequiresProtectionAndSafeNormalRoute()

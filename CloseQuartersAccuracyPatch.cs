@@ -28,7 +28,12 @@ internal static class CloseQuartersAccuracyPatch
                 return;
 
             var distanceFactor = Mathf.Clamp01(distance / closeQuartersRange);
-            __result *= Mathf.Lerp(Settings.SpreadMultiplierAtPointBlank.Value, 1f, distanceFactor);
+            // Preserve the configured point-blank value but let the advantage
+            // remain meaningful through the room/building engagement band instead
+            // of shedding most of it halfway to the configured range.
+            var spreadCurve = distanceFactor * distanceFactor;
+            __result *= Mathf.Lerp(
+                Settings.SpreadMultiplierAtPointBlank.Value, 1f, spreadCurve);
         }
         catch (Exception ex)
         {

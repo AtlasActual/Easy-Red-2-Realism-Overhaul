@@ -689,6 +689,16 @@ internal static class BulletPenetration
                 continue;
 
             hasObstruction = true;
+            // Wire meshes frequently have no reliable closed volume from which an
+            // exit thickness can be measured. That uncertainty must not turn a
+            // penetrable screen into a full ballistic stop for cover selection.
+            if (profile.Surface == PenetrationSurface.ThinMetal &&
+                HasNonProtectiveCoverScreenName(collider))
+            {
+                dominantSurface = profile.Surface;
+                continue;
+            }
+
             if (!penetrationEnabled || initialBudget <= 0.001f ||
                 IsEnvironmentalPenetrationStop(collider))
             {
@@ -1373,6 +1383,17 @@ internal static class BulletPenetration
 
         return true;
     }
+
+    internal static bool IsNonProtectiveCoverScreen(Collider collider)
+    {
+        return TryClassifySurface(collider, out var profile) &&
+               profile.Surface == PenetrationSurface.ThinMetal &&
+               HasNonProtectiveCoverScreenName(collider);
+    }
+
+    private static bool HasNonProtectiveCoverScreenName(Collider collider) =>
+        BallisticCoverDecisionCore.IsNonProtectiveScreenDescription(
+            BuildSurfaceDescription(collider));
 
     private static PenetrationSurfaceProfile ProfileFor(PenetrationSurface surface)
     {

@@ -19,7 +19,21 @@ internal static class ExclusiveCoverAssignmentPatch
         // That clear must not tear down a protected gun route or a defender's
         // selected building/trench post between director updates.
         if (cover == null)
-            return !ContactResponse.ShouldBlockNativeCoverClear(__instance);
+        {
+            var shouldBlockClear = ContactResponse.ShouldBlockNativeCoverClear(__instance);
+            if (!shouldBlockClear)
+            {
+                var soldierId = __instance.GetInstanceID();
+                AiState.ReleaseCoverReservation(soldierId);
+                if (AiState.ContactStates.TryGetValue(soldierId, out var state))
+                {
+                    state.OccupiedCoverClaimId = IntPtr.Zero;
+                    state.OccupiedCoverClaimRefreshAt = 0f;
+                }
+            }
+
+            return !shouldBlockClear;
+        }
 
         // Vehicles inherit AiDestination and the native boarding path calls
         // Soldier.CoverPosition(vehicle). Cover-only ownership rules must not
@@ -47,20 +61,6 @@ internal static class ExclusiveCoverAssignmentPatch
             if (!TryGetUsableCoverPosition(cover, out var coverPosition))
                 return false;
 
-            // Same small HARD radius as the mod's own search (plan 016 review): this
-            // prefix silently rejects a native cover assignment, so a wide exclusion
-            // here would strand soldiers wherever they stand.
-            if (AiState.CoverReservedByOther(
-                    coverId,
-                    coverPosition,
-                    soldierId,
-                    Time.time,
-                    InfantryCoverPolicy.OccupancyRadiusMeters))
-            {
-                AiState.Trace($"Cover occupancy: blocked soldier {soldierId} from an occupied position");
-                return false;
-            }
-
             // A player-issued hold order defines the area in which this squad may
             // improve its position. Native or mod cover selection must not silently
             // replace that command with a cover slot outside the ordered area.
@@ -80,9 +80,19 @@ internal static class ExclusiveCoverAssignmentPatch
             // Native AI assignments do not pass through Contact Response's move
             // state. Reserve their physical destination here as well so two native
             // cover objects at the same trench slot cannot attract two soldiers.
-            var reservationSeconds = InfantryCoverPolicy.DecisionIntervalSeconds;
-            AiState.ReserveCover(
-                coverId, coverPosition, soldierId, Time.time + reservationSeconds);
+            var now = Time.time;
+            if (!AiState.TryReserveCover(
+                    coverId,
+                    coverPosition,
+                    soldierId,
+                    now,
+                    now + InfantryCoverPolicy.CoverReservationLeaseSeconds,
+                    InfantryCoverPolicy.OccupancyRadiusMeters))
+            {
+                AiState.Trace(
+                    $"Cover occupancy: blocked soldier {soldierId} from an occupied position");
+                return false;
+            }
         }
         catch (Exception ex)
         {
@@ -94,6 +104,69 @@ internal static class ExclusiveCoverAssignmentPatch
         }
 
         return true;
+    }
+
+    internal static void MaintainOccupiedCoverClaim(Soldier soldier, float now)
+    {
+        var soldierId = soldier.GetInstanceID();
+        var state = AiState.GetContactState(soldierId);
+        if (!soldier.IsOnCover())
+        {
+            state.OccupiedCoverClaimId = IntPtr.Zero;
+            state.OccupiedCoverClaimRefreshAt = 0f;
+            return;
+        }
+
+        try
+        {
+            var cover = soldier.targetDestination;
+            if (cover == null || cover.WasCollected || cover.Pointer == IntPtr.Zero ||
+                !TryGetUsableCoverPosition(cover, out var coverPosition))
+            {
+                state.OccupiedCoverClaimId = IntPtr.Zero;
+                state.OccupiedCoverClaimRefreshAt = 0f;
+                return;
+            }
+
+            var coverId = cover.Pointer;
+            if (state.OccupiedCoverClaimId == coverId &&
+                now < state.OccupiedCoverClaimRefreshAt)
+            {
+                return;
+            }
+
+            if (!AiState.TryReserveCover(
+                    coverId,
+                    coverPosition,
+                    soldierId,
+                    now,
+                    now + InfantryCoverPolicy.CoverReservationLeaseSeconds,
+                    InfantryCoverPolicy.OccupancyRadiusMeters))
+            {
+                ContactResponse.RejectContestedOccupiedCover(
+                    soldier, state, soldierId, coverId, now);
+                return;
+            }
+
+            state.OccupiedCoverClaimId = coverId;
+            state.OccupiedCoverClaimRefreshAt =
+                now + InfantryCoverPolicy.DecisionIntervalSeconds;
+        }
+        catch (NullReferenceException)
+        {
+            state.OccupiedCoverClaimId = IntPtr.Zero;
+            state.OccupiedCoverClaimRefreshAt = 0f;
+        }
+        catch (Il2CppException)
+        {
+            state.OccupiedCoverClaimId = IntPtr.Zero;
+            state.OccupiedCoverClaimRefreshAt = 0f;
+        }
+        catch (ObjectCollectedException)
+        {
+            state.OccupiedCoverClaimId = IntPtr.Zero;
+            state.OccupiedCoverClaimRefreshAt = 0f;
+        }
     }
 
     internal static bool TryGetUsableCoverPosition(AiDestination cover, out Vector3 position)
@@ -459,7 +532,7 @@ internal static class SoldierTacticalSprintPatch
             }
 
             if ((Settings.DangerReactionsEnabled.Value &&
-                 suppression >= Settings.CrouchSuppression.Value) ||
+                 suppression >= AiBehaviorTuning.CrouchSuppressionThreshold) ||
                 activeThreatMovement || ContactResponse.ShouldOwnCrouch(id, now))
             {
                 ContactResponse.ApplyArbitratedPose(

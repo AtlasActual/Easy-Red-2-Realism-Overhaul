@@ -284,6 +284,7 @@ internal static class KnownTargetSuppressiveFire
             soldier == null || !soldier.IsAlive || !AiOwnership.IsAutonomous(soldier) ||
             soldier.IsOnVehicle() || soldier.IsOnFire ||
             soldier.IsMoving(0.2f) || ContactResponse.IsActualCharge(soldier) ||
+            RememberedGrenadeThrows.IsActive(soldierId) ||
             ContactResponse.IsRelocating(soldierId) || ContactResponse.IsPinned(soldierId) ||
             IncomingFireAwareness.HasActiveCue(soldierId, now) ||
             AiState.IsFlameEvading(soldierId, now))
@@ -332,7 +333,7 @@ internal static class KnownTargetSuppressiveFire
     private static float KnowledgeFreshSeconds()
         => Mathf.Max(
             MinimumKnowledgeFreshSeconds,
-            Settings.TargetMemorySeconds.Value + PostMemoryKnowledgeSeconds);
+            AiBehaviorTuning.TargetMemorySeconds + PostMemoryKnowledgeSeconds);
 
     private static bool HasUsableNativeTarget(SoldierAI ai, Soldier soldier)
         => TargetAcquisition.GetUsableAiTarget(ai) != null ||
@@ -412,7 +413,10 @@ internal static class KnownTargetSuppressiveFireFixedUpdatePatch
         try
         {
             if (__instance != null)
+            {
+                RememberedGrenadeThrows.FixedUpdate(__instance);
                 KnownTargetSuppressiveFire.FixedUpdate(__instance);
+            }
         }
         finally
         {

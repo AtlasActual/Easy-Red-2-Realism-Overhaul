@@ -280,11 +280,11 @@ internal enum PoseOwner
     // d: muzzle-clearance stand (OwnsCurrentCoverClearancePose) -> Idle.
     CoverClearance = 5,
 
-    // c2: the MOVEMENT contract (plan 019). The committed movement decision is actually
-    // moving this soldier, so the pose is the movement pose and never Prone - a bounding
-    // man cannot also be crawling. It outranks every FIGHTING pose below it (they would
-    // otherwise put a moving soldier on his belly) and yields to every SAFETY pose above
-    // it, which is exactly where the two ladders meet: see PoseMovementContractCore.
+    // c2: the MOVEMENT contract (plan 019). A mod-committed movement decision owns the
+    // locomotion pose. Ordinary bounds use Crouch, while a suppressed attacker forced
+    // onward by the maximum combat halt may deliberately crawl. It outranks every
+    // FIGHTING pose below it and yields to every SAFETY pose above it, which is exactly
+    // where the two ladders meet: see PoseMovementContractCore.
     MovementPose = 6,
 
     // b: pinned / on-fire / flame safety (SuppressionPose) - instant.
@@ -298,9 +298,10 @@ internal enum PoseOwner
 /// The contract between the MOVEMENT ladder (<see cref="MovementOwner"/>, plan 018) and the
 /// POSE ladder (<see cref="PoseOwner"/>, plan 014). Each was internally consistent but they
 /// did not talk to each other, so a soldier could be granted a bound (CommittedMove /
-/// OrderedMove) while the pose ladder independently held him Prone from a cover evaluation
-/// or a suppression recovery. He then crawled, made no progress, the movement watchdog
-/// stalled him, and the cycle repeated - the "prone loop they eventually escape".
+/// OrderedMove) while the pose ladder independently supplied an unrelated Prone cover
+/// posture. Movement now owns the stance only for mod-committed moves: ordinary bounds
+/// crouch, while an explicitly authorized suppressed crawl remains prone. Native movement
+/// keeps the game's native favourite pose instead of being raised out of a crawl.
 ///
 /// The invariant that keeps the two ladders consistent, verified rank by rank:
 /// every pose owner ABOVE <see cref="PoseOwner.MovementPose"/> that can demand Prone has a
@@ -320,29 +321,30 @@ internal static class PoseMovementContractCore
     /// True when the committed movement decision is actually MOVING this soldier, so the
     /// movement channel owns his pose. A halting owner never owns it (that is the halt
     /// case: a stationary soldier keeps his evaluated fighting pose, prone included).
-    /// <see cref="MovementOwner.Free"/> means this mod wrote nothing this frame, so it only
-    /// counts when the soldier is natively moving anyway - otherwise every soldier the mod
-    /// is not touching would be forced out of a prone-protective cover slot.
+    /// <see cref="MovementOwner.Free"/> means this mod wrote nothing this frame, so native
+    /// locomotion retains the game's own favourite pose, including a native crawl.
     /// </summary>
     internal static bool MovementOwnsPose(
         MovementOwner committed,
-        bool halted,
-        bool nativelyMoving)
+        bool halted)
     {
         if (halted || MovementArbiterCore.Halts(committed))
             return false;
-        if (MovementArbiterCore.Grants(committed))
-            return true;
-        return committed == MovementOwner.Free && nativelyMoving;
+        return MovementArbiterCore.Grants(committed);
     }
 
     /// <summary>
-    /// The pose a moving soldier takes. Crouch, matching the pre-arbiter
-    /// ApplyTacticalMovementPose precedent and vision.md's "low posture" for a resumed
-    /// advance: the game's native crouch-walk/crouch-sprint still carries him forward,
-    /// which prone does not.
+    /// The pose a mod-owned moving soldier takes. Hazard escapes and spacing steps must
+    /// remain mobile crouch moves. An ordered or committed attacker whose combat-halt
+    /// deadline explicitly forced progress may instead crawl while suppressed.
     /// </summary>
-    internal static TacticalStance MovementStance => TacticalStance.Crouched;
+    internal static TacticalStance MovementStance(
+        MovementOwner committed,
+        bool suppressedForcedAdvance)
+        => suppressedForcedAdvance &&
+           committed is MovementOwner.OrderedMove or MovementOwner.CommittedMove
+            ? TacticalStance.Prone
+            : TacticalStance.Crouched;
 }
 
 /// <summary>
@@ -585,7 +587,7 @@ internal static class MovementArbiterCore
 /// neighbour, he takes one short lateral step off the threat axis first. Sideways, because
 /// stepping across the line of fire is what actually clears the doorway without walking
 /// him toward the enemy. If the step is unreachable the soldier halts anyway - this is one
-/// bounded step on the rising edge of a halt, never a loop and never a formation manager.
+/// bounded correction on a throttled halt check, never a loop and never a formation manager.
 /// </summary>
 internal static class HaltSpacingCore
 {
@@ -608,15 +610,31 @@ internal static class HaltSpacingCore
         MapPoint threat,
         bool hasThreat,
         out MapPoint step)
+        => TryResolveStep(
+            self,
+            neighbour,
+            threat,
+            hasThreat,
+            MinimumSpacingMeters,
+            out step);
+
+    internal static bool TryResolveStep(
+        MapPoint self,
+        MapPoint neighbour,
+        MapPoint threat,
+        bool hasThreat,
+        float minimumSpacingMeters,
+        out MapPoint step)
     {
         step = default;
-        if (!self.IsFinite || !neighbour.IsFinite)
+        if (!self.IsFinite || !neighbour.IsFinite ||
+            !float.IsFinite(minimumSpacingMeters) || minimumSpacingMeters <= 0f)
             return false;
 
         var awayX = self.X - neighbour.X;
         var awayZ = self.Z - neighbour.Z;
         var awaySqr = awayX * awayX + awayZ * awayZ;
-        if (awaySqr > MinimumSpacingMeters * MinimumSpacingMeters)
+        if (awaySqr > minimumSpacingMeters * minimumSpacingMeters)
             return false;
 
         var dirX = 0f;
@@ -654,8 +672,23 @@ internal static class HaltSpacingCore
             dirZ = -dirZ;
         }
 
-        step = new MapPoint(dirX * LateralStepMeters, dirZ * LateralStepMeters);
+        step = new MapPoint(
+            dirX * minimumSpacingMeters,
+            dirZ * minimumSpacingMeters);
         return true;
+    }
+
+    internal static bool StepDoesNotCloseGap(
+        MapPoint self,
+        MapPoint neighbour,
+        MapPoint step)
+    {
+        if (!self.IsFinite || !neighbour.IsFinite || !step.IsFinite)
+            return false;
+
+        var awayX = self.X - neighbour.X;
+        var awayZ = self.Z - neighbour.Z;
+        return step.X * awayX + step.Z * awayZ >= -0.001f;
     }
 }
 
@@ -722,6 +755,30 @@ internal static class CoverPostureOwnershipCore
 }
 
 /// <summary>
+/// Chooses the immediate pinned posture from protection that the soldier could
+/// physically recognize. A roofed position keeps a soldier crouched so the
+/// suppression reaction does not put him flat on an indoor floor and remove his
+/// firing lane.
+/// </summary>
+internal static class PinnedSuppressionPoseCore
+{
+    internal static TacticalStance Resolve(
+        bool hasOverheadProtection,
+        bool onUsableCover,
+        bool hasCoverEvaluation,
+        TacticalStance evaluatedCoverPose)
+    {
+        if (hasOverheadProtection)
+            return TacticalStance.Crouched;
+        if (!onUsableCover)
+            return TacticalStance.Prone;
+        if (!hasCoverEvaluation || evaluatedCoverPose == TacticalStance.Standing)
+            return TacticalStance.Crouched;
+        return evaluatedCoverPose;
+    }
+}
+
+/// <summary>
 /// A soldier already prone in the open under suppression must not be raised to a
 /// crouch while the suppression band stays active — rising in the open while still
 /// under fire is never the correct reaction, and it is what produced the visible
@@ -737,11 +794,13 @@ internal static class SuppressionRecoveryPoseCore
     // already ruled prone-only, so the suppression band must defer to it instead of
     // fighting it every frame (plan 012).
     internal static TacticalStance Resolve(
+        bool hasOverheadProtection,
         bool onUsableCover,
         TacticalStance current,
         bool coverEvaluationOwnsProne)
-        => (!onUsableCover && current == TacticalStance.Prone) ||
-           (onUsableCover && coverEvaluationOwnsProne)
+        => !hasOverheadProtection &&
+           ((!onUsableCover && current == TacticalStance.Prone) ||
+            (onUsableCover && coverEvaluationOwnsProne))
             ? TacticalStance.Prone
             : TacticalStance.Crouched;
 }
@@ -1327,6 +1386,53 @@ internal static class MovementProgressWatchdogCore
             ? MovementProgressDecision.Halt
             : MovementProgressDecision.Observe;
     }
+}
+
+internal enum CoverRouteRecoveryDecision
+{
+    Continue,
+    DestinationProgressed,
+    RefreshPath,
+    Abandon
+}
+
+internal static class CoverRouteRecoveryCore
+{
+    internal const float DestinationProgressEpsilonMeters = 0.35f;
+    internal const float NoDestinationProgressSeconds = 10f;
+
+    internal static CoverRouteRecoveryDecision Evaluate(
+        float currentDestinationDistance,
+        float bestDestinationDistance,
+        float secondsWithoutDestinationProgress,
+        bool pathRetryUsed,
+        bool waitingForPath)
+    {
+        if (waitingForPath)
+            return CoverRouteRecoveryDecision.Continue;
+
+        if (IsFinitePositive(currentDestinationDistance) &&
+            (!IsFinitePositive(bestDestinationDistance) ||
+             currentDestinationDistance + DestinationProgressEpsilonMeters <
+             bestDestinationDistance))
+        {
+            return CoverRouteRecoveryDecision.DestinationProgressed;
+        }
+
+        if (!float.IsNaN(secondsWithoutDestinationProgress) &&
+            !float.IsInfinity(secondsWithoutDestinationProgress) &&
+            secondsWithoutDestinationProgress >= NoDestinationProgressSeconds)
+        {
+            return pathRetryUsed
+                ? CoverRouteRecoveryDecision.Abandon
+                : CoverRouteRecoveryDecision.RefreshPath;
+        }
+
+        return CoverRouteRecoveryDecision.Continue;
+    }
+
+    private static bool IsFinitePositive(float value)
+        => value > 0f && !float.IsNaN(value) && !float.IsInfinity(value);
 }
 
 internal readonly record struct DefensivePositionOwnershipInput(

@@ -800,6 +800,30 @@ internal static partial class ContactResponse
         }
     }
 
+    internal static void RejectContestedOccupiedCover(
+        Soldier soldier,
+        ContactResponseState state,
+        int soldierId,
+        IntPtr coverId,
+        float now)
+    {
+        MarkFailedCover(state, coverId, now);
+        ReleaseDefensiveCoverHold(state, soldierId);
+        ResetManeuverCoverHold(state);
+        state.ManeuverCoverReleasedId = coverId;
+        state.ManeuverCoverReleaseUntil = now + 2f;
+        state.ReservedCoverId = IntPtr.Zero;
+        state.ReservedCoverPosition = default;
+        state.OccupiedCoverClaimId = IntPtr.Zero;
+        state.OccupiedCoverClaimRefreshAt = 0f;
+        state.NextDecisionAt = 0f;
+        state.NextRelocationAllowedAt = now;
+        AiState.ReleaseCoverReservation(soldierId);
+        ExecuteOwnedCoverWrite(soldier, () => soldier.CoverPosition(null!));
+        AiState.Trace(
+            $"Cover occupancy: soldier {soldierId} released a contested occupied position");
+    }
+
     private static bool IsDefensiveAnchorKnownCompromised(
         Soldier soldier,
         ContactResponseState state)

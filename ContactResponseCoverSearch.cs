@@ -6,6 +6,11 @@ namespace ER2RealismOverhaul;
 
 internal static class CoverOccupancy
 {
+    // Cover props and terrain colliders share this all-layer non-alloc query with
+    // soldiers. A small buffer can fill with geometry before the occupying soldier
+    // is returned, making a genuinely occupied slot appear empty.
+    private const int NearbyColliderCapacity = 96;
+
     [ThreadStatic]
     private static Collider[]? _nearbyColliders;
 
@@ -15,7 +20,7 @@ internal static class CoverOccupancy
         try
         {
             var radius = InfantryCoverPolicy.OccupancyRadiusMeters;
-            var nearby = _nearbyColliders ??= new Collider[24];
+            var nearby = _nearbyColliders ??= new Collider[NearbyColliderCapacity];
             var count = Physics.OverlapSphereNonAlloc(
                 coverPosition,
                 radius,
@@ -62,7 +67,7 @@ internal static class CoverOccupancy
         var __t = ModTimeProbe.Begin();
         try
         {
-            var nearby = _nearbyColliders ??= new Collider[24];
+            var nearby = _nearbyColliders ??= new Collider[NearbyColliderCapacity];
             var count = Physics.OverlapSphereNonAlloc(
                 position,
                 radius,
@@ -262,7 +267,7 @@ internal static partial class ContactResponse
     {
         // Calls made by the director's sole cover executor are intentional tactical
         // transitions and must pass through the native CoverPosition method.
-        if (_coverAssignmentExecutorSoldierId == soldier.GetInstanceID())
+        if (OwnsCoverAssignmentWrite(soldier))
             return false;
 
         if (!Settings.ContactResponseEnabled.Value)
@@ -281,7 +286,7 @@ internal static partial class ContactResponse
     internal static bool ShouldBlockNativeCoverClear(Soldier soldier)
     {
         var soldierId = soldier.GetInstanceID();
-        if (_coverAssignmentExecutorSoldierId == soldierId)
+        if (OwnsCoverAssignmentWrite(soldier))
             return false;
 
         var protectedAssignment =
@@ -850,6 +855,14 @@ internal static partial class ContactResponse
                     // arrival point when penetration geometry cannot classify any
                     // sampled barrier. It remains a fallback only: every measured,
                     // materially protective position wins before this path is used.
+                    if (!InfantryCoverDecisionCore.IsAuthoredFallbackEligible(
+                            geometry.Standing.HasClassifiedObstruction,
+                            geometry.Crouched.HasClassifiedObstruction,
+                            geometry.Prone.HasClassifiedObstruction))
+                    {
+                        continue;
+                    }
+
                     var nativePosePenalty = candidate.GetCoverPose() == SoldierPose.Idle
                         ? 450f
                         : 0f;
@@ -1245,8 +1258,12 @@ internal static partial class ContactResponse
         for (var i = 0; i < hitCount; i++)
         {
             var collider = hits[i].collider;
-            if (collider == null || collider.GetComponentInParent<Soldier>() != null)
+            if (collider == null ||
+                collider.GetComponentInParent<Soldier>() != null ||
+                BulletPenetration.IsNonProtectiveCoverScreen(collider))
+            {
                 continue;
+            }
 
             return true;
         }
@@ -1351,6 +1368,8 @@ internal static partial class ContactResponse
         state.RelocateUntil = relocateUntil;
         state.RelocateLastDistance = soldier.DestinationDistance;
         state.RelocateLastProgressAt = now;
+        state.RelocateLastDestinationProgressAt = now;
+        state.RelocatePathRetryUsed = false;
         state.RelocateLastProgressPosition = soldier.transform.position;
         state.RelocateDestinationPointer = coverId;
         state.RelocateDestinationPosition = coverPosition;
@@ -1488,7 +1507,7 @@ internal static partial class ContactResponse
             resolveDecisionTail: true,
             state.Pinned ||
             (Settings.DangerReactionsEnabled.Value &&
-             soldier.GetSuppressionValue() >= Settings.ProneSuppression.Value)
+             soldier.GetSuppressionValue() >= AiBehaviorTuning.ProneSuppressionThreshold)
                 ? SoldierPose.Prone
                 : SoldierPose.Crouch,
             "attack-advance");
@@ -1565,6 +1584,8 @@ internal static partial class ContactResponse
         state.RelocationPausedBySuppression = false;
         state.RelocateLastDistance = 0f;
         state.RelocateLastProgressAt = 0f;
+        state.RelocateLastDestinationProgressAt = 0f;
+        state.RelocatePathRetryUsed = false;
         state.RelocateLastProgressPosition = default;
         var occupiedCoverPosition = state.ReservedCoverPosition;
         state.RelocateDestinationPointer = IntPtr.Zero;
@@ -1612,7 +1633,7 @@ internal static partial class ContactResponse
                 state.ReservedCoverId,
                 occupiedCoverPosition,
                 soldierId,
-                now + InfantryCoverPolicy.DecisionIntervalSeconds);
+                now + InfantryCoverPolicy.CoverReservationLeaseSeconds);
         }
         else
         {

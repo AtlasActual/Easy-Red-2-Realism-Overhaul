@@ -364,10 +364,13 @@ internal static class SafeAiGrenadeThrowPatch
         if (item is not VirtualGrenade && item is not VirtualATGrenade)
             return true;
 
-        var target = __instance.GetCurrentBestVisibleEnemy();
-        if (target == null)
+        var id = __instance.GetInstanceID();
+        var rememberedThrow = RememberedGrenadeThrows.TryAuthorizeOwnedThrow(
+            __instance, id, item, out var targetPosition);
+        var target = rememberedThrow ? null : __instance.GetCurrentBestVisibleEnemy();
+        if (!rememberedThrow && target == null)
         {
-            AiDebugTelemetry.RecordDecision(AiDebugCategory.Danger, __instance.GetInstanceID(),
+            AiDebugTelemetry.RecordDecision(AiDebugCategory.Danger, id,
                 "Grenade rejected: no visible target");
             return false;
         }
@@ -376,19 +379,20 @@ internal static class SafeAiGrenadeThrowPatch
         var squad = __instance.joinedSquad;
         var assaulting = squad != null &&
                          (squad.order == Order.charge || squad.order == Order.attackFromSide);
-        var moving = __instance.IsMoving();
-        if (moving && (!assaulting || isProne))
+        var moving = rememberedThrow
+            ? __instance.IsMoving(0.2f)
+            : __instance.IsMoving();
+        if (moving && (rememberedThrow || !assaulting || isProne))
         {
             // Defenders and prone crawlers wait until stationary. An assaulting
             // soldier instead makes a short crouched throwing halt; the native
             // squad order remains intact and resumes after the throw animation.
-            AiDebugTelemetry.RecordDecision(AiDebugCategory.Danger, __instance.GetInstanceID(),
+            AiDebugTelemetry.RecordDecision(AiDebugCategory.Danger, id,
                 "Grenade rejected: unstable moving throw platform");
             return false;
         }
 
         var now = Time.time;
-        var id = __instance.GetInstanceID();
         if (!AiState.CooldownReady(AiState.NextGrenadeThrow, id, now))
         {
             AiDebugTelemetry.RecordDecision(AiDebugCategory.Danger, id,
@@ -396,7 +400,8 @@ internal static class SafeAiGrenadeThrowPatch
             return false;
         }
 
-        var targetPosition = target.GetCenterOfUnit();
+        if (!rememberedThrow)
+            targetPosition = target!.GetCenterOfUnit();
         var distance = Vector3.Distance(__instance.GetCenterOfUnit(), targetPosition);
         if (distance < Settings.GrenadeMinimumRange.Value ||
             distance > Settings.GrenadeMaximumRange.Value)
@@ -419,7 +424,7 @@ internal static class SafeAiGrenadeThrowPatch
         // it is native cover, a trench, or open ground. Only an active assault gets
         // permission to halt movement for the throw.
         GroundAiDirector.ExecuteGrenadeSafetyHalt(__instance, moving);
-        AiState.NextGrenadeThrow[id] = now + Settings.GrenadeCooldownSeconds.Value;
+        AiState.NextGrenadeThrow[id] = now + AiBehaviorTuning.GrenadeCooldownSeconds;
         var throwContext = moving
             ? "assault halt"
             : isProne

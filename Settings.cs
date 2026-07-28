@@ -7,6 +7,12 @@ internal static class Settings
 {
     internal static ConfigFile ConfigFile { get; private set; } = null!;
 
+    internal static ConfigEntry<float> AiAggressiveness = null!;
+    internal static ConfigEntry<float> AiAccuracy = null!;
+    internal static ConfigEntry<float> AiReactionSpeed = null!;
+    internal static ConfigEntry<float> AiAwareness = null!;
+    internal static ConfigEntry<float> AiSuppressionResistance = null!;
+
     internal static ConfigEntry<bool> AttackingForceBonusEnabled = null!;
     internal static ConfigEntry<float> AttackingForceAccuracySpreadMultiplier = null!;
     internal static ConfigEntry<float> AttackingForceSuppressionReceivedMultiplier = null!;
@@ -18,6 +24,7 @@ internal static class Settings
     internal static ConfigEntry<float> DistantTargetAcquisitionSeconds = null!;
     internal static ConfigEntry<float> DistantTargetAcquisitionRange = null!;
     internal static ConfigEntry<float> TargetMemorySeconds = null!;
+    internal static ConfigEntry<float> NearbyTargetSharingRadius = null!;
     internal static ConfigEntry<float> PeripheralAwarenessDistance = null!;
 
     internal static ConfigEntry<bool> CloseQuartersEnabled = null!;
@@ -28,6 +35,7 @@ internal static class Settings
 
     internal static ConfigEntry<bool> ContactResponseEnabled = null!;
     internal static ConfigEntry<bool> HaltSpacingEnabled = null!;
+    internal static ConfigEntry<float> InfantrySeparationDistance = null!;
     internal static ConfigEntry<float> ContactImmediateFireDistance = null!;
     internal static ConfigEntry<float> ContactCoverSearchRadius = null!;
     internal static ConfigEntry<float> ContactEngagementHaltDistance = null!;
@@ -42,6 +50,7 @@ internal static class Settings
     internal static ConfigEntry<float> MeleeAdditionalReach = null!;
     internal static ConfigEntry<float> MeleeMinimumSweepRadius = null!;
 
+    internal static ConfigEntry<bool> ObjectiveCoordinationEnabled = null!;
     internal static ConfigEntry<bool> StaticWeaponStaffingEnabled = null!;
 
     internal static ConfigEntry<bool> SuppressionAwarenessEnabled = null!;
@@ -179,6 +188,9 @@ internal static class Settings
 
     internal static ConfigEntry<bool> TracerReductionEnabled = null!;
     internal static ConfigEntry<float> MachineGunTracerRetention = null!;
+    internal static ConfigEntry<float> TracerBrightness = null!;
+    internal static ConfigEntry<float> TracerSizeMultiplier = null!;
+    internal static ConfigEntry<float> TracerLengthMultiplier = null!;
     internal static ConfigEntry<int> HitDecalDurationSeconds = null!;
 
     internal static ConfigEntry<float> PlayerSuppressionVignetteMultiplier = null!;
@@ -202,6 +214,10 @@ internal static class Settings
     internal static ConfigEntry<float> ChatterRoutineMaximumSeconds = null!;
 
     internal static ConfigEntry<bool> AudioBalanceEnabled = null!;
+    internal static ConfigEntry<int> MaximumLoopedWeaponSounds = null!;
+    internal static ConfigEntry<bool> RaiseAudioVoiceCapacity = null!;
+    internal static ConfigEntry<int> MinimumRealAudioVoices = null!;
+    internal static ConfigEntry<int> MinimumVirtualAudioVoices = null!;
     internal static ConfigEntry<float> VehicleEngineSound = null!;
     internal static ConfigEntry<float> TankTrackVolumeMultiplier = null!;
     internal static ConfigEntry<float> WeaponFireVolumeMultiplier = null!;
@@ -209,6 +225,8 @@ internal static class Settings
     internal static ConfigEntry<float> PlayerFootstepVolumeMultiplier = null!;
 
     internal static ConfigEntry<bool> FirstPersonPlayerShadowEnabled = null!;
+    internal static ConfigEntry<bool> RealisticAimFatigueEnabled = null!;
+    internal static ConfigEntry<float> UnsupportedAimFatigueSeconds = null!;
     internal static ConfigEntry<float> HoldBreathZoomMultiplier = null!;
     internal static ConfigEntry<bool> BinocularsEnabled = null!;
     internal static ConfigEntry<KeyCode> BinocularsKey = null!;
@@ -222,12 +240,21 @@ internal static class Settings
     internal static ConfigEntry<bool> HeadshotDeathBlackoutEnabled = null!;
 
     internal static ConfigEntry<bool> KeepMultiplayerPlayerNamesWithHudDisabled = null!;
+    internal static ConfigEntry<bool> ImmersiveWorldHudEnabled = null!;
+    internal static ConfigEntry<bool> ContextualSquadNamesEnabled = null!;
+    internal static ConfigEntry<float> ContextualSquadNameRangeMeters = null!;
+    internal static ConfigEntry<bool> LeaveSquadRedeployEnabled = null!;
+
+    internal static ConfigEntry<bool> RagdollMomentumEnabled = null!;
+    internal static ConfigEntry<float> RagdollMomentumMultiplier = null!;
+    internal static ConfigEntry<float> RagdollMomentumMaximumSpeed = null!;
 
     internal static ConfigEntry<bool> ShowSettingsLauncherButton = null!;
     internal static ConfigEntry<string> DisabledSwitchSnapshot = null!;
 
     internal static ConfigEntry<bool> StutterProbeEnabled = null!;
     internal static ConfigEntry<bool> InstallGameplayPatches = null!;
+    internal static ConfigEntry<bool> DeferredInteropHandleCleanupEnabled = null!;
     internal static ConfigEntry<bool> IncrementalGarbageCollectionEnabled = null!;
     internal static ConfigEntry<int> IncrementalGarbageCollectionSliceMicroseconds = null!;
 
@@ -242,6 +269,17 @@ internal static class Settings
     {
         ConfigFile = config;
 
+        AiAggressiveness = config.Bind("AI - Core behavior", "Aggressiveness", 1f,
+            new ConfigDescription("Coordinates close-contact return fire, grenade frequency, and how quickly advancing troops resume their push. 1.0x is the recommended baseline; higher values play more aggressively without changing accuracy.", new AcceptableValueRange<float>(0.5f, 1.5f)));
+        AiAccuracy = config.Bind("AI - Core behavior", "Accuracy", 1f,
+            new ConfigDescription("Scales weapon accuracy for autonomous AI on both sides. 1.0x preserves the recommended baseline; higher values reduce spread and lower values increase it.", new AcceptableValueRange<float>(0.5f, 1.5f)));
+        AiReactionSpeed = config.Bind("AI - Core behavior", "ReactionSpeed", 1f,
+            new ConfigDescription("Coordinates point-blank, nearby, and distant visual target-acquisition delays. 1.0x preserves the detailed timing sliders; higher values identify visible enemies sooner.", new AcceptableValueRange<float>(0.5f, 1.5f)));
+        AiAwareness = config.Bind("AI - Core behavior", "Awareness", 1f,
+            new ConfigDescription("Coordinates field of view, peripheral awareness, and visual contact memory. 1.0x preserves the detailed awareness sliders; higher values notice and remember more without granting line of sight.", new AcceptableValueRange<float>(0.5f, 1.5f)));
+        AiSuppressionResistance = config.Bind("AI - Core behavior", "SuppressionResistance", 1f,
+            new ConfigDescription("Coordinates the suppression thresholds for crouching, going prone, and recovering from a pin. 1.0x preserves the detailed thresholds; higher values keep troops fighting longer under fire.", new AcceptableValueRange<float>(0.5f, 1.5f)));
+
         AttackingForceBonusEnabled = config.Bind("AI - Attack posture bonuses", "AttackPostureBonusesEnabled", true,
             "Gives host-controlled AI in the active Attack posture a modest proficiency bonus. The bonus follows objective ownership and changes sides when posture changes.");
         AttackingForceAccuracySpreadMultiplier = config.Bind("AI - Attack posture bonuses", "AttackPostureAccuracySpreadMultiplier", 0.728f,
@@ -253,41 +291,45 @@ internal static class Settings
 
         PerceptionEnabled = config.Bind("AI - Infantry tactics - Perception", "Enabled", true,
             "Requires AI to visually acquire a target before aiming or firing and stops indefinite target lock outside its forward field of view.");
-        HorizontalFov = config.Bind("AI - Infantry tactics - Perception", "HorizontalFovDegrees", 120f,
-            new ConfigDescription("AI horizontal combat field of view.", new AcceptableValueRange<float>(60f, 240f)));
-        CloseTargetAcquisitionSeconds = config.Bind("AI - Infantry tactics - Perception", "CloseTargetAcquisitionSeconds", 0.59f,
-            new ConfigDescription("Repeated valid observation required to acquire a nearby new target. Increasing this reduces close-range snap targeting.", new AcceptableValueRange<float>(0.15f, 5f)));
-        DistantTargetAcquisitionSeconds = config.Bind("AI - Infantry tactics - Perception", "DistantTargetAcquisitionSeconds", 1.356f,
-            new ConfigDescription("Repeated valid observation required to acquire a new target at or beyond the distant-acquisition range. Time scales smoothly from the close value.", new AcceptableValueRange<float>(0.25f, 8f)));
+        HorizontalFov = config.Bind("AI - Infantry tactics - Perception", "HorizontalFovDegrees", 130.874f,
+            new ConfigDescription("AI horizontal combat field of view. The recommended baseline leaves room for narrower or wider vision.", new AcceptableValueRange<float>(63.084f, 240f)));
+        CloseTargetAcquisitionSeconds = config.Bind("AI - Infantry tactics - Perception", "CloseTargetAcquisitionSeconds", 0.15f,
+            new ConfigDescription("Repeated valid observation required to acquire a nearby new target. Increasing this reduces close-range snap targeting. The recommended baseline is centered on this slider.", new AcceptableValueRange<float>(0.05f, 0.25f)));
+        DistantTargetAcquisitionSeconds = config.Bind("AI - Infantry tactics - Perception", "DistantTargetAcquisitionSeconds", 0.885f,
+            new ConfigDescription("Repeated valid observation required to acquire a new target at or beyond the distant-acquisition range. Time scales smoothly from the close value. The recommended baseline is centered on this slider.", new AcceptableValueRange<float>(0.25f, 1.52f)));
         DistantTargetAcquisitionRange = config.Bind("AI - Infantry tactics - Perception", "DistantTargetAcquisitionRangeMeters", 140f,
             new ConfigDescription("Distance at which the full distant target-acquisition time applies.", new AcceptableValueRange<float>(25f, 400f)));
-        TargetMemorySeconds = config.Bind("AI - Infantry tactics - Perception", "TargetMemorySeconds", 10f,
-            new ConfigDescription("How long an AI may remember a target outside its FOV before losing fire authorization.", new AcceptableValueRange<float>(0f, 15f)));
-        PeripheralAwarenessDistance = config.Bind("AI - Infantry tactics - Perception", "PeripheralAwarenessDistance", 13.834f,
-            new ConfigDescription("Targets this close remain noticeable even outside the normal FOV.", new AcceptableValueRange<float>(0f, 25f)));
+        TargetMemorySeconds = config.Bind("AI - Infantry tactics - Perception", "TargetMemorySeconds", 12.453f,
+            new ConfigDescription("How long an AI may remember a visually confirmed target outside its FOV before losing fire authorization. Suppression shortens this precise memory, while the coarse direction of direct hostile fire is retained for at least 15 seconds and does not grant firing permission. The recommended baseline is centered on this slider.", new AcceptableValueRange<float>(5f, 19.906f)));
+        NearbyTargetSharingRadius = config.Bind("AI - Infantry tactics - Perception", "NearbyTargetSharingRadiusMeters", 15f,
+            new ConfigDescription("How far an AI soldier can call out a personally confirmed target to nearby friendly AI. Recipients turn toward the reported last-known position but must still see and acquire the target themselves before firing.", new AcceptableValueRange<float>(5f, 50f)));
+        PeripheralAwarenessDistance = config.Bind("AI - Infantry tactics - Perception", "PeripheralAwarenessDistance", 25f,
+            new ConfigDescription("Targets this close remain noticeable even outside the normal FOV. The recommended baseline is centered on this slider.", new AcceptableValueRange<float>(0f, 50f)));
 
         CloseQuartersEnabled = config.Bind("AI - Infantry tactics - Close quarters", "Enabled", true,
-            "Speeds up target identification at point-blank range, keeps heavy suppression from blinding a soldier to an immediate close threat, and tightens weapon spread inside close-quarters range.");
-        PointBlankAcquisitionSeconds = config.Bind("AI - Infantry tactics - Close quarters", "PointBlankAcquisitionSeconds", 0.3f,
-            new ConfigDescription("Observation time required to identify a target at 0 m, lerping up to the normal close acquisition time at the immediate-fire distance. Lower values identify point-blank threats faster.", new AcceptableValueRange<float>(0.1f, 1.5f)));
-        MinimumPeripheralAwarenessMeters = config.Bind("AI - Infantry tactics - Close quarters", "MinimumPeripheralAwarenessMeters", 6f,
-            new ConfigDescription("Suppression can never shrink the peripheral-awareness ring below this distance, so a heavily suppressed soldier still notices a threat at arm's length. Never raises awareness above the unsuppressed value.", new AcceptableValueRange<float>(0f, 15f)));
+            "Lets targetless AI check for nearby visible enemies between normal scans, speeds up point-blank identification, keeps heavy suppression from blinding a soldier to an immediate threat, and tightens weapon spread inside close-quarters range.");
+        PointBlankAcquisitionSeconds = config.Bind("AI - Infantry tactics - Close quarters", "PointBlankAcquisitionSeconds", 0.1f,
+            new ConfigDescription("Observation time required to identify a target at 0 m, lerping up to the normal close acquisition time at the immediate-fire distance. Lower values identify point-blank threats faster. The recommended baseline is centered on this slider.", new AcceptableValueRange<float>(0.02f, 0.18f)));
+        MinimumPeripheralAwarenessMeters = config.Bind("AI - Infantry tactics - Close quarters", "MinimumPeripheralAwarenessMeters", 12.414f,
+            new ConfigDescription("Suppression can never shrink the peripheral-awareness ring below this distance, so a heavily suppressed soldier still notices a threat at arm's length. Never raises awareness above the unsuppressed value. The recommended baseline is centered on this slider.", new AcceptableValueRange<float>(0f, 24.828f)));
         CloseQuartersRangeMeters = config.Bind("AI - Infantry tactics - Close quarters", "CloseQuartersRangeMeters", 25f,
             new ConfigDescription("Range inside which AI weapon spread tightens. No effect at or beyond this distance.", new AcceptableValueRange<float>(5f, 50f)));
         SpreadMultiplierAtPointBlank = config.Bind("AI - Infantry tactics - Close quarters", "SpreadMultiplierAtPointBlank", 0.55f,
-            new ConfigDescription("Weapon spread multiplier at 0 m, lerping to 1.0 at the close-quarters range. Lower values make point-blank fire deadlier.", new AcceptableValueRange<float>(0.4f, 1f)));
+            new ConfigDescription("Weapon spread multiplier at 0 m, curving smoothly to 1.0 at the close-quarters range while retaining more of the accuracy bonus through typical room and building distances. Lower values make close fire deadlier.", new AcceptableValueRange<float>(0.4f, 1f)));
 
         ContactResponseEnabled = config.Bind("AI - Infantry tactics - Contact response", "Enabled", true,
             "Coordinates cover selection, forward relocations, and close engagement halts when infantry make contact.");
-        HaltSpacingEnabled = config.Bind("AI - Infantry tactics - Contact response", "StepClearOfStackedSquadmates", false,
-            "When a soldier is about to take a fighting halt on top of an already-halted squadmate, he first takes one short sideways step to open the gap. OFF by default: the step grants locomotion for a fixed window, so a soldier who finishes (or cannot finish) the step keeps his walk animation running for the remainder of it, which reads as walking in place. Cover-slot spacing is handled separately by the cover-search crowding penalty and is unaffected by this setting.");
-        ContactImmediateFireDistance = config.Bind("AI - Infantry tactics - Contact response", "ImmediateFireDistanceMeters", 30f,
-            new ConfigDescription("Inside this surprise-contact distance, an exposed soldier halts and returns fire immediately instead of continuing a cover move. Raised to 30 m so a rifleman caught mid-dash at ordinary infantry engagement range stops and shoots instead of running past the enemy without firing.", new AcceptableValueRange<float>(3f, 45f)));
-        ContactCoverSearchRadius = config.Bind("AI - Infantry tactics - Contact response", "CoverSearchRadiusMeters", 28f,
+        HaltSpacingEnabled = config.Bind("AI - Infantry tactics - Contact response", "StepClearOfStackedSquadmates", true,
+            "When a soldier is about to take a fighting halt on top of an already-halted squadmate, he first takes one short sideways step to open the gap. Cover-slot spacing is handled separately by the cover-search crowding penalty and is unaffected by this setting.");
+        InfantrySeparationDistance = config.Bind("AI - Infantry tactics - Contact response", "MinimumSoldierSeparationMeters", 2.5f,
+            new ConfigDescription("Minimum center-to-center distance autonomous AI tries to preserve when reserving cover or settling into a fighting halt. Larger values reduce bunching but may leave very tightly spaced trench or building slots unused.", new AcceptableValueRange<float>(1.25f, 4f)));
+        ContactImmediateFireDistance = config.Bind("AI - Infantry tactics - Contact response", "ImmediateFireDistanceMeters", 20.103f,
+            new ConfigDescription("Inside this surprise-contact distance, an exposed soldier halts and returns fire immediately instead of continuing a cover move. The recommended baseline is centered on this slider.", new AcceptableValueRange<float>(3f, 37.206f)));
+        ContactCoverSearchRadius = config.Bind("AI - Infantry tactics - Contact response", "CoverSearchRadiusMeters", 29.671f,
             new ConfigDescription("Local cover radius for maneuvering attackers. Raised so attackers can reach flanking cover, doorways, and building slots instead of only a tiny forward wedge. Defenders inventory their entire position out to at least 55 m or the objective radius plus 12 m.", new AcceptableValueRange<float>(5f, 60f)));
-        ContactEngagementHaltDistance = config.Bind("AI - Infantry tactics - Contact response", "EngagementHaltDistanceMeters", 196.449f,
-            new ConfigDescription("Inside this distance, visible contact overrides ordinary attack waypoints and the soldier establishes a firing halt. A charge keeps moving except when a non-SMG soldier meets an immediate close threat.", new AcceptableValueRange<float>(40f, 300f)));
-        MaximumAttackCombatHaltSeconds = config.Bind("AI - Infantry tactics - Contact response", "MaximumAttackCombatHaltSeconds", 12f,
+        ContactEngagementHaltDistance = config.Bind("AI - Infantry tactics - Contact response", "EngagementHaltDistanceMeters", 179.44f,
+            new ConfigDescription("Inside this distance, visible contact overrides ordinary attack waypoints and the soldier establishes a firing halt. A charge keeps moving except when a non-SMG soldier meets an immediate close threat. The recommended baseline is centered on this slider.", new AcceptableValueRange<float>(58.88f, 300f)));
+        MaximumAttackCombatHaltSeconds = config.Bind("AI - Infantry tactics - Contact response", "MaximumAttackCombatHaltSeconds", 22.538f,
             new ConfigDescription("Maximum continuous firing halt before a soldier whose squad is still moving resumes progress. It applies to any squad with a live move order (attack, charge or ordinary follow), so a rifleman who takes cover cannot sit there for as long as he can see an enemy while his squad walks away; a soldier on cover gets 2.5x this before he bounds. Squads on a defend order and squads that have stopped are not capped. Heavily pinned troops crawl; troops still seek forward cover and immediate close threats remain higher priority.", new AcceptableValueRange<float>(6f, 30f)));
         KnownTargetSuppressionEnabled = config.Bind("AI - Infantry tactics - Contact response", "SuppressKnownTargets", true,
             "Allows a stationary on-foot machine gunner to fire one bounded burst at a fresh, personally confirmed last-seen enemy position after sight is lost. It uses real ammunition and never tracks an unseen target.");
@@ -306,8 +348,11 @@ internal static class Settings
         ImprovedMeleeHitRegistrationEnabled = config.Bind("2d. Melee combat", "ImprovedHitRegistration", true,
             "Makes player and AI melee strikes use a longer and wider native hit query, reducing close-range ghost swings without changing melee damage.");
         MeleeAdditionalReach = BindMeleeAdditionalReach(config);
-        MeleeMinimumSweepRadius = config.Bind("2d. Melee combat", "MinimumSweepRadiusMeters", 0.448f,
-            new ConfigDescription("Minimum radius of the melee hit capsule. The base game uses 0.25 m; a modest increase forgives small animation and collider misalignments.", new AcceptableValueRange<float>(0.25f, 0.6f)));
+        MeleeMinimumSweepRadius = config.Bind("2d. Melee combat", "MinimumSweepRadiusMeters", 0.6f,
+            new ConfigDescription("Minimum radius of the melee hit capsule. The base game uses 0.25 m; a modest increase forgives small animation and collider misalignments.", new AcceptableValueRange<float>(0.25f, 1f)));
+
+        ObjectiveCoordinationEnabled = config.Bind("AI - Objective coordination", "Enabled", true,
+            "Spreads AI attackers across as many active objectives as their squad count can support, gives some squads offset approach angles, and keeps defenders distributed around nearby cover at every active objective. Uses native synchronized squad orders and never controls player-led or mission-scripted squads.");
 
         StaticWeaponStaffingEnabled = config.Bind("AI - Defense", "Enabled", true,
             "Sends AI defenders to staff viable static defensive weapons (crewed guns, emplacements) inside their squad's defend order area.");
@@ -325,10 +370,10 @@ internal static class Settings
             "Makes exposed soldiers get low for reloads, suppressed soldiers seek a lower stationary posture, recover from the initial shock to return fire, escape active flames, and dismount AI-led APCs before credible nearby contact.");
         CrouchSuppression = config.Bind("AI - Infantry tactics - Danger", "CrouchSuppressionThreshold", 35,
             new ConfigDescription("Suppression value that triggers crouching.", new AcceptableValueRange<int>(1, 254)));
-        ProneSuppression = config.Bind("AI - Infantry tactics - Danger", "ProneSuppressionThreshold", 51,
-            new ConfigDescription("Suppression value that triggers going prone.", new AcceptableValueRange<int>(2, 255)));
-        ProneReleaseSuppression = config.Bind("AI - Infantry tactics - Danger", "ProneReleaseSuppressionThreshold", 25,
-            new ConfigDescription("A pinned soldier remains prone until suppression falls below this lower threshold.", new AcceptableValueRange<int>(1, 254)));
+        ProneSuppression = config.Bind("AI - Infantry tactics - Danger", "ProneSuppressionThreshold", 55,
+            new ConfigDescription("Suppression value that triggers going prone. The recommended baseline leaves room to make the reaction earlier or later.", new AcceptableValueRange<int>(2, 168)));
+        ProneReleaseSuppression = config.Bind("AI - Infantry tactics - Danger", "ProneReleaseSuppressionThreshold", 35,
+            new ConfigDescription("A pinned soldier remains prone until suppression falls below this lower threshold. The recommended baseline leaves room for faster or slower recovery.", new AcceptableValueRange<int>(1, 87)));
         PinnedMinimumSeconds = config.Bind("AI - Infantry tactics - Danger", "PinnedMinimumSeconds", 6f,
             new ConfigDescription("Minimum commitment to a pinned stationary state before movement is reconsidered. Soldiers crouch behind valid cover and go prone when exposed.", new AcceptableValueRange<float>(1f, 20f)));
         MaximumPinnedSeconds = config.Bind("AI - Infantry tactics - Danger", "MaximumPinnedSeconds", 25f,
@@ -347,7 +392,7 @@ internal static class Settings
             new ConfigDescription("Lower suppression value below which a ducked AI mounted gunner may rise again.", new AcceptableValueRange<int>(0, 253)));
         MountedGunnerMinimumDuckSeconds = config.Bind("AI - Infantry tactics - Danger", "MountedGunnerMinimumDuckSeconds", 2.25f,
             new ConfigDescription("Minimum time an AI mounted gunner remains ducked after reacting to suppression.", new AcceptableValueRange<float>(0.5f, 12f)));
-        MountedGunnerRiseSettleSeconds = config.Bind("AI - Infantry tactics - Danger", "MountedGunnerRiseSettleSeconds", 0.4f,
+        MountedGunnerRiseSettleSeconds = config.Bind("AI - Infantry tactics - Danger", "MountedGunnerRiseSettleSeconds", 0.458f,
             new ConfigDescription("Delay after rising before an AI mounted gunner may fire again.", new AcceptableValueRange<float>(0.1f, 2f)));
 
         AiCasualtySuppressionEnabled = config.Bind("AI - Infantry tactics - Casualty suppression", "Enabled", true,
@@ -374,8 +419,8 @@ internal static class Settings
             new ConfigDescription("AI will not attempt an implausibly long explosive-grenade throw.", new AcceptableValueRange<float>(15f, 75f)));
         GrenadeFriendlySafetyRadius = config.Bind("AI - Infantry tactics - Combat safety", "GrenadeFriendlySafetyRadiusMeters", 11f,
             new ConfigDescription("Required friendly clearance around the intended grenade impact.", new AcceptableValueRange<float>(4f, 25f)));
-        GrenadeCooldownSeconds = config.Bind("AI - Infantry tactics - Combat safety", "GrenadeCooldownSeconds", 18f,
-            new ConfigDescription("Minimum time between explosive-grenade throws by one AI soldier.", new AcceptableValueRange<float>(5f, 90f)));
+        GrenadeCooldownSeconds = config.Bind("AI - Infantry tactics - Combat safety", "GrenadeCooldownSeconds", 13.035f,
+            new ConfigDescription("Minimum time between explosive-grenade throws by one AI soldier. The recommended baseline is centered on this slider.", new AcceptableValueRange<float>(5f, 21.07f)));
 
         TankTacticsEnabled = config.Bind("AI - Vehicle tactics", "Enabled", true,
             "Makes AI tanks establish standoff and reverse when too close to an enemy tank or badly damaged, while tanks on attack orders keep pressure against infantry.");
@@ -389,8 +434,8 @@ internal static class Settings
             new ConfigDescription("AI tanks may reverse while under threat below this fraction of hull life.", new AcceptableValueRange<float>(0.1f, 0.9f)));
         TankMaximumHullFacingAngle = config.Bind("AI - Vehicle tactics", "MaximumHullFacingAngleDegrees", 30f,
             new ConfigDescription("Tank is considered frontally aligned when its hull points within this angle of an enemy tank; retreats preserve hull orientation and drive straight backward.", new AcceptableValueRange<float>(10f, 60f)));
-        TankInfantryHoldDistance = config.Bind("AI - Vehicle tactics", "HoldPositionAgainstInfantryMeters", 160f,
-            new ConfigDescription("AI tanks without a forward attack order stop to engage visible infantry inside this range. Attacking tanks retain native fire-and-move behavior.", new AcceptableValueRange<float>(40f, 300f)));
+        TankInfantryHoldDistance = config.Bind("AI - Vehicle tactics", "HoldPositionAgainstInfantryMeters", 124.159f,
+            new ConfigDescription("AI tanks without a forward attack order stop to engage visible infantry inside this range. Attacking tanks retain native fire-and-move behavior. The recommended baseline is centered on this slider.", new AcceptableValueRange<float>(40f, 208.318f)));
         TankAccelerationMultiplier = config.Bind("4a. Tank physics", "AccelerationMultiplier", 0.302f,
             new ConfigDescription("Scales how quickly player and AI tanks reach their native motor torque without changing top speed or maximum torque. The 0.302 default makes the torque ramp about 3.31 times longer; 1.0 restores stock acceleration.", new AcceptableValueRange<float>(0.1f, 1f)));
         StaticAtSearchRadius = config.Bind("AI - Defense", "WeaponSearchRadiusMeters", 95.724f,
@@ -408,7 +453,7 @@ internal static class Settings
 
         SmokeSupportEnabled = config.Bind("AI - Support coordination - Smoke", "ExtraSmokeRequestsEnabled", true,
             "Allows a small number of additional AI smoke requests. This does not add HE or APHE fire missions.");
-        SmokeRequestChance = config.Bind("AI - Support coordination - Smoke", "RequestChance", 0.08f,
+        SmokeRequestChance = config.Bind("AI - Support coordination - Smoke", "RequestChance", 0.374f,
             new ConfigDescription("Chance per eligible attack opportunity.", new AcceptableValueRange<float>(0f, 1f)));
         SmokeCooldownSeconds = config.Bind("AI - Support coordination - Smoke", "SquadCooldownSeconds", 240f,
             new ConfigDescription("Minimum time between extra smoke attempts by the same squad.", new AcceptableValueRange<float>(20f, 300f)));
@@ -492,9 +537,9 @@ internal static class Settings
         // goes to the first primary bool in the section. This one works whether or not the flight
         // model is on, since it only restores input the game discards during freelook.
         AircraftFreeLookSteeringEnabled = config.Bind("6c. Aircraft flight physics", "FreeLookSteering", true,
-            "Puts pitch and roll on the left stick while the vehicle freelook button is held, instead of the aircraft being limited to rudder for as long as you look around. The freelook camera is always the right stick, so the left one is free to fly in either stick layout. Rudder yields for the duration of the hold when it shares that stick, and the throttle is held steady while you are actually pitching so the same stick cannot do both at once.");
+            "When playing with a controller, puts pitch and roll on the left stick while the vehicle freelook button is held, instead of the aircraft being limited to rudder for as long as you look around. The freelook camera is always the right stick, so the left one is free to fly in either stick layout. Rudder yields for the duration of the hold when it shares that stick, and the throttle is held steady while you are actually pitching so the same stick cannot do both at once. Keyboard controls are never remapped by this option.");
         AircraftAdvancedTuningEnabled = config.Bind("6c. Aircraft flight physics", "UseAdvancedConfigTuning", true,
-            "Uses the low-level aircraft values grouped in the in-game Advanced tab. Leave disabled for the coherent built-in flight preset so detailed values cannot counteract one another accidentally.");
+            "Uses the detailed aircraft values in the in-game Aircraft category. Leave disabled for the coherent built-in flight preset so detailed values cannot counteract one another accidentally.");
         AircraftPhysicsStrength = config.Bind("6c. Aircraft flight physics", "RealismStrength", 1.128f,
             new ConfigDescription("Overall strength of corrective aerodynamic forces and control-rate limits. Zero leaves only the native model; one applies the original built-in strength.", new AcceptableValueRange<float>(0f, 2f)));
         AircraftWorldSpeedScale = config.Bind("6c. Aircraft flight physics", "WorldSpeedScale", 1.1f,
@@ -568,8 +613,14 @@ internal static class Settings
 
         TracerReductionEnabled = config.Bind("7. Weapon presentation", "MachineGunOnlyTracers", true,
             "Removes tracers from rifles, submachine guns, pistols, and other handheld non-machine-guns without changing their projectiles.");
-        MachineGunTracerRetention = config.Bind("7. Weapon presentation", "MachineGunTracerRetention", 0.35f,
-            new ConfigDescription("Fraction of base-game tracer rounds retained by recognized machine guns.", new AcceptableValueRange<float>(0f, 1f)));
+        MachineGunTracerRetention = config.Bind("7. Weapon presentation", "MachineGunTracerRetention", 0.208f,
+            new ConfigDescription("Fraction of base-game tracer rounds retained by recognized handheld and mounted machine guns. Zero removes all of their tracers; one preserves every tracer the base game requests.", new AcceptableValueRange<float>(0f, 1f)));
+        TracerBrightness = config.Bind("7. Weapon presentation", "TracerBrightness", 0.514f,
+            new ConfigDescription("Local visual brightness of tracer glow and attached lights. Zero hides the glow, one preserves the base game, and higher values make tracers brighter. Applies to newly fired tracers without a restart and does not affect projectile behavior.", new AcceptableValueRange<float>(0f, 3f)));
+        TracerSizeMultiplier = config.Bind("7. Weapon presentation", "TracerSizeMultiplier", 0.2f,
+            new ConfigDescription("Local visual thickness of tracer streaks. The recommended 0.2x setting makes them much thinner; one preserves the base-game width and height. Applies to newly fired tracers without a restart and does not affect projectile behavior.", new AcceptableValueRange<float>(0.05f, 1.5f)));
+        TracerLengthMultiplier = config.Bind("7. Weapon presentation", "TracerLengthMultiplier", 1.575f,
+            new ConfigDescription("Local visual length of tracer streaks along their direction of travel. The recommended 1.575x setting lengthens them; one preserves the base-game length. Applies to newly fired tracers without a restart and does not affect projectile behavior.", new AcceptableValueRange<float>(0.1f, 2f)));
         HitDecalDurationSeconds = config.Bind("7. Weapon presentation", "HitDecalDurationSeconds", 30,
             new ConfigDescription("How long bullet-hit decals remain before returning to the prefab pool.", new AcceptableValueRange<int>(1, 300)));
 
@@ -608,6 +659,14 @@ internal static class Settings
 
         AudioBalanceEnabled = config.Bind("7d. Audio balance", "Enabled", true,
             "Rebalances vehicle-engine and weapon-fire loudness without changing audible distance or other sound categories.");
+        MaximumLoopedWeaponSounds = config.Bind("7d. Audio balance", "MaximumLoopedWeaponSounds", 24,
+            new ConfigDescription("Maximum number of handheld and mounted automatic-weapon loops that may remain active together. Easy Red 2 normally stops additional loops after seven.", new AcceptableValueRange<int>(7, 64)));
+        RaiseAudioVoiceCapacity = config.Bind("7d. Audio balance", "RaiseAudioVoiceCapacity", true,
+            "Raises Unity's local simultaneous-sound capacity once during startup. Disable this to keep the game's native audio configuration. Changes take effect on the next game launch.");
+        MinimumRealAudioVoices = config.Bind("7d. Audio balance", "MinimumRealAudioVoices", 256,
+            new ConfigDescription("Minimum number of sounds Unity may keep audible at once. The mod never lowers a higher native value. Changes take effect on the next game launch.", new AcceptableValueRange<int>(32, 512)));
+        MinimumVirtualAudioVoices = config.Bind("7d. Audio balance", "MinimumVirtualAudioVoices", 512,
+            new ConfigDescription("Minimum number of additional playing sounds Unity may track virtually when they cannot all be audible. The mod never lowers a higher native value. Changes take effect on the next game launch.", new AcceptableValueRange<int>(64, 1024)));
         VehicleEngineSound = BindVehicleEngineSound(config);
         TankTrackVolumeMultiplier = config.Bind("7d. Audio balance", "TankTrackVolumeMultiplier", 0.285f,
             new ConfigDescription("Multiplier for tank track and rolling loudness. Ground-vehicle engines, weapon fire, and wheeled-vehicle rolling sounds are unchanged.", new AcceptableValueRange<float>(0f, 2f)));
@@ -622,7 +681,11 @@ internal static class Settings
             new ConfigDescription("Volume multiplier for the locally controlled player's footsteps only. AI footsteps are unchanged.", new AcceptableValueRange<float>(0f, 2f)));
 
         FirstPersonPlayerShadowEnabled = config.Bind("7e. First-person view", "PlayerShadowEnabled", true,
-            "Allows the locally controlled soldier's body and equipment to cast shadows in first-person view. Disable it to hide only the local player's first-person shadow; third-person and other soldiers are unchanged.");
+            "Keeps the locally controlled soldier's third-person body shadow in first person while preventing the separate first-person arms and weapon models from casting duplicate shadows. Disable it to hide the local player's entire shadow in first person; third-person and other soldiers are unchanged.");
+        RealisticAimFatigueEnabled = config.Bind("7e. First-person view", "RealisticAimFatigueEnabled", true,
+            "Makes unsupported standing and crouched aim accumulate fatigue unless the native hold-breath input is used, increasing weapon sway until the weapon is lowered and the soldier recovers.");
+        UnsupportedAimFatigueSeconds = config.Bind("7e. First-person view", "UnsupportedAimFatigueSeconds", 4.5f,
+            new ConfigDescription("Approximate continuous standing aim time before unsupported aiming becomes fatigued. Crouching lasts longer and prone aiming is supported.", new AcceptableValueRange<float>(2f, 12f)));
         HoldBreathZoomMultiplier = config.Bind("7e. First-person view", "HoldBreathZoomMultiplier", 1.646f,
             new ConfigDescription("Strength of the extra first-person zoom while the hold-breath input is active (Shift by default). One preserves the base game, values above one zoom farther in, and values below one zoom less.", new AcceptableValueRange<float>(0.5f, 2f)));
         BinocularsEnabled = config.Bind("7e. First-person view", "BinocularsEnabled", true,
@@ -648,9 +711,23 @@ internal static class Settings
 
         KeepMultiplayerPlayerNamesWithHudDisabled = config.Bind("7f. Multiplayer nameplates", "KeepPlayerNamesWithHudDisabled", true,
             "Keeps names above living allied remote players in multiplayer when the base-game HUD or 3D markers are disabled. Enemy and local-player names remain hidden.");
+        ImmersiveWorldHudEnabled = config.Bind("7f. Multiplayer nameplates", "ImmersiveWorldHudEnabled", true,
+            "Hides floating squad and unit marker icons in the 3D world while preserving their tactical-map icons.");
+        ContextualSquadNamesEnabled = config.Bind("7f. Multiplayer nameplates", "ContextualSquadNamesEnabled", true,
+            "Shows restrained names for nearby AI squadmates near the center of the view when immersive world markers are hidden.");
+        ContextualSquadNameRangeMeters = config.Bind("7f. Multiplayer nameplates", "ContextualSquadNameRangeMeters", 25f,
+            new ConfigDescription("Maximum range for contextual AI squadmate names.", new AcceptableValueRange<float>(10f, 75f)));
+        LeaveSquadRedeployEnabled = config.Bind("7f. Multiplayer nameplates", "LeaveSquadRedeployEnabled", true,
+            "Adds a native-canvas leave-squad and redeploy action while dead on the multiplayer squad-selection screen.");
 
         KeepHighQualityDistantAnimations = config.Bind("7h. Animation quality", "KeepHighQualityDistantAnimations", true,
             "Keeps visible distant soldiers at the full animation refresh rate instead of using distance-based animation throttling. This can reduce performance in large battles.");
+        RagdollMomentumEnabled = config.Bind("7h. Animation quality", "RagdollMomentumEnabled", true,
+            "Carries a soldier's real movement velocity into the ragdoll when they are killed.");
+        RagdollMomentumMultiplier = config.Bind("7h. Animation quality", "RagdollMomentumMultiplier", 0.85f,
+            new ConfigDescription("Amount of the soldier's pre-death movement velocity inherited by the ragdoll.", new AcceptableValueRange<float>(0f, 1.5f)));
+        RagdollMomentumMaximumSpeed = config.Bind("7h. Animation quality", "RagdollMomentumMaximumSpeed", 7.292f,
+            new ConfigDescription("Maximum inherited ragdoll movement speed in meters per second.", new AcceptableValueRange<float>(3f, 20f)));
 
         ShowSettingsLauncherButton = config.Bind("7i. Settings menu", "ShowLauncherButton", true,
             "Shows the Realism Overhaul settings button at the bottom center of the screen. F10 opens the settings menu even when this button is hidden.");
@@ -664,7 +741,7 @@ internal static class Settings
         AiDebugOverlayMaximumDistance = config.Bind("AI - Diagnostics", "VisualDebugMaximumDistanceMeters", 300f,
             new ConfigDescription("Maximum camera distance at which AI entities are sampled and drawn. The live overlay hotkeys can temporarily adjust this value.", new AcceptableValueRange<float>(25f, 1500f)));
         AiDebugOverlayMaximumActors = config.Bind("AI - Diagnostics", "VisualDebugMaximumActors", 256,
-            new ConfigDescription("Maximum nearby soldiers shown by the visual debug layer. Vehicles, aircraft, command leases, and aggregate counters have separate bounded displays.", new AcceptableValueRange<int>(1, 256)));
+            new ConfigDescription("Maximum nearby soldiers shown by the visual debug layer. Vehicles, aircraft, command leases, and aggregate counters have separate bounded displays.", new AcceptableValueRange<int>(1, 512)));
         AiDebugOverlayEventHistorySeconds = config.Bind("AI - Diagnostics", "VisualDebugEventHistorySeconds", 30f,
             new ConfigDescription("How long tactical decisions remain in the visual debug event feed.", new AcceptableValueRange<float>(5f, 180f)));
         VerboseLogging = config.Bind("AI - Diagnostics", "VerboseLogging", false,
@@ -672,6 +749,9 @@ internal static class Settings
 
         StutterProbeEnabled = config.Bind("AI - Diagnostics", "StutterProbeEnabled", false,
             "Logs one line whenever a frame takes far longer than the recent average, recording which mod systems coincided with the spike, plus a frame-time distribution every 30 seconds. Diagnostic-only; disable once stutter hunting is finished.");
+
+        DeferredInteropHandleCleanupEnabled = config.Bind("AI - Diagnostics", "DeferredInteropHandleCleanup", true,
+            "Prevents large-battle stutters caused by base-game Assembly-CSharp wrappers accumulating on the managed finalizer queue. UnityEngine and plugin-injected wrapper types keep their normal Il2CppInterop lifetime behavior. Set false only as a mixed-mod compatibility fallback. Requires a game restart.");
 
         IncrementalGarbageCollectionEnabled = config.Bind("AI - Diagnostics", "IncrementalGarbageCollection", false,
             "Asks the game engine to collect garbage in small timed slices rather than in one pass. The engine's own memory cleanup is the largest remaining source of frame hitches in long or very large battles, and a single pass can pause the game for tens of milliseconds. Slicing it trades a little overall throughput for a much shorter worst-case pause. Has no effect if the game was not built with incremental collection; the log says which on the first battle.");
@@ -770,7 +850,7 @@ internal static class Settings
             section,
             currentKey,
             true,
-            "Allows range-checked, friendly-safe AI explosive-grenade throws from any stationary stance. Assaulting soldiers may make a brief crouched halt to throw.");
+            "Allows range-checked, friendly-safe AI explosive-grenade throws from any stationary stance, including at a fresh last-known enemy position when the arcing path is clear. Assaulting soldiers may make a brief crouched halt for native visible-target throws.");
 
         if (oldCurrentExists && !currentExists)
         {

@@ -20,6 +20,23 @@ internal static class InvalidFirePositionAudioPlayPatch
     }
 }
 
+[HarmonyPatch(typeof(GenericGun), nameof(GenericGun.CanPlayMoreFarSounds), MethodType.Getter)]
+internal static class LoopedWeaponSoundLimitPatch
+{
+    [HarmonyPostfix]
+    private static void Postfix(ref bool __result)
+    {
+        // Preserve the native answer below its seven-loop limit, then extend only
+        // the hard-coded gate. The game's normal source, distance, loop, and tail
+        // handling remains responsible for every sound that is admitted.
+        if (!__result)
+        {
+            __result = GenericGun.firing_looped_weapons_count <
+                       Settings.MaximumLoopedWeaponSounds.Value;
+        }
+    }
+}
+
 [HarmonyPatch(typeof(TankTrucksSound), nameof(TankTrucksSound.Update))]
 internal static class TankTrackVolumePatch
 {

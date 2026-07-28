@@ -8,6 +8,8 @@ namespace ER2RealismOverhaul;
 internal enum SettingsMenuCategory
 {
     QuickSetup,
+    CoreAiBehavior,
+    ObjectiveCoordination,
     AttackPostureBonuses,
     Defense,
     InfantryTactics,
@@ -22,7 +24,6 @@ internal enum SettingsMenuCategory
     Audio,
     PlayerExperience,
     VisualsAndAnimation,
-    Advanced,
     Diagnostics
 }
 
@@ -95,26 +96,35 @@ internal static class SettingsCatalog
         "AI - Infantry tactics - Danger\u001fPinnedImmunitySeconds",
         // Only meaningful at load time, so it must never look like a live toggle:
         // keeping it out of All also keeps it out of Disable All and settings sync.
-        "AI - Diagnostics\u001fInstallGameplayPatches"
+        "AI - Diagnostics\u001fInstallGameplayPatches",
+        "AI - Diagnostics\u001fDeferredInteropHandleCleanup"
     };
 
     private static readonly Regex SectionPrefix = new(@"^\d+[a-z]?\.\s*", RegexOptions.Compiled);
     private static readonly Regex WordBoundary = new(@"(?<=[a-z0-9])(?=[A-Z])", RegexOptions.Compiled);
-    // Broadly useful controls are also exposed in Quick Setup. Unified AI sections keep
-    // all of their detailed controls together on their doctrine page; unrelated detailed
-    // tuning still defaults to Advanced until deliberately promoted into this list.
+    // Broadly useful controls are also exposed in Quick Setup. Every setting otherwise
+    // stays with the category that owns its system.
     private static readonly HashSet<string> PrimarySettingIds = new(StringComparer.Ordinal)
     {
+        "AI - Core behavior\u001fAggressiveness",
+        "AI - Core behavior\u001fAccuracy",
+        "AI - Core behavior\u001fReactionSpeed",
+        "AI - Core behavior\u001fAwareness",
+        "AI - Core behavior\u001fSuppressionResistance",
+
         "AI - Attack posture bonuses\u001fAttackPostureBonusesEnabled",
         "AI - Attack posture bonuses\u001fAttackPostureAccuracySpreadMultiplier",
         "AI - Attack posture bonuses\u001fAttackPostureSuppressionReceivedMultiplier",
+        "AI - Objective coordination\u001fEnabled",
 
         "AI - Infantry tactics - Perception\u001fEnabled",
         "AI - Infantry tactics - Perception\u001fHorizontalFovDegrees",
         "AI - Infantry tactics - Perception\u001fDistantTargetAcquisitionSeconds",
         "AI - Infantry tactics - Perception\u001fTargetMemorySeconds",
+        "AI - Infantry tactics - Perception\u001fNearbyTargetSharingRadiusMeters",
 
         "AI - Infantry tactics - Contact response\u001fEnabled",
+        "AI - Infantry tactics - Contact response\u001fMinimumSoldierSeparationMeters",
         "AI - Infantry tactics - Contact response\u001fImmediateFireDistanceMeters",
         "AI - Infantry tactics - Contact response\u001fCoverSearchRadiusMeters",
         "AI - Infantry tactics - Contact response\u001fEngagementHaltDistanceMeters",
@@ -196,6 +206,10 @@ internal static class SettingsCatalog
         "6e. Bullet penetration\u001fAddedRicochetChanceMultiplier",
 
         "7. Weapon presentation\u001fMachineGunOnlyTracers",
+        "7. Weapon presentation\u001fMachineGunTracerRetention",
+        "7. Weapon presentation\u001fTracerBrightness",
+        "7. Weapon presentation\u001fTracerSizeMultiplier",
+        "7. Weapon presentation\u001fTracerLengthMultiplier",
         "7. Weapon presentation\u001fHitDecalDurationSeconds",
 
         "7a. Player suppression effects\u001fVignetteMultiplier",
@@ -211,6 +225,10 @@ internal static class SettingsCatalog
         "AI - Infantry tactics - Battle chatter\u001fEnabled",
 
         "7d. Audio balance\u001fEnabled",
+        "7d. Audio balance\u001fMaximumLoopedWeaponSounds",
+        "7d. Audio balance\u001fRaiseAudioVoiceCapacity",
+        "7d. Audio balance\u001fMinimumRealAudioVoices",
+        "7d. Audio balance\u001fMinimumVirtualAudioVoices",
         "7d. Audio balance\u001fVehicleEngineSound",
         "7d. Audio balance\u001fTankTrackVolumeMultiplier",
         "7d. Audio balance\u001fWeaponFireVolumeMultiplier",
@@ -218,6 +236,8 @@ internal static class SettingsCatalog
         "7d. Audio balance\u001fPlayerFootstepVolumeMultiplier",
 
         "7e. First-person view\u001fPlayerShadowEnabled",
+        "7e. First-person view\u001fRealisticAimFatigueEnabled",
+        "7e. First-person view\u001fUnsupportedAimFatigueSeconds",
         "7e. First-person view\u001fHoldBreathZoomMultiplier",
         "7e. First-person view\u001fBinocularsEnabled",
         "7e. First-person view\u001fBinocularsKey",
@@ -231,6 +251,14 @@ internal static class SettingsCatalog
         "7e. First-person view\u001fHeadshotDeathBlackout",
 
         "7f. Multiplayer nameplates\u001fKeepPlayerNamesWithHudDisabled",
+        "7f. Multiplayer nameplates\u001fImmersiveWorldHudEnabled",
+        "7f. Multiplayer nameplates\u001fContextualSquadNamesEnabled",
+        "7f. Multiplayer nameplates\u001fContextualSquadNameRangeMeters",
+        "7f. Multiplayer nameplates\u001fLeaveSquadRedeployEnabled",
+
+        "7h. Animation quality\u001fRagdollMomentumEnabled",
+        "7h. Animation quality\u001fRagdollMomentumMultiplier",
+        "7h. Animation quality\u001fRagdollMomentumMaximumSpeed",
 
         "AI - Diagnostics\u001fVisualDebugStartEnabled",
         "AI - Diagnostics\u001fVisualDebugToggleKey",
@@ -260,14 +288,11 @@ internal static class SettingsCatalog
                 continue;
 
             var primary = PrimarySettingIds.Contains(id);
-            var quick = primary && entry.SettingType == typeof(bool) &&
-                        quickSections.Add(entry.Definition.Section);
-            // Presentation-facing controls are already narrow, user-facing groups. Keep
-            // their detailed controls with the rest of their section instead of burying
-            // sound shaping, chatter timing, or tracer tuning in Advanced.
-            var category = primary || HasDedicatedCategory(entry.Definition.Section)
-                ? CategoryFor(entry.Definition.Section)
-                : SettingsMenuCategory.Advanced;
+            var quick = primary &&
+                        (entry.Definition.Section == "AI - Core behavior" ||
+                         (entry.SettingType == typeof(bool) &&
+                          quickSections.Add(entry.Definition.Section)));
+            var category = CategoryFor(entry.Definition.Section);
             settings.Add(new MenuSetting(entry, category, quick));
         }
 
@@ -280,6 +305,8 @@ internal static class SettingsCatalog
     internal static string CategoryName(SettingsMenuCategory category) => category switch
     {
         SettingsMenuCategory.QuickSetup => "Quick Setup",
+        SettingsMenuCategory.CoreAiBehavior => "AI / Core Behavior",
+        SettingsMenuCategory.ObjectiveCoordination => "AI / Objectives",
         SettingsMenuCategory.AttackPostureBonuses => "AI / Attack Bonuses",
         SettingsMenuCategory.Defense => "AI / Defense",
         SettingsMenuCategory.InfantryTactics => "AI / Infantry Tactics",
@@ -294,15 +321,18 @@ internal static class SettingsCatalog
         SettingsMenuCategory.Audio => "Audio",
         SettingsMenuCategory.PlayerExperience => "Player Experience",
         SettingsMenuCategory.VisualsAndAnimation => "Visuals & Animation",
-        SettingsMenuCategory.Advanced => "Advanced",
         SettingsMenuCategory.Diagnostics => "Diagnostics",
         _ => category.ToString()
     };
 
     internal static string CleanSectionName(string section)
     {
+        if (section.Equals("AI - Core behavior", StringComparison.Ordinal))
+            return "Core AI Behavior";
         if (section.Equals("AI - Attack posture bonuses", StringComparison.Ordinal))
             return "Attack Posture Bonuses";
+        if (section.Equals("AI - Objective coordination", StringComparison.Ordinal))
+            return "Objective Coordination";
         if (section.Equals("AI - Defense", StringComparison.Ordinal))
             return "Defense";
         if (section.Equals("AI - Infantry tactics", StringComparison.Ordinal))
@@ -355,8 +385,12 @@ internal static class SettingsCatalog
 
     internal static string InferUnit(string key)
     {
-        if (key is "VehicleEngineSound")
+        if (key is "Aggressiveness" or "Accuracy" or "ReactionSpeed" or "Awareness" or
+            "SuppressionResistance" or "VehicleEngineSound" or "TracerBrightness" or
+            "TracerSizeMultiplier")
             return "x";
+        if (key == "MachineGunTracerRetention")
+            return "0-1";
         if (key.Contains("Seconds", StringComparison.OrdinalIgnoreCase))
             return "s";
         if (key.Contains("Multiplier", StringComparison.OrdinalIgnoreCase))
@@ -393,6 +427,12 @@ internal static class SettingsCatalog
 
         return key switch
         {
+        "Aggressiveness" => ("more cautious", "push and return fire more"),
+        "Accuracy" => ("less accurate", "more accurate"),
+        "ReactionSpeed" => ("slower reactions", "faster reactions"),
+        "Awareness" => ("narrower awareness", "broader awareness"),
+        "SuppressionResistance" => ("take cover sooner", "fight longer under fire"),
+
         "AttackPostureAccuracySpreadMultiplier" or
         "AttackPostureTankAccuracySpreadMultiplier" => ("more accurate", "less accurate"),
         "AttackPostureSuppressionReceivedMultiplier" => ("harder to pin", "easier to pin"),
@@ -402,6 +442,7 @@ internal static class SettingsCatalog
         "DistantTargetAcquisitionSeconds" => ("faster spotting", "slower spotting"),
         "DistantTargetAcquisitionRangeMeters" => ("delay starts closer", "delay starts farther"),
         "TargetMemorySeconds" => ("forget sooner", "remember longer"),
+        "NearbyTargetSharingRadiusMeters" => ("share with nearer troops", "share with farther troops"),
         "PeripheralAwarenessDistance" => ("less side awareness", "more side awareness"),
 
         "PointBlankAcquisitionSeconds" => ("faster point-blank ID", "slower point-blank ID"),
@@ -410,6 +451,7 @@ internal static class SettingsCatalog
         "SpreadMultiplierAtPointBlank" => ("deadlier up close", "gentler up close"),
 
         "ImmediateFireDistanceMeters" => ("instant fire closer", "instant fire farther"),
+        "MinimumSoldierSeparationMeters" => ("tighter formations", "more separation"),
         "CoverSearchRadiusMeters" => ("search nearer cover", "search farther cover"),
         "EngagementHaltDistanceMeters" => ("halt only closer", "halt from farther"),
         "MaximumAttackCombatHaltSeconds" => ("push sooner under fire", "hold and fire longer"),
@@ -509,6 +551,9 @@ internal static class SettingsCatalog
         "HudScale" => ("smaller instrument HUD", "larger instrument HUD"),
 
         "MachineGunTracerRetention" => ("fewer tracers", "more tracers"),
+        "TracerBrightness" => ("dimmer tracers", "brighter tracers"),
+        "TracerSizeMultiplier" => ("thinner tracer streaks", "thicker tracer streaks"),
+        "TracerLengthMultiplier" => ("shorter tracer streaks", "longer tracer streaks"),
         "HitDecalDurationSeconds" => ("decals clear sooner", "decals stay longer"),
         "VignetteMultiplier" => ("weaker dark vignette", "stronger dark vignette"),
         "WeaponWobbleMultiplier" => ("less weapon wobble", "more weapon wobble"),
@@ -524,20 +569,31 @@ internal static class SettingsCatalog
         "RoutineCalloutChance" => ("fewer callouts", "more callouts"),
         "RoutineMinimumIntervalSeconds" => ("chatter can start sooner", "chatter starts later"),
         "RoutineMaximumIntervalSeconds" => ("shorter maximum wait", "longer maximum wait"),
+        "MaximumLoopedWeaponSounds" => ("fewer automatic weapons audible", "more automatic weapons audible"),
+        "MinimumRealAudioVoices" => ("fewer audible sounds", "more audible sounds"),
+        "MinimumVirtualAudioVoices" => ("track fewer playing sounds", "track more playing sounds"),
         "VehicleEngineSound" => ("quieter vehicle engines", "louder vehicle engines"),
         "TankTrackVolumeMultiplier" => ("quieter tank tracks", "louder tank tracks"),
         "WeaponFireVolumeMultiplier" => ("quieter weapon fire", "louder weapon fire"),
         "TankGunVolumeMultiplier" => ("quieter tank guns", "louder tank guns"),
         "PlayerFootstepVolumeMultiplier" => ("quieter player footsteps", "louder player footsteps"),
+        "UnsupportedAimFatigueSeconds" => ("fatigue sooner", "fatigue later"),
         "HoldBreathZoomMultiplier" => ("weaker hold-breath zoom", "stronger hold-breath zoom"),
         "BinocularZoomMultiplier" => ("wider binocular view", "stronger binocular zoom"),
         "FreeLookHorizontalArcDegrees" => ("narrower freelook arc", "wider freelook arc"),
+        "ContextualSquadNameRangeMeters" => ("names appear closer", "names appear farther"),
+        "RagdollMomentumMultiplier" => ("less inherited motion", "more inherited motion"),
+        "RagdollMomentumMaximumSpeed" => ("lower momentum cap", "higher momentum cap"),
             _ => ("smaller effect", "larger effect")
         };
     }
 
     private static SettingsMenuCategory CategoryFor(string section)
     {
+        if (section.StartsWith("AI - Core behavior", StringComparison.Ordinal))
+            return SettingsMenuCategory.CoreAiBehavior;
+        if (section.StartsWith("AI - Objective coordination", StringComparison.Ordinal))
+            return SettingsMenuCategory.ObjectiveCoordination;
         if (section.StartsWith("AI - Attack posture", StringComparison.Ordinal))
             return SettingsMenuCategory.AttackPostureBonuses;
         if (section.StartsWith("AI - Defense", StringComparison.Ordinal))
@@ -574,17 +630,6 @@ internal static class SettingsCatalog
             return SettingsMenuCategory.VisualsAndAnimation;
         return SettingsMenuCategory.Diagnostics;
     }
-
-    private static bool HasDedicatedCategory(string section) =>
-        IsUnifiedAiSection(section) || section.StartsWith("7", StringComparison.Ordinal);
-
-    private static bool IsUnifiedAiSection(string section) =>
-        section.StartsWith("AI - Attack posture", StringComparison.Ordinal) ||
-        section.StartsWith("AI - Defense", StringComparison.Ordinal) ||
-        section.StartsWith("AI - Infantry tactics", StringComparison.Ordinal) ||
-        section.StartsWith("AI - Vehicle tactics", StringComparison.Ordinal) ||
-        section.StartsWith("AI - Support coordination", StringComparison.Ordinal) ||
-        section.StartsWith("AI - Diagnostics", StringComparison.Ordinal);
 
     private static bool IsMigrationOnlyEntry(ConfigEntryBase entry) =>
         (entry.Description.Description ?? string.Empty).StartsWith("Legacy ", StringComparison.OrdinalIgnoreCase);

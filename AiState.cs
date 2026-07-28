@@ -41,6 +41,7 @@ internal static class AiState
     internal static readonly Dictionary<int, GunfireCue> GunfireCues = new();
     internal static readonly Dictionary<int, ContactResponseState> ContactStates = new();
     internal static readonly Dictionary<int, KnownTargetSuppressiveFireState> KnownTargetSuppressionStates = new();
+    internal static readonly Dictionary<int, RememberedGrenadeThrowState> RememberedGrenadeThrowStates = new();
     internal static readonly Dictionary<IntPtr, CoverReservation> CoverReservations = new();
     internal static readonly Dictionary<int, float> FlameEvasionUntil = new();
     internal static readonly Dictionary<int, float> NextTankTactic = new();
@@ -135,6 +136,7 @@ internal static class AiState
         TargetMemory.Remove(id);
         ContactStates.Remove(id);
         KnownTargetSuppressiveFire.RemoveSoldier(id);
+        RememberedGrenadeThrows.RemoveSoldier(id);
         FlameEvasionUntil.Remove(id);
         NextOrderGesture.Remove(id);
         NextGrenadeThrow.Remove(id);
@@ -232,6 +234,29 @@ internal static class AiState
             soldierId, expiresAt, coverPosition);
     }
 
+    internal static bool TryReserveCover(
+        IntPtr coverId,
+        Vector3 coverPosition,
+        int soldierId,
+        float now,
+        float expiresAt,
+        float minimumSpacing)
+    {
+        if (coverId == IntPtr.Zero ||
+            CoverReservedByOther(
+                coverId,
+                coverPosition,
+                soldierId,
+                now,
+                minimumSpacing))
+        {
+            return false;
+        }
+
+        ReserveCover(coverId, coverPosition, soldierId, expiresAt);
+        return true;
+    }
+
     internal static void ReleaseCoverReservation(int soldierId)
     {
         List<IntPtr>? releases = null;
@@ -314,12 +339,19 @@ internal sealed class TargetMemoryState
     internal IntPtr IncomingFireShooterToken;
     internal bool IncomingFireIsDirect;
     internal float NextGunfirePollAt;
+    internal float NextNearbyTargetShareAt;
+    internal IntPtr ReportedTargetToken;
+    internal Vector3 ReportedTargetPosition;
+    internal float ReportedTargetAvailableAt;
+    internal float ReportedTargetUntil;
     internal float NextCloseConfirmPollAt;
+    internal float NextCloseDiscoveryPollAt;
     // When this soldier last ran the incoming-fire orientation step. That step is now
     // budgeted per frame, so the turn is driven by the time actually elapsed since the
     // last one rather than by a fixed step — a soldier who waited a frame then turns
     // through the angle he would have covered anyway, at the same rate.
     internal float LastIncomingFireTurnAt;
+    internal float LastReportedTargetTurnAt;
     internal readonly Dictionary<IntPtr, TargetCandidateState> Candidates = new();
 }
 

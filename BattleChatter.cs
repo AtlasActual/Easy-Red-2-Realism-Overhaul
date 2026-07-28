@@ -56,8 +56,8 @@ internal static class BattleChatter
         }
 
         var suppression = soldier.GetSuppressionValue();
-        if (suppression >= Settings.CrouchSuppression.Value &&
-            state.PreviousSuppression < Settings.CrouchSuppression.Value &&
+        if (suppression >= AiBehaviorTuning.CrouchSuppressionThreshold &&
+            state.PreviousSuppression < AiBehaviorTuning.CrouchSuppressionThreshold &&
             UnityEngine.Random.value <= Settings.ChatterRoutineCalloutChance.Value)
         {
             TrySay(soldier, VoiceManager.VoiceClip.imUnderFire, state, now, "suppressed");
@@ -82,7 +82,7 @@ internal static class BattleChatter
 
         if (target != null)
         {
-            if (suppression >= Settings.CrouchSuppression.Value)
+            if (suppression >= AiBehaviorTuning.CrouchSuppressionThreshold)
                 TrySay(soldier, VoiceManager.VoiceClip.imUnderFire, state, now, "combat pressure");
             else if (ContactResponse.IsWeaponFiring(soldier) || soldier.IsGunner() || soldier.hasMg)
                 TrySay(soldier, VoiceManager.VoiceClip.coveringFire, state, now, "covering fire");

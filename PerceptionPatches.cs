@@ -359,6 +359,7 @@ internal static class GunfireAwarenessBattleResetPatch
         GunfireAwareness.ResetBattle();
         MountedGunnerSuppression.ResetBattle();
         KnownTargetSuppressiveFire.ResetBattle();
+        RememberedGrenadeThrows.ResetBattle();
         ContactResponse.ResetBattleAttackEvidence();
         CasualtySuppression.ResetBattle();
     }
@@ -366,7 +367,6 @@ internal static class GunfireAwarenessBattleResetPatch
 
 internal static class IncomingFireAwareness
 {
-    private const float CueLifetimeSeconds = 4f;
     private const float CandidateAttentionFreshSeconds = 1.5f;
 
     [ThreadStatic]
@@ -386,7 +386,8 @@ internal static class IncomingFireAwareness
             shooterToken,
             shooterId,
             now,
-            now + CueLifetimeSeconds,
+            now + DirectThreatMemoryCore.RetentionSeconds(
+                AiBehaviorTuning.TargetMemorySeconds),
             isDirect: true);
 
     internal static void RecordHeardGunfire(
@@ -644,6 +645,215 @@ internal static class IncomingFireAwareness
     }
 }
 
+/// <summary>
+/// Shares a confirmed observer's frozen last-known target position with autonomous
+/// friendly infantry in local voice range. A report can turn a recipient toward the
+/// contact, but it never writes a visible/confirmed target or bypasses normal LOS and
+/// acquisition time.
+/// </summary>
+internal static class NearbyTargetKnowledge
+{
+    private const float CalloutDelaySeconds = 0.2f;
+    private const float ReportLifetimeSeconds = 4f;
+    private const float ReportRefreshSeconds = 0.75f;
+    private const float DirectObservationPrioritySeconds = 1.5f;
+    private const int MaxReportTurnsPerFrame = 12;
+
+    private static readonly Il2CppSystem.Collections.Generic.List<Creature> NearbyFriendlies = new();
+    private static int _reportTurnFrame = -1;
+    private static int _reportTurnsThisFrame;
+
+    internal static void PublishConfirmedObservation(
+        Soldier reporter,
+        IntPtr targetToken,
+        Vector3 targetPosition,
+        float now)
+    {
+        if (!Settings.PerceptionEnabled.Value ||
+            targetToken == IntPtr.Zero ||
+            reporter == null ||
+            !reporter.IsAlive ||
+            !AiOwnership.IsAutonomous(reporter) ||
+            reporter.IsOnVehicle())
+        {
+            return;
+        }
+
+        var reporterId = reporter.GetInstanceID();
+        var reporterMemory = AiState.GetTargetMemory(reporterId);
+        if (now < reporterMemory.NextNearbyTargetShareAt)
+            return;
+
+        var faction = AiState.FactionOf(reporter);
+        if (string.IsNullOrWhiteSpace(faction) ||
+            string.Equals(faction, Soldier.UnknownFaction, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            var reporterPosition = reporter.GetCenterOfUnit();
+            var sharingRadius = Settings.NearbyTargetSharingRadius.Value;
+            NearbyFriendlies.Clear();
+            var octree = Creature.creaturesOctatree;
+            if (octree == null ||
+                !octree.GetNearbyNonAlloc(reporterPosition, sharingRadius, NearbyFriendlies))
+            {
+                return;
+            }
+
+            reporterMemory.NextNearbyTargetShareAt = now + ReportRefreshSeconds;
+            for (var index = 0; index < NearbyFriendlies.Count; index++)
+            {
+                var recipient = NearbyFriendlies[index]?.TryCast<Soldier>();
+                if (recipient == null ||
+                    recipient.GetInstanceID() == reporterId ||
+                    !recipient.IsAlive ||
+                    recipient.IsOnVehicle() ||
+                    !AiOwnership.IsAutonomous(recipient) ||
+                    !ResourcesManager.IsSameFaction(faction, AiState.FactionOf(recipient)))
+                {
+                    continue;
+                }
+
+                var recipientPosition = recipient.GetCenterOfUnit();
+                if (!LocalTargetReportCore.IsInsideSharingRadius(
+                        (recipientPosition - reporterPosition).sqrMagnitude,
+                        sharingRadius))
+                {
+                    continue;
+                }
+
+                var memory = AiState.GetTargetMemory(recipient.GetInstanceID());
+                if (memory.HasConfirmedTarget)
+                    continue;
+
+                var currentReportActive =
+                    memory.ReportedTargetToken != IntPtr.Zero &&
+                    now < memory.ReportedTargetUntil;
+                var isSameTarget = memory.ReportedTargetToken == targetToken;
+                if (!LocalTargetReportCore.ShouldAcceptReport(
+                        currentReportActive,
+                        isSameTarget,
+                        (memory.ReportedTargetPosition - recipientPosition).sqrMagnitude,
+                        (targetPosition - recipientPosition).sqrMagnitude))
+                {
+                    continue;
+                }
+
+                memory.ReportedTargetToken = targetToken;
+                memory.ReportedTargetPosition = targetPosition;
+                memory.ReportedTargetAvailableAt = now + CalloutDelaySeconds;
+                memory.ReportedTargetUntil = now + ReportLifetimeSeconds;
+            }
+        }
+        catch (NullReferenceException) { }
+        catch (Il2CppException) { }
+        catch (ObjectCollectedException) { }
+        catch (Exception ex)
+        {
+            Plugin.LogSource.LogWarning($"Nearby target callout failed: {ex.Message}");
+        }
+        finally
+        {
+            NearbyFriendlies.Clear();
+        }
+    }
+
+    internal static void Update(Soldier soldier, float now)
+    {
+        var soldierId = soldier.GetInstanceID();
+        if (!AiState.TargetMemory.TryGetValue(soldierId, out var state) ||
+            state.ReportedTargetToken == IntPtr.Zero)
+        {
+            return;
+        }
+
+        if (!Settings.PerceptionEnabled.Value ||
+            now >= state.ReportedTargetUntil ||
+            !soldier.IsAlive ||
+            !AiOwnership.IsAutonomous(soldier) ||
+            soldier.IsOnVehicle())
+        {
+            Clear(state);
+            return;
+        }
+
+        if (now < state.ReportedTargetAvailableAt)
+            return;
+
+        if (state.HasConfirmedTarget)
+        {
+            if (state.TargetToken == state.ReportedTargetToken)
+                Clear(state);
+            return;
+        }
+
+        // Direct observation and incoming rounds both outrank a second-hand voice
+        // report. The callout remains alive and can be considered if those cues end.
+        var hasFreshObservedCandidate = false;
+        foreach (var candidate in state.Candidates.Values)
+        {
+            if (now - candidate.LastSeenAt <= DirectObservationPrioritySeconds)
+            {
+                hasFreshObservedCandidate = true;
+                break;
+            }
+        }
+
+        if (hasFreshObservedCandidate ||
+            now < state.IncomingFireUntil ||
+            (Settings.DangerReactionsEnabled.Value &&
+             (soldier.IsOnFire || AiState.IsFlameEvading(soldierId, now))) ||
+            ContactResponse.IsWeaponFiring(soldier) ||
+            soldier.IsMoving(0.15f))
+        {
+            return;
+        }
+
+        var towardReport = state.ReportedTargetPosition - soldier.LookPosition();
+        towardReport.y = 0f;
+        if (towardReport.sqrMagnitude <= 0.01f ||
+            Vector3.Angle(soldier.transform.forward, towardReport) <= 2f ||
+            !TryTakeReportTurnBudget())
+        {
+            return;
+        }
+
+        var turnDelta = state.LastReportedTargetTurnAt > 0f
+            ? Mathf.Clamp(now - state.LastReportedTargetTurnAt, Time.fixedDeltaTime, 0.1f)
+            : Time.fixedDeltaTime;
+        state.LastReportedTargetTurnAt = now;
+        soldier.RotateToward(towardReport.normalized, turnDelta);
+    }
+
+    private static bool TryTakeReportTurnBudget()
+    {
+        var frame = Time.frameCount;
+        if (frame != _reportTurnFrame)
+        {
+            _reportTurnFrame = frame;
+            _reportTurnsThisFrame = 0;
+        }
+
+        if (_reportTurnsThisFrame >= MaxReportTurnsPerFrame)
+            return false;
+
+        _reportTurnsThisFrame++;
+        return true;
+    }
+
+    private static void Clear(TargetMemoryState state)
+    {
+        state.ReportedTargetToken = IntPtr.Zero;
+        state.ReportedTargetPosition = default;
+        state.ReportedTargetAvailableAt = 0f;
+        state.ReportedTargetUntil = 0f;
+        state.LastReportedTargetTurnAt = 0f;
+    }
+}
+
 [HarmonyPatch(typeof(SoldierAI), "FixedUpdate")]
 internal static class IncomingFireOrientationPatch
 {
@@ -672,13 +882,14 @@ internal static class IncomingFireOrientationPatch
 
                     if (!KnownTargetSuppressiveFire.OwnsAim(soldier.GetInstanceID(), Time.time))
                     {
+                        NearbyTargetKnowledge.Update(soldier, Time.time);
                         IncomingFireAwareness.Update(__instance, soldier, Time.time);
                     }
                 }
             }
             catch (Exception ex)
             {
-                Plugin.LogSource.LogWarning($"Incoming-fire orientation failed: {ex.Message}");
+                Plugin.LogSource.LogWarning($"Perception orientation failed: {ex.Message}");
             }
         }
         finally
@@ -910,7 +1121,10 @@ internal static class SoldierSequentialUpdatePatch
                 GunfireAwareness.Disable();
                 var inactiveSoldier = __instance.GetSoldier();
                 if (inactiveSoldier != null)
+                {
+                    RememberedGrenadeThrows.Disable(__instance, inactiveSoldier);
                     KnownTargetSuppressiveFire.Disable(__instance, inactiveSoldier);
+                }
                 return;
             }
 
@@ -929,6 +1143,7 @@ internal static class SoldierSequentialUpdatePatch
             if (soldier.IsOnVehicle())
             {
                 ModTimeProbe.Stage(SequentialStage.PostfixVehicleSuspend);
+                RememberedGrenadeThrows.Disable(__instance, soldier);
                 KnownTargetSuppressiveFire.Disable(__instance, soldier);
                 AiState.TargetMemory.Remove(soldier.GetInstanceID());
                 ContactResponse.SuspendForVehicle(__instance, soldier);
@@ -962,10 +1177,10 @@ internal static class SoldierSequentialUpdatePatch
         var id = soldier.GetInstanceID();
         var now = Time.time;
         var suppression = TargetAcquisition.Suppression(soldier);
-        var effectiveFov = Settings.HorizontalFov.Value *
+        var effectiveFov = AiBehaviorTuning.HorizontalFov *
                            Mathf.Lerp(1f, Settings.SuppressedFovMultiplier.Value, suppression);
         var effectivePeripheralDistance = TargetAcquisition.EffectivePeripheralDistance(suppression);
-        var effectiveMemory = Settings.TargetMemorySeconds.Value *
+        var effectiveMemory = AiBehaviorTuning.TargetMemorySeconds *
                               Mathf.Lerp(1f, Settings.SuppressedMemoryMultiplier.Value, suppression);
         var insideFov = distance <= effectivePeripheralDistance ||
                         Vector3.Angle(soldier.transform.forward, toTarget) <= effectiveFov * 0.5f;
@@ -1200,7 +1415,7 @@ internal static class TargetAcquisition
 
     internal static float EffectivePeripheralDistance(float suppression)
     {
-        var distance = Settings.PeripheralAwarenessDistance.Value *
+        var distance = AiBehaviorTuning.PeripheralAwarenessDistance *
                        Mathf.Lerp(1f, Settings.SuppressedPeripheralMultiplier.Value, suppression);
 
         if (!Settings.CloseQuartersEnabled.Value)
@@ -1210,8 +1425,8 @@ internal static class TargetAcquisition
         // configurable minimum awareness floor, and the floor never raises
         // awareness above the unsuppressed distance.
         return Mathf.Min(
-            Settings.PeripheralAwarenessDistance.Value,
-            Mathf.Max(Settings.MinimumPeripheralAwarenessMeters.Value, distance));
+            AiBehaviorTuning.PeripheralAwarenessDistance,
+            Mathf.Max(AiBehaviorTuning.MinimumPeripheralAwarenessDistance, distance));
     }
 
     internal static bool IsInsideEffectiveFov(
@@ -1225,7 +1440,7 @@ internal static class TargetAcquisition
             return true;
 
         var direction = targetPosition - soldier.LookPosition();
-        var effectiveFov = Settings.HorizontalFov.Value *
+        var effectiveFov = AiBehaviorTuning.HorizontalFov *
                            Mathf.Lerp(1f, Settings.SuppressedFovMultiplier.Value, suppression);
         return Vector3.Angle(soldier.transform.forward, direction) <= effectiveFov * 0.5f;
     }
@@ -1241,7 +1456,7 @@ internal static class TargetAcquisition
         if (!TryGetTargetSnapshot(target, out var targetToken, out var targetPosition))
             return false;
         var state = AiState.GetTargetMemory(soldierId);
-        var effectiveMemory = Settings.TargetMemorySeconds.Value *
+        var effectiveMemory = AiBehaviorTuning.TargetMemorySeconds *
                               Mathf.Lerp(1f, Settings.SuppressedMemoryMultiplier.Value, suppression);
 
         // A positive observation of the already-confirmed target is current proof,
@@ -1310,7 +1525,7 @@ internal static class TargetAcquisition
             return;
 
         var suppression = Suppression(soldier);
-        var effectiveMemory = Settings.TargetMemorySeconds.Value *
+        var effectiveMemory = AiBehaviorTuning.TargetMemorySeconds *
                               Mathf.Lerp(1f, Settings.SuppressedMemoryMultiplier.Value, suppression);
         if (state.HasConfirmedTarget && now - state.LastObservedAt > effectiveMemory)
         {
@@ -1410,7 +1625,7 @@ internal static class TargetAcquisition
         if (!MatchesTarget(priorConfirmed, state.TargetToken))
             return false;
 
-        var effectiveMemory = Settings.TargetMemorySeconds.Value *
+        var effectiveMemory = AiBehaviorTuning.TargetMemorySeconds *
                               Mathf.Lerp(1f, Settings.SuppressedMemoryMultiplier.Value, Suppression(soldier));
         if (now - state.LastObservedAt > effectiveMemory)
         {
@@ -1490,17 +1705,20 @@ internal static class TargetAcquisition
     {
         var distanceFactor = Mathf.Clamp01(distance / Settings.DistantTargetAcquisitionRange.Value);
         var seconds = Mathf.Lerp(
-            Settings.CloseTargetAcquisitionSeconds.Value,
-            Settings.DistantTargetAcquisitionSeconds.Value,
+            AiBehaviorTuning.ObservationSeconds(Settings.CloseTargetAcquisitionSeconds.Value),
+            AiBehaviorTuning.ObservationSeconds(Settings.DistantTargetAcquisitionSeconds.Value),
             distanceFactor);
 
-        if (Settings.CloseQuartersEnabled.Value && distance < Settings.ContactImmediateFireDistance.Value)
+        if (Settings.CloseQuartersEnabled.Value && distance < AiBehaviorTuning.ImmediateFireDistance)
         {
             // Point-blank threats should be identified faster than the general
             // "close" acquisition time; lerp down toward the point-blank value
             // as distance shrinks below the immediate-fire distance.
-            var pointBlankFactor = Mathf.Clamp01(distance / Settings.ContactImmediateFireDistance.Value);
-            seconds = Mathf.Lerp(Settings.PointBlankAcquisitionSeconds.Value, seconds, pointBlankFactor);
+            var pointBlankFactor = Mathf.Clamp01(distance / AiBehaviorTuning.ImmediateFireDistance);
+            seconds = Mathf.Lerp(
+                AiBehaviorTuning.ObservationSeconds(Settings.PointBlankAcquisitionSeconds.Value),
+                seconds,
+                pointBlankFactor);
         }
 
         // Suppression slows interpretation of new visual information while the
@@ -1528,23 +1746,23 @@ internal static class TargetAcquisition
         state.ConfirmedLastKnownTargetToken = targetToken;
         state.ConfirmedLastKnownPosition = targetPosition;
         state.ConfirmedLastKnownObservedAt = now;
+        NearbyTargetKnowledge.PublishConfirmedObservation(
+            soldier, targetToken, targetPosition, now);
     }
 }
 
 /// <summary>
-/// Decouples close-range confirmation from the staggered native visibility scan.
-/// A pending candidate inside <see cref="Settings.ContactImmediateFireDistance"/>
-/// is re-checked with a direct native <c>CanSee</c> raycast on its own short
-/// cadence, so the ~0.6s close acquisition delay is no longer stretched by the
-/// gaps between <c>SoldierAI.SequentialUpdate</c> samples at high AI counts.
-/// First sighting itself stays native-scan-bound; this only speeds up the
-/// interval between first sighting and confirmation.
+/// Decouples close-range discovery and confirmation from the staggered native
+/// visibility scan. A targetless soldier runs a bounded nearby-creature query,
+/// then uses the native <c>CanSee</c> test and the normal acquisition timer.
+/// Pending candidates inside <see cref="Settings.ContactImmediateFireDistance"/>
+/// continue to be checked on their own short cadence, so neither first sighting
+/// nor confirmation is stretched by the shared <c>SequentialUpdate</c> queue.
 /// </summary>
 internal static class CloseRangeAcquisitionTick
 {
-    // Perf budget: at most one poll per soldier per this interval, and only for
-    // soldiers that already have a pending close-range candidate.
     private const float PollIntervalSeconds = 0.2f;
+    private const float DiscoveryIntervalSeconds = 0.35f;
 
     // This tick raycasts (CanSee) once per close candidate. A fixed poll interval lets
     // every soldier's next poll drift into the same frame, and the whole battle's
@@ -1552,28 +1770,32 @@ internal static class CloseRangeAcquisitionTick
     // Two bounds fix that without dropping any check: a per-soldier offset so polls
     // cannot stay synchronized, and a per-frame ceiling that spreads a synchronized wave
     // across consecutive frames.
-    private const int MaxCloseConfirmScansPerFrame = 8;
-    private static int _closeConfirmScanFrame = -1;
-    private static int _closeConfirmScansThisFrame;
+    private const int MaxCloseScansPerFrame = 8;
+    private static int _closeScanFrame = -1;
+    private static int _closeScansThisFrame;
+    private static readonly Il2CppSystem.Collections.Generic.List<Creature> NearbyCreatures = new();
 
     // Deterministic per-soldier spread (no RNG, so multiplayer peers stay in step),
     // adding up to one extra poll interval so neighbours cannot share a due frame.
     private static float NextCloseConfirmPollDelay(int soldierId)
         => PollIntervalSeconds * (1f + (soldierId & 7) * 0.125f);
 
-    private static bool TryTakeCloseConfirmBudget()
+    private static float NextCloseDiscoveryPollDelay(int soldierId)
+        => DiscoveryIntervalSeconds * (1f + (soldierId & 7) * 0.125f);
+
+    private static bool TryTakeCloseScanBudget()
     {
         var frame = Time.frameCount;
-        if (frame != _closeConfirmScanFrame)
+        if (frame != _closeScanFrame)
         {
-            _closeConfirmScanFrame = frame;
-            _closeConfirmScansThisFrame = 0;
+            _closeScanFrame = frame;
+            _closeScansThisFrame = 0;
         }
 
-        if (_closeConfirmScansThisFrame >= MaxCloseConfirmScansPerFrame)
+        if (_closeScansThisFrame >= MaxCloseScansPerFrame)
             return false;
 
-        _closeConfirmScansThisFrame++;
+        _closeScansThisFrame++;
         return true;
     }
 
@@ -1583,17 +1805,23 @@ internal static class CloseRangeAcquisitionTick
             return;
 
         var soldierId = soldier.GetInstanceID();
-        if (!AiState.TargetMemory.TryGetValue(soldierId, out var state) ||
-            state.HasConfirmedTarget ||
-            state.Candidates.Count == 0)
-        {
+        var state = AiState.GetTargetMemory(soldierId);
+        if (state.HasConfirmedTarget)
             return;
-        }
+
+        // Nearby discovery is independent of the current candidate list. A soldier
+        // may already be observing somebody farther away when a more immediate enemy
+        // enters the room. When a due discovery scan runs, let its result settle and
+        // perform the short confirmation poll on the next physics tick.
+        var ranDiscoveryScan =
+            TryDiscoverCloseTarget(ai, soldier, state, soldierId, now);
+        if (state.HasConfirmedTarget || state.Candidates.Count == 0 || ranDiscoveryScan)
+            return;
 
         if (now < state.NextCloseConfirmPollAt)
             return;
 
-        var closeDistance = Settings.ContactImmediateFireDistance.Value;
+        var closeDistance = AiBehaviorTuning.ImmediateFireDistance;
         var closeRangeSqr = closeDistance * closeDistance;
         Vector3 origin;
         try
@@ -1620,7 +1848,7 @@ internal static class CloseRangeAcquisitionTick
 
         // Over budget: leave the poll DUE so this soldier retries next frame rather than
         // losing its turn. Nothing is skipped, it is only deferred.
-        if (!TryTakeCloseConfirmBudget())
+        if (!TryTakeCloseScanBudget())
             return;
 
         state.NextCloseConfirmPollAt = now + NextCloseConfirmPollDelay(soldierId);
@@ -1655,14 +1883,137 @@ internal static class CloseRangeAcquisitionTick
             if (!TargetAcquisition.TryConfirm(soldier, target, distance, suppression, now))
                 continue;
 
-            TargetAcquisition.RecordConfirmedNativeObservation(soldier, targetToken, targetPosition, now);
-            TargetAcquisition.PublishSoldierTarget(soldier, target);
-            if (!TargetAcquisition.MatchesTarget(ai.visibleTarget, targetToken))
-                ai.visibleTarget = target;
+            PublishConfirmedCloseTarget(
+                ai, soldier, target, targetToken, targetPosition, now);
             AiState.Trace(
                 $"Acquisition: soldier {soldierId} fast-confirmed close target {targetToken} " +
                 $"at {distance:0}m via close-range tick");
             return;
         }
+    }
+
+    private static bool TryDiscoverCloseTarget(
+        SoldierAI ai,
+        Soldier soldier,
+        TargetMemoryState state,
+        int soldierId,
+        float now)
+    {
+        if (!Settings.CloseQuartersEnabled.Value ||
+            now < state.NextCloseDiscoveryPollAt ||
+            !TryTakeCloseScanBudget())
+        {
+            return false;
+        }
+
+        state.NextCloseDiscoveryPollAt = now + NextCloseDiscoveryPollDelay(soldierId);
+
+        Vector3 origin;
+        try
+        {
+            origin = soldier.LookPosition();
+            NearbyCreatures.Clear();
+            var octree = Creature.creaturesOctatree;
+            if (octree == null ||
+                !octree.GetNearbyNonAlloc(
+                    origin,
+                    AiBehaviorTuning.ImmediateFireDistance,
+                    NearbyCreatures))
+            {
+                return true;
+            }
+
+            var ownFaction = AiState.FactionOf(soldier);
+            var suppression = TargetAcquisition.Suppression(soldier);
+            Spottable? closestVisibleTarget = null;
+            var closestDistance = float.MaxValue;
+            var closestPosition = default(Vector3);
+
+            for (var index = 0; index < NearbyCreatures.Count; index++)
+            {
+                var other = NearbyCreatures[index]?.TryCast<Soldier>();
+                if (other == null ||
+                    other.GetInstanceID() == soldierId ||
+                    !other.IsAlive ||
+                    other.IsOnVehicle() ||
+                    !ResourcesManager.IsEnemyFaction(ownFaction, AiState.FactionOf(other)))
+                {
+                    continue;
+                }
+
+                var target = Creature.GetConnectedSpottable(other.transform);
+                if (!TargetAcquisition.TryGetTargetSnapshot(
+                        target, out _, out var targetPosition))
+                {
+                    continue;
+                }
+
+                var distance = Vector3.Distance(origin, targetPosition);
+                if (distance >= closestDistance ||
+                    !TargetAcquisition.IsInsideEffectiveFov(
+                        soldier, targetPosition, distance, suppression) ||
+                    !soldier.CanSee(target))
+                {
+                    continue;
+                }
+
+                closestVisibleTarget = target;
+                closestDistance = distance;
+                closestPosition = targetPosition;
+            }
+
+            if (closestVisibleTarget == null)
+                return true;
+
+            // First sighting deliberately starts, rather than bypasses, the configured
+            // human reaction delay. The ordinary fast-confirm path owns later samples.
+            TargetAcquisition.RetainOnlyNativeCandidate(
+                soldier, closestVisibleTarget.Pointer);
+            if (TargetAcquisition.TryConfirm(
+                    soldier, closestVisibleTarget, closestDistance, suppression, now))
+            {
+                PublishConfirmedCloseTarget(
+                    ai,
+                    soldier,
+                    closestVisibleTarget,
+                    closestVisibleTarget.Pointer,
+                    closestPosition,
+                    now);
+            }
+
+            state.NextCloseConfirmPollAt = now + NextCloseConfirmPollDelay(soldierId);
+            AiState.Trace(
+                $"Acquisition: soldier {soldierId} discovered close target " +
+                $"{closestVisibleTarget.Pointer} at {closestDistance:0}m between native scans");
+        }
+        catch (NullReferenceException) { }
+        catch (Il2CppException) { }
+        catch (ObjectCollectedException) { }
+        finally
+        {
+            NearbyCreatures.Clear();
+        }
+
+        return true;
+    }
+
+    private static void PublishConfirmedCloseTarget(
+        SoldierAI ai,
+        Soldier soldier,
+        Spottable target,
+        IntPtr targetToken,
+        Vector3 targetPosition,
+        float now)
+    {
+        TargetAcquisition.RecordConfirmedNativeObservation(
+            soldier, targetToken, targetPosition, now);
+        TargetAcquisition.PublishSoldierTarget(soldier, target);
+        if (!TargetAcquisition.MatchesTarget(ai.visibleTarget, targetToken))
+            ai.visibleTarget = target;
+
+        // This confirmation runs outside the shared tactical decision queue. Apply
+        // the equally urgent close-contact halt here too, so a rifleman does not
+        // spend the queue delay walking through an enemy with fire inhibited.
+        ContactResponse.ReactToNewCloseTarget(ai, soldier, targetPosition, now);
     }
 }

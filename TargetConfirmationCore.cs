@@ -28,3 +28,18 @@ internal static class TargetConfirmationCore
         return observedSeconds + Math.Min(gap, MaxSampleCreditSeconds);
     }
 }
+
+/// <summary>
+/// Keeps the coarse direction of direct hostile fire longer than a precise visual
+/// target. This is danger memory, not permission to aim at or fire on an unseen unit.
+/// </summary>
+internal static class DirectThreatMemoryCore
+{
+    internal const float MinimumRetentionSeconds = 15f;
+    internal const float AdditionalRetentionSeconds = 5f;
+
+    internal static float RetentionSeconds(float configuredTargetMemorySeconds)
+        => Math.Max(
+            MinimumRetentionSeconds,
+            Math.Max(0f, configuredTargetMemorySeconds) + AdditionalRetentionSeconds);
+}

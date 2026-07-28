@@ -10,8 +10,16 @@ internal sealed class FirstPersonPlayerShadowController : MonoBehaviour
 
     private readonly Dictionary<int, RendererState> _suppressedRenderers = new();
     private int _suppressedSoldierId;
+    private SuppressionScope _scope;
     private float _nextRendererRefreshAt;
     private string _lastErrorSignature = string.Empty;
+
+    private enum SuppressionScope
+    {
+        None,
+        ViewModelOnly,
+        WholePlayer
+    }
 
     private sealed class RendererState
     {
@@ -26,51 +34,37 @@ internal sealed class FirstPersonPlayerShadowController : MonoBehaviour
         try
         {
             var playerShadowEnabled = Settings.FirstPersonPlayerShadowEnabled.Value;
-            if (playerShadowEnabled && _suppressedRenderers.Count == 0)
-                return;
-
             var player = Soldier.CurrentControlledSoldierOrNull();
             var playerId = player != null ? player.GetInstanceID() : 0;
             var inFirstPerson = PlayerController.fpsCamera;
-            var suppressShadow = !playerShadowEnabled &&
-                                 inFirstPerson && player != null;
+            var desiredScope = !inFirstPerson || player == null
+                ? SuppressionScope.None
+                : playerShadowEnabled
+                    ? SuppressionScope.ViewModelOnly
+                    : SuppressionScope.WholePlayer;
 
-            if (!suppressShadow)
+            if (desiredScope == SuppressionScope.None)
             {
-                // When the option is re-enabled during first person, put every
-                // renderer back exactly as the game configured it. Camera and
-                // controlled-soldier transitions own their own visibility changes,
-                // so do not overwrite the modes they have just selected.
-                if (playerShadowEnabled &&
-                    inFirstPerson && playerId == _suppressedSoldierId)
-                {
-                    RestoreNativeModes();
-                }
-                else
-                {
-                    RestoreModesStillSuppressed();
-                }
-
+                RestoreModesStillSuppressed();
                 return;
             }
 
-            if (_suppressedSoldierId != playerId)
+            if (_suppressedSoldierId != playerId || _scope != desiredScope)
             {
-                RestoreModesStillSuppressed();
+                RestoreNativeModes();
                 _suppressedSoldierId = playerId;
+                _scope = desiredScope;
                 _nextRendererRefreshAt = 0f;
             }
 
-            // Reassert every frame because the game may change a renderer's
-            // casting mode during stance, equipment, or LOD transitions. Any
-            // such native change becomes the mode restored when the setting is
-            // switched back on.
             ReassertSuppressedModes();
 
             if (Time.unscaledTime >= _nextRendererRefreshAt)
             {
                 _nextRendererRefreshAt = Time.unscaledTime + RendererRefreshInterval;
-                SuppressNewRenderers(player!);
+                var root = ResolveSuppressionRoot(player!, desiredScope);
+                if (root != null)
+                    SuppressNewRenderers(root);
             }
         }
         catch (Exception ex)
@@ -85,9 +79,22 @@ internal sealed class FirstPersonPlayerShadowController : MonoBehaviour
     }
 
     [HideFromIl2Cpp]
-    private void SuppressNewRenderers(Soldier player)
+    private static GameObject? ResolveSuppressionRoot(Soldier player, SuppressionScope scope)
     {
-        var renderers = player.gameObject.GetComponentsInChildren<Renderer>(true);
+        if (scope == SuppressionScope.WholePlayer)
+            return player.gameObject;
+
+        // The FPS gun manager owns the separate first-person arms, uniform, and
+        // weapon models. Suppressing only this subtree leaves the soldier's
+        // ordinary third-person body available to cast the visible body shadow.
+        var manager = player.GetFPSGunManager();
+        return manager != null ? manager.gameObject : null;
+    }
+
+    [HideFromIl2Cpp]
+    private void SuppressNewRenderers(GameObject root)
+    {
+        var renderers = root.GetComponentsInChildren<Renderer>(true);
         foreach (var renderer in renderers)
         {
             if (renderer == null)
@@ -225,6 +232,7 @@ internal sealed class FirstPersonPlayerShadowController : MonoBehaviour
     {
         _suppressedRenderers.Clear();
         _suppressedSoldierId = 0;
+        _scope = SuppressionScope.None;
         _nextRendererRefreshAt = 0f;
     }
 

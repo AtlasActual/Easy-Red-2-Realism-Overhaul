@@ -50,9 +50,9 @@ internal readonly record struct CoverScoreInput(
     float PrimaryProtectionFraction = 1f,
     bool PreferProtectionOverFiringLine = false,
     // Count of other soldiers' active cover reservations within the dispersion
-    // radius of this candidate (plan 016). A light tie-breaking term only - it must
-    // never outweigh a genuine protection difference, so its weight in Score() stays
-    // well below the smallest meaningful protectionPenalty swing.
+    // radius of this candidate (plan 016). Ordinary maneuver uses a light
+    // tie-breaker; initial defensive occupation spreads more assertively among
+    // equivalently protective firing positions.
     int NearbyReservationCount = 0);
 
 internal readonly record struct CoverPostureInput(
@@ -230,14 +230,26 @@ internal static class InfantryCoverDecisionCore
         if (input.CloseThreat)
             return Hold("the close threat must be engaged before moving");
 
-        var urgent = input.CoverCompromised || input.UnderDirectFire;
+        // A confirmed distant threat makes remaining in genuinely open ground the
+        // unsafe choice even when that enemy has not fired this instant. Treat the
+        // bounded dash into local protective cover as urgent so the normal-route
+        // exposure filter does not reject every route that starts in the open.
+        // Close contact was handled above: at that range the soldier fights first.
+        var exposedToDistantThreat = !input.HasUsableCover && !input.CloseThreat;
+        var urgent = input.CoverCompromised ||
+                     input.UnderDirectFire ||
+                     exposedToDistantThreat;
         if (input.AttackAdvanceBlocked && !urgent)
             return Wait(CoverSelectionMode.Normal, "advance lacks established covering fire");
 
         if (urgent)
         {
             return input.UrgentDecisionDue
-                ? Search(CoverSelectionMode.Urgent, "exposed position is under direct threat")
+                ? Search(
+                    CoverSelectionMode.Urgent,
+                    input.CoverCompromised || input.UnderDirectFire
+                        ? "exposed position is under direct threat"
+                        : "distant confirmed threat warrants a move out of the open")
                 : Wait(CoverSelectionMode.Urgent, "urgent cover choice is already being acted on");
         }
 
@@ -264,6 +276,17 @@ internal static class InfantryCoverDecisionCore
         bool hasValidAuthoredCandidate)
         => !hasMeasuredProtectiveSelection && hasValidAuthoredCandidate;
 
+    internal static bool IsAuthoredFallbackEligible(
+        bool standingHasClassifiedObstruction,
+        bool crouchedHasClassifiedObstruction,
+        bool proneHasClassifiedObstruction)
+        // The authored fallback exists for a trench/building slot whose material
+        // could not be classified. A measured weak obstacle is evidence against
+        // the slot, not a reason to trust its native cover label.
+        => !standingHasClassifiedObstruction &&
+           !crouchedHasClassifiedObstruction &&
+           !proneHasClassifiedObstruction;
+
     internal static float Score(CoverSelectionMode mode, CoverScoreInput input)
     {
         var distanceMeters = MathF.Sqrt(Math.Max(0f, input.DistanceSqr));
@@ -273,12 +296,13 @@ internal static class InfantryCoverDecisionCore
             : Math.Clamp(input.PrimaryProtectionFraction, 0f, 1f);
         var protectionPenalty = (1f - protectionFraction) *
                                 (input.PreferProtectionOverFiringLine ? 1600f : 700f);
-        // Crowding is a tie-breaker (plan 016), not a survival factor: 25 per
-        // squadmate already reserved nearby is small next to any real protection
-        // difference (a 0.05 protection swing alone moves protectionPenalty by
-        // 35-80), so it nudges the 2nd-9th soldier off an equally good slot without
-        // ever pulling anyone off genuinely better cover.
-        var crowdingPenalty = Math.Max(0, input.NearbyReservationCount) * 25f;
+        // Defenders inventory a whole position once, so use that opportunity to
+        // spread them across equivalent firing cover instead of forming a knot
+        // around the first good node. Protection still dominates: a 0.1 defensive
+        // protection advantage is worth 200 points below, well over this penalty.
+        var crowdingWeight = mode == CoverSelectionMode.DefensiveOccupation ? 60f : 25f;
+        var crowdingPenalty =
+            Math.Max(0, input.NearbyReservationCount) * crowdingWeight;
         var firePenalty = input.AssignedPoseCanFire
             ? 0f
             : input.StandingCanFire
@@ -324,9 +348,11 @@ internal static class InfantryCoverDecisionCore
                    crowdingPenalty;
         }
 
-        return (input.PreferProtectionOverFiringLine
-                   ? distanceMeters * 2f
-                   : input.DistanceSqr * 0.65f) +
+        // Deliberate movement compares nearby positions by travel distance rather
+        // than squared distance. This keeps proximity relevant without letting a
+        // marginal obstruction beat substantially safer cover only a short bound
+        // farther away. Urgent movement above retains its strong short-dash bias.
+        return distanceMeters * (input.PreferProtectionOverFiringLine ? 2f : 6f) +
                input.StandingPosePenalty +
                input.UnprotectedSecondaryThreats * 350f +
                input.ExposedRouteMeters * 35f +

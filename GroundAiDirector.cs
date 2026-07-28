@@ -11,13 +11,12 @@ namespace ER2RealismOverhaul;
 /// Feature modules remain sensors/policies; native mutations are reached through
 /// this director or the soldier executor selected here.
 ///
-/// The AI commander (attack/defense operation planning, squad/vehicle
-/// command leases) was removed: ER2's maps are balanced for vanilla's continuous
-/// frontal pressure, and the commander's staged gating made attacks stall. This
-/// director now only arbitrates the tactical layer (perception, suppression,
-/// danger reactions, cover), tracks external (player/mission-script) ownership so
-/// that layer never fights a human or scripted order, and hosts the one salvaged
-/// commander-adjacent behavior: static-weapon staffing.
+/// The old AI commander (staging, roles, reserves, support plans, and squad/vehicle
+/// command leases) was removed because its gates made attacks stall. The small
+/// objective coordinator called here only spreads native attack/defend orders and
+/// never claims those channels. This director otherwise arbitrates the tactical
+/// layer (perception, suppression, danger reactions, cover), tracks external
+/// player/mission-script ownership, and hosts static-weapon staffing.
 /// </summary>
 internal static class GroundAiDirector
 {
@@ -37,7 +36,12 @@ internal static class GroundAiDirector
         // Continuous authority check: if multiplayer authority is lost mid-battle
         // (e.g. a host migration), locally held leases must not linger.
         if (!MultiplayerAuthority.CanMutateGameplay())
+        {
             ClearRuntimeState();
+            return;
+        }
+
+        ObjectiveCoordination.Update(manager, now);
     }
 
     /// <summary>
@@ -323,6 +327,8 @@ internal static class GroundAiDirector
         if (!TryTakeDirectorBudget())
             return;
 
+        ExclusiveCoverAssignmentPatch.MaintainOccupiedCoverClaim(soldier, now);
+
         ModTimeProbe.Stage(SequentialStage.DirectorSnapshot);
         var snapshot = CaptureSnapshot(ai, soldier, squad);
         var reusableResolution = SoldierResolutions.TryGetValue(id, out var priorResolution)
@@ -341,6 +347,7 @@ internal static class GroundAiDirector
         ModTimeProbe.Stage(SequentialStage.DirectorSuppressionReaction);
         ContactResponse.UpdateSuppressionReaction(ai, soldier, id, now, Time.deltaTime);
         ModTimeProbe.Stage(SequentialStage.DirectorSuppressiveSchedule);
+        RememberedGrenadeThrows.Schedule(ai, soldier, now);
         KnownTargetSuppressiveFire.Schedule(ai, soldier, now);
 
         var movementSource = resolution.Winners.TryGetValue(TacticalChannel.Movement, out var movement)
@@ -424,6 +431,7 @@ internal static class GroundAiDirector
         StaticAntiTankStaffing.ResetBattle();
         StaticGunInfantryTargeting.ResetBattle();
         SoldierFireDanger.Reset();
+        ObjectiveCoordination.ResetBattle();
     }
 
     private static SoldierTacticalSnapshot CaptureSnapshot(
@@ -454,7 +462,7 @@ internal static class GroundAiDirector
             scriptOwned,
             soldier.IsAlive,
             soldier.IsOnVehicle(),
-            soldier.GetSuppressionValue() >= Settings.CrouchSuppression.Value,
+            soldier.GetSuppressionValue() >= AiBehaviorTuning.CrouchSuppressionThreshold,
             soldier.IsReloading,
             lethalHazard,
             new MapPoint(position.x, position.z),

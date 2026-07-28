@@ -6,11 +6,25 @@ ER2RealismOverhaul is built around the rough edges that become hard to ignore af
 
 The goal is to fix those moments without replacing the game underneath them. This is not a health or damage multiplier mod; Easy Red 2's missions, armour system, and basic damage model remain intact.
 
-> **Current development version:** 1.0.6
+> **Current release:** 1.0.8
 >
-> **Latest public release:** 1.0.5
->
-> **Compatibility:** Tested with Easy Red 2 Steam public-branch build `24246380` (July 20, 2026)
+> **Compatibility:** Tested with Easy Red 2 2.0.8 Stable, Steam public-branch build `24420558` (July 27, 2026)
+
+## What's new in 1.0.8
+
+- **The 1.0.5 large-battle stutter fix is back with a mixed-mod safety boundary.** Transient base-game wrappers no longer build an enormous managed finalizer backlog. UnityEngine wrappers and types injected by any plugin retain their normal Il2CppInterop lifetime behavior, and a base-game wrapper held by another mod remains live.
+- **AI reacts promptly and shoots decisively in close quarters without becoming instant or omniscient.** A new nearby visible enemy can preempt an unrelated unconfirmed contact, then still requires the configured human reaction delay. Once confirmed, a close threat immediately halts a moving rifleman or machine gunner and releases fire permission; eligible close-range submachine guns can still fire while moving. The close-range accuracy advantage now remains meaningful through typical indoor fighting distances.
+- **Confirmed contacts are shared locally instead of becoming faction-wide knowledge.** AI call out a frozen last-known target position to friendly AI within 15 m by default, adjustable from 5-50 m. A moving recipient does not turn or interrupt its route; after stopping, it can orient toward a still-fresh report but must personally see and acquire the target before firing.
+- **Recovering from suppression no longer erases the danger immediately.** Direct incoming fire leaves a coarse last-known direction for at least 15 seconds without granting aim or fire permission against an unseen enemy. Precise visual target memory now defaults to 15 seconds and is adjustable from 5-30 seconds.
+- **Pinned infantry keep a usable indoor firing posture.** A nearby solid ceiling keeps suppression-driven posture crouched instead of prone, while exposed soldiers outdoors can still flatten themselves.
+- **Defenders occupy cover with less clustering.** Soldiers spread more strongly across equivalently protective firing positions, exact-position stacking is rejected more reliably in dense geometry, and clearly safer cover still takes priority.
+- **Unsupported aiming develops recoverable native weapon sway.** Crouching lasts longer before fatigue sets in, while prone aiming or held breath provides support.
+- **First-person shadows retain the third-person body silhouette.** Only first-person weapon and viewmodel renderers stop casting shadows, while the local soldier model continues to produce a natural body shadow.
+- **Headshot deaths now use the native death-panel lifecycle.** The blackout remains headshot-only, sits behind the game's death information, mutes combat audio, and clears through the normal respawn and deployment flow.
+- **The world HUD can be made less intrusive without weakening the map.** In-world marker sprites can be hidden while map markers remain visible. Nearby AI squad names and allied multiplayer names share the same camera-aware placement, with multiplayer labels retaining each player's online nickname. Each contextual name uses one clean gold draw without a duplicate black shadow label.
+- **Dead multiplayer players can leave their current squad and redeploy.** A dedicated deployment-screen action uses the game's native squad-leave and respawn flow.
+- **Ragdolls now inherit the soldier's real movement velocity.** Death momentum follows actual character movement and is clamped to keep the result stable.
+- **Multiple machine guns no longer hit Easy Red 2's separate seven-loop sound cutoff.** The Audio page raises that limit to a configurable 24 automatic weapons by default, covering both handheld and mounted guns. The mod also raises Unity's local capacity on startup to at least 256 audible and 512 virtual voices without lowering higher native values.
 
 ## What's new in 1.0.6
 
@@ -29,9 +43,9 @@ The goal is to fix those moments without replacing the game underneath them. Thi
 ### Infantry combat
 
 - **Melee attacks connect at believable distances.** The base hit check is longer and slightly wider for both players and AI, greatly reducing point-blank ghost swings. At the default setting, an ordinary strike reaches roughly 1.32 m and a bayonet roughly 1.68 m. Damage is unchanged.
-- **AI no longer snaps onto every target or tracks enemies forever.** Soldiers need time to visually acquire a target, have a limited forward field of view, and lose firing permission when a remembered target is no longer reasonably known.
+- **AI no longer snaps onto every target or tracks enemies forever.** Soldiers need time to visually acquire a target, have a limited forward field of view, and lose firing permission when a remembered target is no longer reasonably known. Personally confirmed contacts can be called out to nearby friendly AI, but only as a short-lived last-known position that never grants aim or fire permission by itself. A soldier directly fired upon separately remembers the frozen direction of that danger long enough to avoid forgetting it as soon as suppression fades.
 - **Cover is treated as a position, not a suggestion.** Exposed infantry look for threat-facing cover, favour trenches and lower stances, avoid piling multiple soldiers into the same spot, and hold good cover instead of constantly shuffling away from it. Cover rays use the penetration model's material and measured thickness, so foliage, glass, canvas, and thin props no longer receive the same survival value as earthworks, sandbags, masonry, or substantial buildings.
-- **Suppression changes behaviour.** Pinned soldiers get low, exposed troops may crawl toward safety, mounted gunners duck and stop firing, and heavily suppressed squads see and remember less. Nearby allied wounds and deaths now add a separate morale shock to AI only, with deaths having the larger radius and effect.
+- **Suppression changes behaviour.** Pinned soldiers get low, exposed troops may crawl toward safety, and soldiers under a nearby solid ceiling remain crouched instead of losing their indoor firing lane by going prone. Mounted gunners duck and stop firing, and heavily suppressed squads see and remember precise contacts less reliably. Nearby allied wounds and deaths add a separate morale shock to AI only, with deaths having the larger radius and effect.
 - **Movement and weapon handling are less awkward.** Riflemen stop before firing, SMGs retain limited close-range moving fire, exposed AI reload from a safer posture, and crawling soldiers must stop before reloading or bandaging.
 - **Squads can suppress a position without seeing through walls.** A stationary machine gunner may fire one short burst at a fresh, personally confirmed last-known position, using real ammunition and without tracking an invisible target.
 
@@ -45,7 +59,7 @@ The goal is to fix those moments without replacing the game underneath them. Thi
 
 ### Weapons, vehicles, and battlefield effects
 
-- **AI has better fire discipline.** Handheld and mounted weapons check for friendlies in the firing lane. Grenades require sensible range, a clear target area, and a per-soldier cooldown.
+- **AI has better fire discipline.** Handheld and mounted weapons check for friendlies in the firing lane. Grenades require sensible range, a clear target area, and a per-soldier cooldown; a stationary soldier can also throw an explosive grenade at a fresh last-known enemy position when the arcing path is clear.
 - **Tanks behave more like armoured vehicles.** They hold useful fighting distances, reverse without exposing their rear, avoid pointless hull pivots, accelerate with more weight, and keep attacking when their orders call for pressure.
 - **Infantry respond more sensibly to armour.** Riflemen hold their small-arms fire against a tank instead of plinking at it, anti-tank troops wait for a practical launcher shot rather than firing a rocket across the map, and crews on valid defensive gun assignments do not abandon their weapons because a separate suppression reaction tried to dismount them.
 - **Thin cover is no longer automatically bulletproof.** Material-aware penetration measures cover thickness and resistance, carries reduced projectile energy through suitable props, and preserves entry, exit, tracer, decal, and ricochet feedback. Terrain, bunkers, vehicle armour, and native armour penetration remain meaningful.
@@ -56,15 +70,17 @@ The goal is to fix those moments without replacing the game underneath them. Thi
 
 ### Smaller fixes and presentation options
 
-- More restrained AI command gestures and better animation quality for visible distant soldiers.
-- Allied multiplayer infantry can deliberately form one squad: open the player list, select a player, and choose **Join [player]'s squad**. Joining is per life and never happens automatically on spawn or respawn.
-- Configurable impact-decal lifetime, tracer frequency, battle chatter, distant sound shaping, weapon audio, tank engines, tracks, player footsteps, and rain/snow particle size, amount, and fall speed.
-- Adjustable player suppression effects—including a larger near-miss radius and optional depth-of-field blur—plus true 10x Caps Lock binocular zoom with the weapon model hidden, 200-degree hold-Alt freelook, first-person shadows, and allied multiplayer names when the rest of the HUD is hidden.
+- More restrained AI command gestures, better animation quality for visible distant soldiers, and movement-aware ragdoll momentum.
+- Allied multiplayer infantry can deliberately form one squad: open the player list, select a player, and choose **Join [player]'s squad**. Joining is per life and never happens automatically on spawn or respawn. Dead players can also leave their current squad and return to deployment.
+- Configurable impact-decal lifetime, machine-gun tracer frequency, brightness, thickness, and independent streak length, battle chatter, simultaneous-sound capacity, distant sound shaping, weapon audio, tank engines, tracks, player footsteps, and rain/snow particle size, amount, and fall speed.
+- Adjustable player suppression effects—including a larger near-miss radius and optional depth-of-field blur—plus recoverable aim fatigue, true 10x Caps Lock binocular zoom with the weapon model hidden, 200-degree hold-Alt freelook, corrected first-person body shadows, an immersive world HUD, and allied multiplayer names when other markers are hidden.
 - A bullet to the head that kills you cuts to black and silence instantly instead of leaving the death camera on your body, with the death panel still readable over it; every other death is unchanged, and sight and sound always return when you take control of a soldier again.
 - A map-north-aligned scrolling bottom-screen compass tape shown for five seconds with **K**, using NATO mils by default with optional degree bearings, tapered fading edges, and an option to keep it permanently visible.
-- A built-in settings menu with Apply, Cancel, reset controls, individual switches for nearly every system, and one-click Enable All / Disable All system kill switches.
+- A built-in settings menu with Apply, Cancel, reset controls, individual switches for nearly every system, one-click Enable All / Disable All system kill switches, and Quality, Balanced, and Large Battle performance presets.
 
-Press **F10**, or choose **Realism Overhaul Settings** from the main or pause menu. AI options are organized into Attack Posture Bonuses, Defense, Infantry Tactics, Vehicle Tactics, Support Coordination, and Diagnostics. Defender static-weapon staffing has its own switch on the Defense page. Non-AI settings are unchanged.
+Press **F10**, or choose **Realism Overhaul Settings** from the main or pause menu. Quick Setup offers three performance starting points: **Quality** restores the recommended defaults, **Balanced** keeps every gameplay system while reducing the main animation/effects/audio costs, and **Large Battle** keeps the core AI and fire-safety systems while minimizing supplemental blast, fragmentation, ricochet, lingering-effect, decal, and audio work. Presets stage ordinary settings rather than hiding them, so every changed value remains individually editable before you press Apply. Audio-capacity changes take effect on the next launch.
+
+Quick Setup and the AI / Core Behavior page also expose centered 0.5x-1.5x sliders for Aggressiveness, Accuracy, Reaction Speed, Awareness, and Suppression Resistance; 1.0x is the recommended baseline. Detailed AI options remain available under Objectives, Attack Bonuses, Defense, Infantry Tactics, Vehicle Tactics, Support, and Diagnostics. Defender static-weapon staffing has its own switch on the Defense page. Non-AI settings are unchanged.
 
 The F10 menu also lets you rebind the **Binoculars Key**, **Free Look Key**, and **Compass Key**: select a binding, press the desired key, then Apply to save it. Defaults remain **Caps Lock**, either **Alt** key, and **K**.
 
@@ -86,7 +102,9 @@ The complete layer and marker reference is in [`docs/AI_VISUAL_DEBUG.md`](docs/A
 
 ## Coming soon
 
-Tank combat is the next major area being rebuilt. Tank ballistics, armour values, and internal vehicle subsystems are all being reworked for a future release. These changes are still work in progress and are not part of v1.0.6; for now, the mod leaves Easy Red 2's existing tank ballistics and armour model alone.
+Vehicle combat is the next major area being rebuilt. The first milestone is direct, non-screen-centering aiming for player-controlled ground-vehicle turrets and direct-fire stationary guns while preserving adjustable range zeroing. The next step is a read-only audit of Easy Red 2's existing whole-vehicle, engine, hull, fuel-tank, track, wheel, penetration, repair, destruction, and networked damage paths before changing any damage behavior. Large-calibre gun, shell, anti-tank weapon, and bomb ballistics will then be researched and reworked in bounded weapon families. Historically sourced vehicle armour values and any native damage tuning are conditional later phases, after the relevant game data and runtime behavior can be mapped reliably.
+
+No replacement subsystem architecture or replacement of Easy Red 2's native whole-vehicle health model is planned. Initial inspection also indicates that infantry anti-tank weapons currently aim at a vehicle's general center rather than deliberately selecting a component; optional broad, externally visible aim zones will be considered only after the native damage audit and will not give AI hidden weak-point knowledge. The vehicle aiming, damage audit/tuning, zeroing, ballistics, and possible armour changes are still work in progress and are not part of v1.0.8; for now, the mod leaves Easy Red 2's existing vehicle aiming, damage, tank ballistics, and armour model alone.
 
 ## Installation
 

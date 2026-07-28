@@ -547,6 +547,7 @@ internal static class StutterProbe
     private static float _nextLogAllowedAt;
     private static float _nextCacheCensusAt;
     private static int _lastSoldierCount = -1;
+    private static long _lastIl2CppUsedBytes = -1;
     // Managed bytes allocated on the game thread. The game itself is il2cpp/native, so
     // essentially every managed allocation here is the mod or Il2CppInterop marshalling
     // on its behalf — which makes this the direct measure of what feeds the gen0
@@ -733,6 +734,7 @@ internal static class StutterProbe
             "managedHeap " + (GC.GetTotalMemory(false) / 1048576f).ToString("F1") + "MB; " +
             "gcMode " + System.Runtime.GCSettings.LatencyMode + "; " +
             "engineGc " + IncrementalGarbageCollection.DescribeState() + "; " +
+            "interopReaper " + InteropFinalizerReaper.DescribeState() + "; " +
             ModTimeProbe.DescribeAllocation() + "; caches: " +
             ",vehTrack=" + VehicleAudioBalance.TrackSourceCount +
             ",vehEngine=" + VehicleAudioBalance.EngineSourceCount +
@@ -826,6 +828,13 @@ internal static class StutterProbe
         var soldiersDelta = _lastSoldierCount >= 0 ? soldiers - _lastSoldierCount : 0;
         _lastSoldierCount = soldiers;
 
+        // The game-side IL2CPP (Boehm) collector is invisible to System.GC — its
+        // world-stop pauses are the one stutter source no managed counter shows.
+        // A used-size DROP across a spike frame means it collected during it.
+        var il2cppUsed = IL2CPP.il2cpp_gc_get_used_size();
+        var il2cppDelta = _lastIl2CppUsedBytes >= 0 ? il2cppUsed - _lastIl2CppUsedBytes : 0;
+        _lastIl2CppUsedBytes = il2cppUsed;
+
         var spike = frameSeconds >= Mathf.Max(MinimumSpikeSeconds, _smoothedFrameSeconds * SpikeFactor);
         // Spikes are excluded from the average so one hitch cannot raise the
         // baseline and hide the next one.
@@ -864,7 +873,7 @@ internal static class StutterProbe
 
         Plugin.LogSource.LogInfo(
             $"Stutter probe: frame {frameSeconds * 1000f:F0}ms (recent avg {_smoothedFrameSeconds * 1000f:F1}ms); " +
-            $"GC {gcDelta0}/{gcDelta1}/{gcDelta2}; " +
+            $"GC {gcDelta0}/{gcDelta1}/{gcDelta2}; il2cppHeap {il2cppUsed / 1048576f:F1}MB (delta {il2cppDelta / 1048576f:+0.0;-0.0;0}MB); " +
             $"coverSearch={coverSearchCoincided}; " +
             $"casualtyBatch={casualtyBatch}; explosions={explosions}; " +
             $"postureEvals={postureEvals}; " +

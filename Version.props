@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
     <!-- The single authoritative mod version. Build metadata and PluginVersion derive from this value. -->
-    <ModVersion>1.0.6</ModVersion>
+    <ModVersion>1.0.8</ModVersion>
   </PropertyGroup>
 </Project>

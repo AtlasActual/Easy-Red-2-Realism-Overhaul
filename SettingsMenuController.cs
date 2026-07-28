@@ -339,12 +339,22 @@ internal sealed class SettingsMenuController : MonoBehaviour
 
         DrawSearch(rect, padding);
 
+        var presetHeight = _selectedCategory == SettingsMenuCategory.QuickSetup ? S(102f) : 0f;
+        if (presetHeight > 0f)
+        {
+            DrawPerformancePresets(new Rect(
+                rect.x + padding,
+                rect.y + headerHeight,
+                rect.width - padding * 2f,
+                presetHeight - S(6f)));
+        }
+
         var readOnlyHeight = SettingsSyncController.AreSettingsReadOnly ? S(38f) : 0f;
         if (SettingsSyncController.AreSettingsReadOnly)
         {
             var readOnlyRect = new Rect(
                 rect.x + padding,
-                rect.y + headerHeight,
+                rect.y + headerHeight + presetHeight,
                 rect.width - padding * 2f,
                 readOnlyHeight - S(6f));
             FillRect(readOnlyRect, AccentDarkColor);
@@ -357,9 +367,9 @@ internal sealed class SettingsMenuController : MonoBehaviour
 
         _settingsViewport = new Rect(
             rect.x + padding,
-            rect.y + headerHeight + readOnlyHeight,
+            rect.y + headerHeight + presetHeight + readOnlyHeight,
             rect.width - padding * 2f,
-            rect.height - headerHeight - readOnlyHeight - padding);
+            rect.height - headerHeight - presetHeight - readOnlyHeight - padding);
 
         var cardGap = S(8f);
         var desiredCardHeight = S(98f);
@@ -411,6 +421,79 @@ internal sealed class SettingsMenuController : MonoBehaviour
         }
 
         DrawPageProgress(_settingsViewport, visibleCount, pageCount);
+    }
+
+    [HideFromIl2Cpp]
+    private void DrawPerformancePresets(Rect rect)
+    {
+        FillRect(rect, RaisedColor);
+        DrawOutline(rect, BorderColor, S(1f));
+
+        GUI.Label(
+            new Rect(rect.x + S(10f), rect.y + S(4f), rect.width - S(20f), S(21f)),
+            "PERFORMANCE PRESETS  /  only known cost drivers change; every individual setting remains editable",
+            _smallStyle!);
+
+        var activePreset = _draft == null ? null : PerformancePresets.Detect(_draft);
+        var gap = S(8f);
+        var buttonY = rect.y + S(29f);
+        var buttonHeight = S(39f);
+        var buttonWidth = (rect.width - S(20f) - gap * 2f) / 3f;
+        var wasEnabled = GUI.enabled;
+        GUI.enabled = wasEnabled && !SettingsSyncController.AreSettingsReadOnly && _draft != null;
+
+        for (var index = 0; index < PerformancePresetCore.Presets.Length; index++)
+        {
+            var preset = PerformancePresetCore.Presets[index];
+            var selected = activePreset == preset.Kind;
+            var buttonRect = new Rect(
+                rect.x + S(10f) + index * (buttonWidth + gap),
+                buttonY,
+                buttonWidth,
+                buttonHeight);
+            var label = selected ? preset.Label + "  /  ACTIVE" : preset.Label;
+            if (!DrawButton(
+                    buttonRect,
+                    label,
+                    selected ? AccentDarkColor : PanelColor,
+                    selected ? AccentColor : HoverColor,
+                    selected ? AccentColor : BorderColor,
+                    _buttonStyle!))
+            {
+                continue;
+            }
+
+            var result = PerformancePresets.Apply(_draft!, preset.Kind);
+            if (result.MissingCount > 0)
+            {
+                _message =
+                    $"Error: {result.MissingCount} preset settings are unavailable in this build; no changes were saved.";
+                Plugin.LogSource.LogWarning(
+                    $"Performance preset {preset.Kind} could not find {result.MissingCount} catalog settings.");
+            }
+            else if (result.ChangedCount == 0)
+            {
+                _message = $"{preset.Label} performance settings are already staged.";
+            }
+            else
+            {
+                _message =
+                    $"{preset.Label} preset staged ({result.ChangedCount} settings changed). Apply to save." +
+                    (result.RestartRequired ? " Audio capacity changes take effect next launch." : string.Empty);
+            }
+
+            if (result.MissingCount == 0)
+                activePreset = preset.Kind;
+        }
+
+        GUI.enabled = wasEnabled;
+        var activeInfo = activePreset == null
+            ? "CUSTOM  /  performance-sensitive settings do not exactly match a preset"
+            : PerformancePresetCore.Presets.First(preset => preset.Kind == activePreset.Value).Description;
+        GUI.Label(
+            new Rect(rect.x + S(10f), rect.yMax - S(23f), rect.width - S(20f), S(19f)),
+            activeInfo,
+            _mutedStyle!);
     }
 
     [HideFromIl2Cpp]

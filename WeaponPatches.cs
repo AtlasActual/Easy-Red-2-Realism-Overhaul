@@ -1,4 +1,5 @@
 using HarmonyLib;
+using Il2CppInterop.Runtime;
 
 namespace ER2RealismOverhaul;
 
@@ -14,16 +15,83 @@ internal static class GenericGunTracerPatch
             return;
         }
 
-        if (!HandheldWeaponClassifier.IsMachineGun(__instance, true))
+        __result = TracerRetentionCore.ShouldKeep(
+            __result,
+            HandheldWeaponClassifier.IsMachineGun(__instance, true),
+            Settings.MachineGunTracerRetention.Value,
+            UnityEngine.Random.value);
+    }
+}
+
+internal static class TurretMachineGunTracerScope
+{
+    [ThreadStatic]
+    private static int _depth;
+
+    internal static bool Active => _depth > 0;
+
+    internal static bool Enter(TurretGun gun)
+    {
+        if (!Settings.TracerReductionEnabled.Value ||
+            !MultiplayerAuthority.CanMutateGameplay() ||
+            gun.TryCast<TurretMG>() == null)
         {
-            __result = false;
-            return;
+            return false;
         }
 
-        if (UnityEngine.Random.value > Settings.MachineGunTracerRetention.Value)
-            __result = false;
+        _depth++;
+        return true;
     }
 
+    internal static void Exit(bool entered)
+    {
+        if (entered && _depth > 0)
+            _depth--;
+    }
+}
+
+[HarmonyPatch(typeof(TurretGun), nameof(TurretGun.Shoot))]
+internal static class TurretMachineGunTracerScopePatch
+{
+    [HarmonyPrefix]
+    private static void Prefix(TurretGun __instance, out bool __state)
+        => __state = TurretMachineGunTracerScope.Enter(__instance);
+
+    [HarmonyFinalizer]
+    private static void Finalizer(bool __state)
+        => TurretMachineGunTracerScope.Exit(__state);
+}
+
+[HarmonyPatch(
+    typeof(Corvostudio.Weapons.Projectile),
+    nameof(Corvostudio.Weapons.Projectile.Shoot))]
+internal static class TurretMachineGunProjectileTracerPatch
+{
+    [HarmonyPrefix]
+    private static void Prefix(ref bool use_tracer)
+        => ApplyRetention(ref use_tracer);
+
+    internal static void ApplyRetention(ref bool useTracer)
+    {
+        if (!useTracer || !TurretMachineGunTracerScope.Active)
+            return;
+
+        useTracer = TracerRetentionCore.ShouldKeep(
+            true,
+            true,
+            Settings.MachineGunTracerRetention.Value,
+            UnityEngine.Random.value);
+    }
+}
+
+[HarmonyPatch(
+    typeof(Corvostudio.Weapons.Projectile),
+    nameof(Corvostudio.Weapons.Projectile.FakeShoot))]
+internal static class TurretMachineGunFakeProjectileTracerPatch
+{
+    [HarmonyPrefix]
+    private static void Prefix(ref bool use_tracer)
+        => TurretMachineGunProjectileTracerPatch.ApplyRetention(ref use_tracer);
 }
 
 [HarmonyPatch(typeof(SoldierAI), nameof(SoldierAI.UseBestWearedWeaponCheck))]

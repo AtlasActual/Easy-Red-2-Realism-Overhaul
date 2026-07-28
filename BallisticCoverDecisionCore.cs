@@ -77,6 +77,23 @@ internal static class BallisticCoverDecisionCore
         => IsFinite(protectionFraction) &&
            protectionFraction >= MeaningfulRayProtection;
 
+    internal static bool IsNonProtectiveScreenDescription(string? description)
+    {
+        if (string.IsNullOrWhiteSpace(description))
+            return false;
+
+        var normalized = description.ToLowerInvariant();
+        return normalized.Contains("barbed", StringComparison.Ordinal) ||
+               normalized.Contains("barbwire", StringComparison.Ordinal) ||
+               normalized.Contains("barb_wire", StringComparison.Ordinal) ||
+               normalized.Contains("razorwire", StringComparison.Ordinal) ||
+               normalized.Contains("razor_wire", StringComparison.Ordinal) ||
+               normalized.Contains("chainlink", StringComparison.Ordinal) ||
+               normalized.Contains("chain_link", StringComparison.Ordinal) ||
+               normalized.Contains("chain link", StringComparison.Ordinal) ||
+               normalized.Contains("wire", StringComparison.Ordinal);
+    }
+
     private static bool IsFinite(float value)
         => !float.IsNaN(value) && !float.IsInfinity(value);
 }

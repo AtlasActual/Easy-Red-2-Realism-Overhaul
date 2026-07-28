@@ -36,6 +36,8 @@ internal sealed class ContactResponseState
     internal float RelocateUntil;
     internal float RelocateLastDistance;
     internal float RelocateLastProgressAt;
+    internal float RelocateLastDestinationProgressAt;
+    internal bool RelocatePathRetryUsed;
     internal Vector3 RelocateLastProgressPosition;
     internal IntPtr RelocateDestinationPointer;
     internal Vector3 RelocateDestinationPosition;
@@ -75,10 +77,14 @@ internal sealed class ContactResponseState
     // that guarantees the check runs at most once per halt episode.
     internal float HaltSpacingMoveUntil;
     internal float HaltSpacingNextCheckAt;
+    internal bool HasHaltSpacingTarget;
+    internal Vector3 HaltSpacingTarget;
     internal bool SuppressionMovementOwned;
     internal bool SuppressionPoseOwned;
     internal bool SuppressionFireInhibited;
     internal float SuppressionCrouchUntil;
+    internal float NextOverheadProtectionCheckAt;
+    internal bool HasOverheadProtection;
     internal bool ContactCrouchOwned;
     internal bool CoverClearancePoseOwned;
     internal IntPtr CoverClearanceCoverId;
@@ -98,6 +104,8 @@ internal sealed class ContactResponseState
     internal IntPtr ManeuverCoverReleasedId;
     internal IntPtr ManeuverCoverAnchorId;
     internal Vector3 ManeuverCoverAnchorPosition;
+    internal IntPtr OccupiedCoverClaimId;
+    internal float OccupiedCoverClaimRefreshAt;
     internal bool DefensiveCoverHold;
     internal bool HasDefensiveCoverAnchor;
     internal IntPtr DefensiveCoverAnchorId;
@@ -184,7 +192,8 @@ internal static class InfantryCoverPolicy
     internal const int NearestDetailedCandidateCount = 6;
     internal const int DefensiveDetailedCandidateLimit = 20;
     internal const int DefensiveNearestDetailedCandidateCount = 3;
-    internal const float OccupancyRadiusMeters = 1.75f;
+    internal static float OccupancyRadiusMeters =>
+        Mathf.Clamp(Settings.InfantrySeparationDistance.Value, 1.25f, 4f);
     // SCORING-ONLY dispersion radius (plan 016): the range within which another
     // soldier's cover reservation counts as a crowding neighbour in Score(). It is
     // deliberately NOT a filter distance — every hard reservation/occupancy check
@@ -193,6 +202,9 @@ internal static class InfantryCoverPolicy
     // and strand soldiers in the open (plan 016 review).
     internal const float CoverDispersionSpacingMeters = 5f;
     internal const float DecisionIntervalSeconds = 12f;
+    // Long enough for an ordinary native route into a nearby trench or building.
+    // Once occupied, the claim is renewed at DecisionIntervalSeconds cadence.
+    internal const float CoverReservationLeaseSeconds = 30f;
     internal const float MoveProgressWindowSeconds = 6f;
     internal const float RelocationCooldownSeconds = 15f;
     // D5 (plan 015): the fighting-position minimum hold is split so an attacker

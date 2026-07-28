@@ -7,6 +7,8 @@ namespace ER2RealismOverhaul;
 internal static partial class ContactResponse
 {
     private const float CoverMuzzleClearanceDistance = 2f;
+    private const float OverheadProtectionCheckIntervalSeconds = 0.5f;
+    private const float OverheadProtectionDistanceMeters = 4f;
 
     private static void ResetTacticalPoseLatch(ContactResponseState state)
     {
@@ -69,22 +71,23 @@ internal static partial class ContactResponse
         }
 
         // c. The movement contract (plan 019). The committed movement decision from the
-        // single movement write site is an INPUT here: when it is actually moving this
-        // soldier, the pose is the movement pose and can never be Prone. This is resolved
-        // ABOVE the stagger cache deliberately - it is two managed field reads, and a
-        // cached fighting pose from an earlier decision frame must never survive into a
-        // bound. The interop IsMoving() probe is reached only for MovementOwner.Free,
-        // i.e. only when this mod wrote nothing and the question is whether native
-        // locomotion is carrying him.
+        // single movement write site is an INPUT here. An ordinary mod-owned bound uses
+        // Crouch, while a suppressed attacker released by the maximum combat halt keeps
+        // Prone and crawls toward the objective. Native locomotion is not claimed here:
+        // MovementOwner.Free leaves the game's own favourite pose untouched, including
+        // native crawl movement. This rank stays above the stagger cache so a cached
+        // fighting pose cannot leak into a newly committed move.
         var committedMovement = state.LastMovementOwner;
         if (PoseMovementContractCore.MovementOwnsPose(
                 committedMovement,
-                state.MovementHalted,
-                committedMovement == MovementOwner.Free && !state.MovementHalted &&
-                IsPhysicallyMoving(soldier)))
+                state.MovementHalted))
         {
             owner = PoseOwner.MovementPose;
-            return FromTacticalStance(PoseMovementContractCore.MovementStance);
+            return FromTacticalStance(PoseMovementContractCore.MovementStance(
+                committedMovement,
+                state.AttackProgressForced &&
+                state.SuppressionPoseOwned &&
+                !state.HasOverheadProtection));
         }
 
         // Decision tail (ranks d-i): reuse the cached outcome on non-decision frames so
@@ -110,6 +113,8 @@ internal static partial class ContactResponse
         out PoseOwner owner)
     {
         var id = soldier.GetInstanceID();
+        var suppressionBand = Settings.DangerReactionsEnabled.Value &&
+                              soldier.GetSuppressionValue() >= AiBehaviorTuning.CrouchSuppressionThreshold;
 
         // d. Cover muzzle-clearance stand.
         if (OwnsCurrentCoverClearancePose(soldier, state))
@@ -128,6 +133,12 @@ internal static partial class ContactResponse
                 soldier, state, state.LastThreatPosition, now, out var evaluation))
         {
             var proposed = ApplyCoverDowngradeHysteresis(state, evaluation.Pose, now);
+            if (suppressionBand &&
+                proposed == SoldierPose.Prone &&
+                HasOverheadProtection(soldier, state, now))
+            {
+                proposed = SoldierPose.Crouch;
+            }
             if (proposed == SoldierPose.Idle)
             {
                 ClaimCoverClearancePose(soldier, state);
@@ -143,8 +154,6 @@ internal static partial class ContactResponse
         // f. Suppression band / recovery. On owned cover rank e above already owns the
         // pose; off cover this keeps an already-prone soldier down and crouches a
         // standing/crouched one (SuppressionRecoveryPoseCore).
-        var suppressionBand = Settings.DangerReactionsEnabled.Value &&
-                              soldier.GetSuppressionValue() >= Settings.CrouchSuppression.Value;
         if (IsSuppressionPoseOwner(id) || suppressionBand)
         {
             owner = PoseOwner.SuppressionRecovery;
@@ -163,30 +172,6 @@ internal static partial class ContactResponse
         // i. No mod owner: leave the native favourite pose untouched.
         owner = PoseOwner.None;
         return SoldierPose.Idle;
-    }
-
-    // Only asked when this mod wrote nothing to locomotion this frame (MovementOwner.Free)
-    // and the pose ladder still needs to know whether native locomotion is carrying the
-    // soldier. A soldier whose movement state cannot be read is treated as stationary, so
-    // the failure mode is "keeps his fighting pose", never "stands up".
-    private static bool IsPhysicallyMoving(Soldier soldier)
-    {
-        try
-        {
-            return soldier.IsMoving();
-        }
-        catch (NullReferenceException)
-        {
-            return false;
-        }
-        catch (Il2CppException)
-        {
-            return false;
-        }
-        catch (ObjectCollectedException)
-        {
-            return false;
-        }
     }
 
     private static SoldierPose FromTacticalStance(TacticalStance stance)
@@ -233,26 +218,24 @@ internal static partial class ContactResponse
 
     internal static SoldierPose SuppressionPose(Soldier soldier)
     {
-        if (!IsOnUsableCover(soldier))
-            return SoldierPose.Prone;
-
         var state = AiState.GetContactState(soldier.GetInstanceID());
-        if (state.HasThreatPosition &&
+        var now = Time.time;
+        var onUsableCover = IsOnUsableCover(soldier);
+        var hasEvaluation = false;
+        var evaluatedPose = TacticalStance.Crouched;
+        if (onUsableCover && state.HasThreatPosition &&
             TryGetCurrentCoverEvaluation(
-                soldier,
-                state,
-                state.LastThreatPosition,
-                Time.time,
-                out var evaluation))
+                soldier, state, state.LastThreatPosition, now, out var evaluation))
         {
-            // Pinning never owns a standing firing exposure. Keep the protection
-            // decision, but drop behind low cover if its firing pose was standing.
-            return evaluation.Pose == SoldierPose.Idle
-                ? SoldierPose.Crouch
-                : evaluation.Pose;
+            hasEvaluation = true;
+            evaluatedPose = ToTacticalStance(evaluation.Pose);
         }
 
-        return SoldierPose.Crouch;
+        return FromTacticalStance(PinnedSuppressionPoseCore.Resolve(
+            HasOverheadProtection(soldier, state, now),
+            onUsableCover,
+            hasEvaluation,
+            evaluatedPose));
     }
 
     // A stationary suppression-driven crouch proposal must not raise a soldier who is
@@ -263,10 +246,10 @@ internal static partial class ContactResponse
     internal static SoldierPose SuppressionRecoveryPose(Soldier soldier)
     {
         var onUsableCover = IsOnUsableCover(soldier);
+        var state = AiState.GetContactState(soldier.GetInstanceID());
         var coverEvaluationOwnsProne = false;
         if (onUsableCover)
         {
-            var state = AiState.GetContactState(soldier.GetInstanceID());
             coverEvaluationOwnsProne = CoverPostureOwnershipCore.CoverPoseOwned(
                                            state.HasThreatPosition, onUsableCover, state.DefensiveCoverHold) &&
                                        TryGetCurrentCoverEvaluation(
@@ -279,10 +262,50 @@ internal static partial class ContactResponse
         }
 
         return SuppressionRecoveryPoseCore.Resolve(
+                   HasOverheadProtection(soldier, state, Time.time),
                    onUsableCover,
                    soldier.Pose == SoldierPose.Prone ? TacticalStance.Prone : TacticalStance.Crouched,
                    coverEvaluationOwnsProne)
                == TacticalStance.Prone ? SoldierPose.Prone : SoldierPose.Crouch;
+    }
+
+    private static bool HasOverheadProtection(
+        Soldier soldier,
+        ContactResponseState state,
+        float now)
+    {
+        if (now < state.NextOverheadProtectionCheckAt)
+            return state.HasOverheadProtection;
+
+        state.NextOverheadProtectionCheckAt =
+            now + OverheadProtectionCheckIntervalSeconds;
+        try
+        {
+            // Start just above eye level so the ray cannot immediately hit the
+            // soldier's own collision volume. A nearby solid ceiling is the
+            // reliable geometry signal available for a roofed fighting position.
+            var origin = soldier.LookPosition() + Vector3.up * 0.2f;
+            state.HasOverheadProtection = Physics.Raycast(
+                origin,
+                Vector3.up,
+                OverheadProtectionDistanceMeters,
+                Physics.DefaultRaycastLayers,
+                QueryTriggerInteraction.Ignore);
+        }
+        catch (NullReferenceException)
+        {
+            state.HasOverheadProtection = false;
+        }
+        catch (Il2CppException)
+        {
+            state.HasOverheadProtection = false;
+        }
+        catch (ObjectCollectedException)
+        {
+            state.HasOverheadProtection = false;
+        }
+
+        return state.HasOverheadProtection;
     }
 
     private static SoldierPose GetStationaryEngagementPose(

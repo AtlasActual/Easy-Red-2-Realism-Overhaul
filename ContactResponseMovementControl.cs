@@ -126,6 +126,34 @@ internal static partial class ContactResponse
         string? traceSource,
         bool resolvePose)
     {
+        // End a dispersion grant as soon as its destination is reached instead of
+        // leaving moveCharacter enabled for the remainder of a fixed timer. A higher
+        // priority halt also cancels the step rather than allowing it to resume later.
+        if (state.HasHaltSpacingTarget)
+        {
+            var reachedSpacingTarget =
+                HorizontalDistanceSqr(soldier.transform.position, state.HaltSpacingTarget) <=
+                MovementProgressWatchdogCore.ProgressEpsilonMeters *
+                MovementProgressWatchdogCore.ProgressEpsilonMeters;
+            if (owner != MovementOwner.HaltSpacing ||
+                reachedSpacingTarget ||
+                now >= state.HaltSpacingMoveUntil)
+            {
+                state.HasHaltSpacingTarget = false;
+                state.HaltSpacingTarget = default;
+                if (owner != MovementOwner.HaltSpacing)
+                {
+                    state.HaltSpacingMoveUntil = 0f;
+                }
+                else if (reachedSpacingTarget)
+                {
+                    state.HaltSpacingMoveUntil = 0f;
+                    owner = ResolveMovementOwner(
+                        soldier, state, soldierId, now, MovementOwner.Free);
+                }
+            }
+        }
+
         // resolvePose false marks the stagger's write-through REPLAY. A replay must not
         // start a new dispersion step: the step is a decision, and granting one here would
         // hand movement back while the caller is still gating native locomotion off.
@@ -194,14 +222,14 @@ internal static partial class ContactResponse
     }
 
     /// <summary>
-    /// Plan 018 item 3. On the RISING EDGE of a fighting halt only, and at most once per
-    /// long cooldown, a soldier about to freeze on top of an already-halted friendly
-    /// takes one bounded lateral step off the threat axis first. An unreachable step
-    /// means he halts anyway: this must never become a loop, and it must never become a
-    /// formation manager. Safety halts (burning, pinned) are deliberately
-    /// excluded - a man under a burst does not walk sideways - and a soldier
-    /// already committed to a cover route is excluded so the step cannot replace his
-    /// destination.
+    /// Plan 018 item 3. At most once per cooldown, a soldier in a fighting halt who
+    /// overlaps an already-halted friendly takes one bounded lateral step off the threat
+    /// axis. Rechecking a settled halt closes the old rising-edge gap where two soldiers
+    /// could become co-located after arrival. An unreachable step still ends in a halt:
+    /// this never becomes a formation manager. Safety halts (burning, pinned) are
+    /// deliberately excluded - a man under a burst does not walk sideways - and a
+    /// soldier already committed to a cover route is excluded so the step cannot replace
+    /// his destination.
     /// </summary>
     private static bool TryStepOutOfStackedHalt(
         SoldierAI ai,
@@ -211,29 +239,25 @@ internal static partial class ContactResponse
         MovementOwner owner,
         float now)
     {
-        // Off by default (playtest 2026-07-24: "some AI walk in place"). The step grants
-        // locomotion for a FIXED window rather than until arrival, so a soldier who
-        // completes - or cannot complete - the 2.5 m offset keeps moveCharacter set for the
-        // remainder of it with nothing left to walk toward, and re-arms every cooldown.
-        // Cover-slot dispersion (plan 016's crowding penalty) is independent of this and
-        // stays on.
         if (!Settings.HaltSpacingEnabled.Value ||
             owner is not (MovementOwner.EngagementHold or MovementOwner.CoverHold) ||
-            state.MovementHalted || state.Relocating ||
+            state.Relocating ||
             now < state.HaltSpacingNextCheckAt)
         {
             return false;
         }
 
         state.HaltSpacingNextCheckAt = now + HaltSpacingCore.RecheckCooldownSeconds;
+        var separation = InfantryCoverPolicy.OccupancyRadiusMeters;
         var position = soldier.transform.position;
         if (!CoverOccupancy.TryFindHaltedNeighbour(
-                position, soldier, HaltSpacingCore.MinimumSpacingMeters, out var neighbour) ||
+                position, soldier, separation, out var neighbour) ||
             !HaltSpacingCore.TryResolveStep(
                 new MapPoint(position.x, position.z),
                 new MapPoint(neighbour.x, neighbour.z),
                 new MapPoint(state.LastThreatPosition.x, state.LastThreatPosition.z),
                 state.HasThreatPosition,
+                separation,
                 out var step))
         {
             return false;
@@ -241,10 +265,36 @@ internal static partial class ContactResponse
 
         var target = new Vector3(position.x + step.X, position.y, position.z + step.Z);
         if (!IsShortStepReachable(soldier, position, target))
-            return false;
+        {
+            // With co-located soldiers either side of the threat-lateral axis opens the
+            // same gap. Try the other side when it does not move toward an offset
+            // neighbour; this matters in narrow trenches where one wall can block the
+            // otherwise arbitrary first side.
+            var alternate = new MapPoint(-step.X, -step.Z);
+            if (!HaltSpacingCore.StepDoesNotCloseGap(
+                    new MapPoint(position.x, position.z),
+                    new MapPoint(neighbour.x, neighbour.z),
+                    alternate))
+            {
+                return false;
+            }
 
-        state.HaltSpacingMoveUntil = now + HaltSpacingCore.StepWindowSeconds;
-        ai.MoveDirectlyToward(target, 1.5f);
+            target = new Vector3(
+                position.x + alternate.X,
+                position.y,
+                position.z + alternate.Z);
+            if (!IsShortStepReachable(soldier, position, target))
+                return false;
+        }
+
+        var stepWindow = Mathf.Clamp(
+            separation / 1.5f + 0.35f,
+            HaltSpacingCore.StepWindowSeconds,
+            3.5f);
+        state.HaltSpacingMoveUntil = now + stepWindow;
+        state.HasHaltSpacingTarget = true;
+        state.HaltSpacingTarget = target;
+        ai.MoveDirectlyToward(target, stepWindow);
         AiState.Trace(
             $"Halt spacing: soldier {soldierId} stepped clear of a halted squadmate " +
             "before taking his own fighting halt");

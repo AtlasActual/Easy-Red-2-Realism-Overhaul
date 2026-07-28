@@ -1589,9 +1589,11 @@ internal static class AircraftNativeVelocityLossPatch
 /// left stick is therefore never the camera, in either stick layout, and is the one place flight
 /// input can be put during a look without the camera flying the aeroplane.
 ///
-/// So while freelook is held the left stick flies: pitch from its Y axis, roll from its X axis,
-/// read through the game's own GetGenericCameraRotationInput with swapSticks forced true so the
-/// invert-Y, sensitivity and acceleration all match the native feel instead of approximating it.
+/// So while freelook is held on a physical controller the left stick flies: pitch from its Y axis,
+/// roll from its X axis, read through the game's own GetGenericCameraRotationInput with swapSticks
+/// forced true so the invert-Y, sensitivity and acceleration all match the native feel instead of
+/// approximating it. The physical-controller guard is essential because VirtualGamepad otherwise
+/// exposes W/S and A/D as simulated left-stick axes while the keyboard is assigned.
 ///
 /// Two things otherwise share that stick and have to yield for the duration of the hold:
 ///   * Rudder. With the sticks unswapped the native yaw is GetAxis(LeftStickX) — the same axis now
@@ -1697,6 +1699,7 @@ internal static class AircraftFreeLookSteering
     {
         var gamepad = GamepadsAPI.GetGamepad(0);
         return gamepad != null &&
+               gamepad.IsGamepad &&
                gamepad.GetButton(
                    GameInput.LookAroundInVehicle, StickPressCondition.StickCentered);
     }
