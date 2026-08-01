@@ -10,6 +10,13 @@
 
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="AircraftAerodynamicsScenarios.cs" />
+    <Compile Include="AircraftCameraScenarios.cs" />
+    <Compile Include="AircraftMouseInstructorScenarios.cs" />
+    <Compile Include="..\..\AircraftFlightOwnershipCore.cs" Link="AircraftFlightOwnershipCore.cs" />
+    <Compile Include="..\..\AircraftAerodynamicsCore.cs" Link="AircraftAerodynamicsCore.cs" />
+    <Compile Include="..\..\AircraftCameraCore.cs" Link="AircraftCameraCore.cs" />
+    <Compile Include="..\..\AircraftMouseInstructorCore.cs" Link="AircraftMouseInstructorCore.cs" />
     <Compile Include="..\..\BallisticCoverDecisionCore.cs" Link="BallisticCoverDecisionCore.cs" />
     <Compile Include="..\..\AiBehaviorTuningCore.cs" Link="AiBehaviorTuningCore.cs" />
     <Compile Include="..\..\RememberedGrenadeDecisionCore.cs" Link="RememberedGrenadeDecisionCore.cs" />

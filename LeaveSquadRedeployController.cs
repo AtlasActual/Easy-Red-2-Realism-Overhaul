@@ -1,169 +1,138 @@
 using Il2CppInterop.Runtime.Attributes;
-using Photon.Pun;
 using UnityEngine;
-using UnityEngine.Events;
-using UnityEngine.UI;
 
 namespace ER2RealismOverhaul;
 
 /// <summary>
-/// Adds a native-canvas action to the dead-player squad picker. Easy Red 2
-/// represents this state by leaving squad selection open after the controller
-/// has stopped controlling a soldier; the dead Soldier reference itself is not
-/// a reliable visibility signal.
+/// Adds a prominent change-squad action while the dead-player squad picker is
+/// open. Easy Red 2 opens that picker before deassigning the dead soldier, so
+/// controller ownership alone is not a reliable death-state signal.
 /// </summary>
 internal sealed class LeaveSquadRedeployController : MonoBehaviour
 {
-    private const string ButtonObjectName = "ER2RealismOverhaulLeaveSquadRedeploy";
+    private const float ButtonWidth = 360f;
+    private const float ButtonHeight = 52f;
 
-    private GameObject? _buttonObject;
-    private RectTransform? _buttonCanvas;
-    private UnityAction? _buttonAction;
+    private bool _visible;
+    private GUIStyle? _buttonStyle;
     private string _lastErrorSignature = string.Empty;
-
-    private void Awake()
-    {
-        _buttonAction = (Action)LeaveAndRedeploy;
-    }
 
     private void Update()
     {
         try
         {
-            var shouldShow = ShouldShow();
-            if (shouldShow)
-                EnsureButton();
-
-            SetButtonVisible(shouldShow);
+            _visible = ShouldShow();
         }
         catch (Exception ex)
         {
-            SetButtonVisible(false);
+            _visible = false;
             ReportError(ex);
         }
     }
 
-    private void OnDestroy()
+    private void OnGUI()
     {
+        if (!_visible)
+            return;
+
         try
         {
-            var button = _buttonObject != null
-                ? _buttonObject.GetComponent<Button>()
-                : null;
-            if (button != null && _buttonAction != null)
-                button.onClick.RemoveListener(_buttonAction);
+            EnsureStyle();
+
+            var scale = Mathf.Clamp(Screen.height / 1080f, 0.8f, 1.5f);
+            var width = ButtonWidth * scale;
+            var height = ButtonHeight * scale;
+            var rect = new Rect(
+                (Screen.width - width) * 0.5f,
+                Screen.height - height - (26f * scale),
+                width,
+                height);
+
+            var previousDepth = GUI.depth;
+            bool clicked;
+            try
+            {
+                GUI.depth = -10000;
+                clicked = GUI.Button(rect, "CHANGE SQUAD", _buttonStyle!);
+            }
+            finally
+            {
+                GUI.depth = previousDepth;
+            }
+
+            if (clicked)
+                ChangeSquad();
         }
-        catch
+        catch (Exception ex)
         {
-            // The UI canvas can already be gone during scene teardown.
+            _visible = false;
+            ReportError(ex);
         }
     }
 
     [HideFromIl2Cpp]
     private static bool ShouldShow()
     {
-        if (!Settings.LeaveSquadRedeployEnabled.Value ||
-            !PhotonNetwork.InRoom ||
-            !PlayerGUI.IsSelectingSquad())
+        if (!Settings.LeaveSquadRedeployEnabled.Value)
+            return false;
+
+        // IsSelectingSquad throws inside the game whenever PlayerGUI or its
+        // selection mask has not been initialized, which is normal between
+        // scenes. Read the same active state only after both objects exist.
+        var playerGui = PlayerGUI.instance;
+        if (playerGui == null)
+            return false;
+
+        var selectionMask = playerGui.squadGUIMask;
+        if (selectionMask == null)
+            return false;
+
+        var selectionObject = selectionMask.gameObject;
+        if (selectionObject == null ||
+            !selectionObject.activeSelf ||
+            PlayerGUI.GetGUISquad() == null)
         {
             return false;
         }
 
         var controller = PlayerController.currentController;
-        return controller != null && !controller.IsControllingPlayer();
+        if (controller == null)
+            return false;
+
+        var soldier = controller.ControlledCharacter;
+        return soldier == null || soldier.IsDead;
     }
 
     [HideFromIl2Cpp]
-    private void EnsureButton()
+    private void EnsureStyle()
     {
-        var canvas = RespawnPanel.GetCanvas();
-        if (canvas == null)
+        if (_buttonStyle != null)
             return;
 
-        if (_buttonObject != null && _buttonCanvas == canvas)
-            return;
+        _buttonStyle = new GUIStyle();
+        GUIStyle.Internal_Copy(_buttonStyle, GUI.skin.button);
+        _buttonStyle.alignment = TextAnchor.MiddleCenter;
+        _buttonStyle.fontSize = 20;
+        _buttonStyle.fontStyle = FontStyle.Bold;
+        _buttonStyle.normal.textColor = new Color(1f, 0.92f, 0.86f, 1f);
+        _buttonStyle.hover.textColor = Color.white;
+        _buttonStyle.active.textColor = Color.white;
+    }
 
-        var existing = canvas.Find(ButtonObjectName);
-        if (existing != null)
+    [HideFromIl2Cpp]
+    private void ChangeSquad()
+    {
+        _visible = false;
+
+        var playerGui = PlayerGUI.instance;
+        if (playerGui != null)
         {
-            _buttonObject = existing.gameObject;
-            _buttonCanvas = canvas;
+            playerGui.RespawnNewSquad();
             return;
         }
 
-        var buttonObject = new GameObject(ButtonObjectName);
-        buttonObject.transform.SetParent(canvas, false);
-
-        var background = buttonObject.AddComponent<Image>();
-        background.color = new Color(0.42f, 0.16f, 0.12f, 0.96f);
-
-        var rect = buttonObject.GetComponent<RectTransform>();
-        rect.anchorMin = new Vector2(0.5f, 0f);
-        rect.anchorMax = new Vector2(0.5f, 0f);
-        rect.pivot = new Vector2(0.5f, 0f);
-        rect.anchoredPosition = new Vector2(0f, 42f);
-        rect.sizeDelta = new Vector2(340f, 52f);
-
-        var button = buttonObject.AddComponent<Button>();
-        if (_buttonAction != null)
-            button.onClick.AddListener(_buttonAction);
-
-        var labelObject = new GameObject("Label");
-        labelObject.transform.SetParent(buttonObject.transform, false);
-        var label = labelObject.AddComponent<Text>();
-        label.text = "LEAVE SQUAD & REDEPLOY";
-        label.alignment = TextAnchor.MiddleCenter;
-        label.color = new Color(1f, 0.92f, 0.86f, 1f);
-        label.fontSize = 18;
-        label.fontStyle = FontStyle.Bold;
-        label.raycastTarget = false;
-        label.font = ResolveUiFont(canvas);
-
-        var labelRect = labelObject.GetComponent<RectTransform>();
-        labelRect.anchorMin = Vector2.zero;
-        labelRect.anchorMax = Vector2.one;
-        labelRect.offsetMin = Vector2.zero;
-        labelRect.offsetMax = Vector2.zero;
-
-        _buttonObject = buttonObject;
-        _buttonCanvas = canvas;
-    }
-
-    [HideFromIl2Cpp]
-    private static Font? ResolveUiFont(RectTransform canvas)
-    {
-        try
-        {
-            var localizedFont = LocalizationManager.GetFont();
-            if (localizedFont != null)
-                return localizedFont;
-        }
-        catch
-        {
-            // Fall through to a font already owned by this canvas.
-        }
-
-        return canvas.GetComponentInChildren<Text>(true)?.font;
-    }
-
-    [HideFromIl2Cpp]
-    private void SetButtonVisible(bool visible)
-    {
-        if (_buttonObject != null && _buttonObject.activeSelf != visible)
-            _buttonObject.SetActive(visible);
-    }
-
-    [HideFromIl2Cpp]
-    private void LeaveAndRedeploy()
-    {
-        SetButtonVisible(false);
-
-        var controller = PlayerController.currentController;
-        var soldier = controller != null ? controller.ControlledCharacter : null;
-        var squad = soldier != null ? soldier.joinedSquad : null;
-        if (soldier != null && squad != null)
-            squad.Leave(soldier, true);
-
+        // Retain the same safe fallback if the UI instance disappears during
+        // the click because the battle is changing scenes.
         PlayerGUI.CloseSquadSelection();
         RespawnPanel.EnableRespawnPanel(0.2f);
     }

@@ -111,6 +111,9 @@ internal sealed class MultiplayerPlayerNameController : MonoBehaviour
 
         var sameSquad = soldier.joinedSquad != null &&
                         soldier.joinedSquad == localPlayer.joinedSquad;
+        if (WorldHudVisibility.ShouldHideSquadmateNameInSameVehicle(soldier))
+            return false;
+
         if (!sameSquad &&
             !ResourcesManager.IsSameFaction(soldier.faction, localPlayer.faction))
         {

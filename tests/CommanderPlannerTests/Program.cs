@@ -68,7 +68,7 @@ internal static class Program
             (nameof(CommittedCoverMoveSurvivesATransientContact), CommittedCoverMoveSurvivesATransientContact),
             (nameof(LapsedHoldsReturnTheSoldierToNativeMovement), LapsedHoldsReturnTheSoldierToNativeMovement),
             (nameof(HaltSpacingStepsOffTheThreatAxisOnlyWhenStacked), HaltSpacingStepsOffTheThreatAxisOnlyWhenStacked),
-            (nameof(ForcedSuppressedAdvancesCanCrawl), ForcedSuppressedAdvancesCanCrawl),
+            (nameof(MovingPostureTracksSuppression), MovingPostureTracksSuppression),
             (nameof(SafetyPosesOutrankTheMovementContract), SafetyPosesOutrankTheMovementContract),
             (nameof(AHaltedSoldierKeepsHisProneCoverSlot), AHaltedSoldierKeepsHisProneCoverSlot),
             (nameof(CommandLeasesAreStableAndRejectStaleWork), CommandLeasesAreStableAndRejectStaleWork),
@@ -86,7 +86,7 @@ internal static class Program
             (nameof(AiDebugAllegianceScopeIsExplicitAndFailClosed), AiDebugAllegianceScopeIsExplicitAndFailClosed),
             (nameof(GameplayMutationIsHostAuthoritative), GameplayMutationIsHostAuthoritative),
             (nameof(DefenderAllocatorStaffsAllViableWeaponsInPriorityOrder), DefenderAllocatorStaffsAllViableWeaponsInPriorityOrder),
-            (nameof(DefenderAllocatorProtectsReserveAndCriticalFootStrength), DefenderAllocatorProtectsReserveAndCriticalFootStrength),
+            (nameof(DefenderAllocatorUsesEverySquadWhileProtectingCriticalFootStrength), DefenderAllocatorUsesEverySquadWhileProtectingCriticalFootStrength),
             (nameof(DefenderAllocatorHandlesInsufficientCrewsAndInvalidWeapons), DefenderAllocatorHandlesInsufficientCrewsAndInvalidWeapons),
             (nameof(ProtectedWeaponTransitLeaseSurvivesTemporaryInterruption), ProtectedWeaponTransitLeaseSurvivesTemporaryInterruption),
             (nameof(StaticWeaponTransitAcceptsAssignedSeatReservation), StaticWeaponTransitAcceptsAssignedSeatReservation),
@@ -116,7 +116,7 @@ internal static class Program
             (nameof(TankEngagementLosFlickerGrantsGraceBeforeReleasingHold), TankEngagementLosFlickerGrantsGraceBeforeReleasingHold),
             (nameof(TankEngagementHoldAndReverseNeverDitherAroundTheirBoundaries), TankEngagementHoldAndReverseNeverDitherAroundTheirBoundaries),
             (nameof(TankEngagementDamagedReverseDoesNotLoopWhenRearIsBlocked), TankEngagementDamagedReverseDoesNotLoopWhenRearIsBlocked),
-            (nameof(TankEngagementHullRotationOnlyAllowedInHoldOutsideReverseBand), TankEngagementHullRotationOnlyAllowedInHoldOutsideReverseBand),
+            (nameof(TankHullOrientationRequiresAVisibleArmoredTarget), TankHullOrientationRequiresAVisibleArmoredTarget),
             (nameof(TankStallWatchdogRecoversResetsAndGivesUp), TankStallWatchdogRecoversResetsAndGivesUp)
         };
 
@@ -811,6 +811,7 @@ internal static class Program
         bool requiredAction = false,
         bool pinnedOrBurning = false,
         bool flameEvading = false,
+        bool suppressed = false,
         bool suppressedForcedAdvance = false)
     {
         if (requiredAction && !flameEvading)
@@ -828,16 +829,17 @@ internal static class Program
         {
             owner = PoseOwner.MovementPose;
             return PoseMovementContractCore.MovementStance(
-                committedMovement, suppressedForcedAdvance);
+                committedMovement, suppressed, suppressedForcedAdvance);
         }
 
         owner = PoseOwner.CoverEvaluation;
         return fightingStance;
     }
 
-    private static void ForcedSuppressedAdvancesCanCrawl()
+    private static void MovingPostureTracksSuppression()
     {
-        // Ordinary mod-owned movement remains a crouch bound.
+        // Ordinary movement stands until suppression owns the locomotion pose, then
+        // lowers to a crouch without stopping.
         foreach (var granting in new[]
                  {
                      MovementOwner.OrderedMove, MovementOwner.CommittedMove,
@@ -849,7 +851,17 @@ internal static class Program
             var stance = ResolvePoseWithMovementContract(
                 granting, movementHalted: false, TacticalStance.Prone, out var owner);
             Equal(PoseOwner.MovementPose, owner, "A granted move did not own the pose.");
-            Equal(TacticalStance.Crouched, stance, "The movement pose was not the crouch bound.");
+            Equal(TacticalStance.Standing, stance,
+                "Unsuppressed movement did not use the standing posture.");
+            Equal(TacticalStance.Crouched,
+                ResolvePoseWithMovementContract(
+                    granting, movementHalted: false, TacticalStance.Standing,
+                    out _, suppressed: true),
+                "Suppressed movement did not lower to a crouch.");
+            Equal(TacticalStance.Standing,
+                PoseMovementContractCore.MovementStance(
+                    granting, suppressed: false, suppressedForcedAdvance: true),
+                "A forced-advance flag lowered an unsuppressed moving soldier.");
         }
 
         // The deadline-forced attacker is the intentional crawl: both the objective route
@@ -862,7 +874,7 @@ internal static class Program
             Equal(TacticalStance.Prone,
                 ResolvePoseWithMovementContract(
                     advancing, movementHalted: false, TacticalStance.Crouched,
-                    out var crawlOwner, suppressedForcedAdvance: true),
+                    out var crawlOwner, suppressed: true, suppressedForcedAdvance: true),
                 "A forced suppressed advance was raised out of its crawl.");
             Equal(PoseOwner.MovementPose, crawlOwner,
                 "The crawl did not remain owned by the movement contract.");
@@ -877,7 +889,7 @@ internal static class Program
             Equal(TacticalStance.Crouched,
                 ResolvePoseWithMovementContract(
                     safetyMove, movementHalted: false, TacticalStance.Prone,
-                    out _, suppressedForcedAdvance: true),
+                    out _, suppressed: true, suppressedForcedAdvance: true),
                 "A safety move incorrectly became a crawl.");
         }
 
@@ -941,12 +953,12 @@ internal static class Program
         True(MovementArbiterCore.Grants(
                 ResolveMovement(hazardEscape: true, pinnedHold: true)),
             "Flame evasion stopped granting movement.");
-        Equal(TacticalStance.Crouched,
+        Equal(TacticalStance.Standing,
             ResolvePoseWithMovementContract(
                 MovementOwner.HazardEscape, movementHalted: false, TacticalStance.Prone,
                 out var hazardOwner, requiredAction: true, pinnedOrBurning: true,
                 flameEvading: true),
-            "A soldier escaping a flame was held prone while the ladder moved him.");
+            "An unsuppressed soldier escaping a flame did not run standing.");
         Equal(PoseOwner.MovementPose, hazardOwner, "The flame escape did not own the pose.");
     }
 
@@ -2672,6 +2684,15 @@ internal static class Program
                 TankEngagementState.Hold,
                 TankInput(distance: 150f, lifeFraction: 0.4f, rearBlocked: true)),
             "A damaged tank reversed into a blocked rear instead of holding to fight.");
+        Equal(TankEngagementState.Hold,
+            TankEngagementDecisionCore.NextState(
+                TankEngagementState.Hold,
+                TankInput(
+                    distance: 90f,
+                    lifeFraction: 0.4f,
+                    hullFacesThreat: false,
+                    rearBlocked: false)),
+            "A side-on tank reversed before orienting its frontal armor to the threat.");
 
         // Once reversing, a blocked rear (or lost reverse capability) must end the
         // retreat immediately rather than loop a blind reverse forever.
@@ -2685,6 +2706,11 @@ internal static class Program
                 TankEngagementState.Reverse,
                 TankInput(distance: 90f, reverseTimerElapsed: false, reverseAvailable: false)),
             "Reverse kept looping after reverse capability was lost.");
+        Equal(TankEngagementState.Hold,
+            TankEngagementDecisionCore.NextState(
+                TankEngagementState.Reverse,
+                TankInput(distance: 90f, reverseTimerElapsed: false, hullFacesThreat: false)),
+            "Reverse continued after the target moved outside the frontal hull arc.");
 
         // A target that dies or goes unseen past the grace window must end the
         // reverse and resume pathing, even while still deep inside the reverse
@@ -2701,23 +2727,17 @@ internal static class Program
             "Reverse outlived a target that no longer exists.");
     }
 
-    private static void TankEngagementHullRotationOnlyAllowedInHoldOutsideReverseBand()
+    private static void TankHullOrientationRequiresAVisibleArmoredTarget()
     {
-        False(TankEngagementDecisionCore.AllowHullRotation(
-                TankEngagementState.Follow, 150f, 100f, false),
-            "Hull rotation was allowed outside of Hold.");
-        False(TankEngagementDecisionCore.AllowHullRotation(
-                TankEngagementState.Reverse, 150f, 100f, false),
-            "Hull rotation was allowed while reversing.");
-        False(TankEngagementDecisionCore.AllowHullRotation(
-                TankEngagementState.Hold, 90f, 100f, false),
-            "Hull rotation was allowed inside the close reverse band.");
-        False(TankEngagementDecisionCore.AllowHullRotation(
-                TankEngagementState.Hold, 150f, 100f, true),
+        False(TankEngagementDecisionCore.ShouldOrientHull(
+                hasVisibleArmoredTarget: false, hullFacesThreat: false),
+            "Remembered engagement state authorized a hull pivot without a visible tank.");
+        False(TankEngagementDecisionCore.ShouldOrientHull(
+                hasVisibleArmoredTarget: true, hullFacesThreat: true),
             "Hull rotation was requested while already facing the threat.");
-        True(TankEngagementDecisionCore.AllowHullRotation(
-                TankEngagementState.Hold, 150f, 100f, false),
-            "Hull rotation was withheld at standoff range while side-on to the threat.");
+        True(TankEngagementDecisionCore.ShouldOrientHull(
+                hasVisibleArmoredTarget: true, hullFacesThreat: false),
+            "A spotted tank outside the frontal arc did not authorize hull orientation.");
     }
 
     private static void TankStallWatchdogRecoversResetsAndGivesUp()
@@ -3143,9 +3163,9 @@ internal static class Program
     {
         var squads = new[]
         {
-            new DefenderSquadCandidate(1, 10f, 7, false, false),
-            new DefenderSquadCandidate(2, 9f, 7, false, false),
-            new DefenderSquadCandidate(3, 8f, 7, true, false)
+            new DefenderSquadCandidate(1, 10f, 7, false),
+            new DefenderSquadCandidate(2, 9f, 7, false),
+            new DefenderSquadCandidate(3, 8f, 7, false)
         };
         var crews = Enumerable.Range(1, 3).SelectMany(squadId => new[]
         {
@@ -3162,8 +3182,6 @@ internal static class Program
         };
 
         var plan = DefenderAllocationCore.Allocate(squads, crews, weapons, true);
-        SequenceEqual(new[] { 3 }, plan.ReserveSquadIds,
-            "The complete planned reserve was not protected.");
         SequenceEqual(new[] { 10, 20, 30 }, plan.WeaponAssignments.Select(item => item.WeaponId),
             "AP guns were not staffed first by caliber and coverage.");
         Equal(0, plan.UnstaffedWeaponIds.Count, "A viable objective weapon was left unstaffed.");
@@ -3172,12 +3190,12 @@ internal static class Program
             "One soldier was assigned to multiple weapons.");
     }
 
-    private static void DefenderAllocatorProtectsReserveAndCriticalFootStrength()
+    private static void DefenderAllocatorUsesEverySquadWhileProtectingCriticalFootStrength()
     {
         var squads = new[]
         {
-            new DefenderSquadCandidate(1, 10f, 4, false, false),
-            new DefenderSquadCandidate(2, 12f, 8, true, false)
+            new DefenderSquadCandidate(1, 10f, 4, false),
+            new DefenderSquadCandidate(2, 12f, 8, false)
         };
         var crews = new[]
         {
@@ -3193,16 +3211,17 @@ internal static class Program
         };
 
         var plan = DefenderAllocationCore.Allocate(squads, crews, weapons, false);
-        SequenceEqual(new[] { 2 }, plan.ReserveSquadIds, "The full mobile reserve donated a gunner.");
-        Equal(1, plan.WeaponAssignments.Count,
-            "A donor squad was reduced below its leader plus two combat-ready soldiers.");
-        Equal(12, plan.WeaponAssignments[0].SoldierId,
+        Equal(2, plan.WeaponAssignments.Count,
+            "An arbitrary full-squad reserve left a useful defensive weapon empty.");
+        True(plan.WeaponAssignments.Any(assignment => assignment.SoldierId == 12),
+            "The smaller donor squad was not used down to its protected two-soldier floor.");
+        False(plan.WeaponAssignments.Any(assignment => assignment.SoldierId == 11),
             "The last medic was consumed before an ordinary rifleman.");
     }
 
     private static void DefenderAllocatorHandlesInsufficientCrewsAndInvalidWeapons()
     {
-        var squads = new[] { new DefenderSquadCandidate(1, 10f, 4, false, false) };
+        var squads = new[] { new DefenderSquadCandidate(1, 10f, 4, false) };
         var crews = new[]
         {
             new DefenderCrewCandidate(1, 1, true, false, false, false, true),

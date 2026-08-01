@@ -29,6 +29,37 @@ internal static class WorldHudDrawContext
     }
 }
 
+internal static class WorldHudVisibility
+{
+    internal static bool ShouldHideSquadmateNameInSameVehicle(Soldier? otherSoldier)
+    {
+        if (!Settings.HidePlayerNamesInSameVehicle.Value || otherSoldier == null)
+            return false;
+
+        try
+        {
+            var player = Soldier.CurrentControlledSoldierOrNull();
+            if (player == null ||
+                player.GetInstanceID() == otherSoldier.GetInstanceID())
+            {
+                return false;
+            }
+
+            var playerSeat = player.currentVehicleSeat;
+            var otherSeat = otherSoldier.currentVehicleSeat;
+            var playerVehicle = playerSeat?.GetSeatVehicle();
+            var otherVehicle = otherSeat?.GetSeatVehicle();
+            return playerVehicle != null &&
+                   otherVehicle != null &&
+                   playerVehicle.GetInstanceID() == otherVehicle.GetInstanceID();
+        }
+        catch
+        {
+            return false;
+        }
+    }
+}
+
 internal static class ContextualWorldNameProjection
 {
     private const float MaximumViewAngle = 45f;
@@ -139,17 +170,22 @@ internal static class NativeContextualSquadNamePatch
     [HarmonyPrefix]
     private static bool Prefix(string __1, float __2)
     {
-        if (!Settings.ImmersiveWorldHudEnabled.Value ||
-            !WorldHudDrawContext.InsidePlayerWorldHud ||
+        if (ShouldSuppressSameVehicleName(__1))
+            return false;
+
+        if (!WorldHudDrawContext.InsidePlayerWorldHud ||
             Mathf.Abs(__2 - 0.4f) > 0.015f ||
             string.IsNullOrWhiteSpace(__1))
         {
             return true;
         }
 
-        var suppressAiNames = Settings.ContextualSquadNamesEnabled.Value;
+        var suppressAiNames = Settings.ImmersiveWorldHudEnabled.Value &&
+                              Settings.ContextualSquadNamesEnabled.Value;
         var suppressMultiplayerNames = MultiplayerPlayerNameController.ShouldDrawNames();
-        if (!suppressAiNames && !suppressMultiplayerNames)
+        if (!Settings.HidePlayerNamesInSameVehicle.Value &&
+            !suppressAiNames &&
+            !suppressMultiplayerNames)
             return true;
 
         // The native squad-name pass is identified by both its fixed outline
@@ -178,12 +214,41 @@ internal static class NativeContextualSquadNamePatch
             }
 
             var sync = member.GetSyncher();
-            return MultiplayerPlayerNameController.IsRemotePlayer(sync)
-                ? !suppressMultiplayerNames
-                : !suppressAiNames;
+            var remotePlayer = MultiplayerPlayerNameController.IsRemotePlayer(sync);
+            return remotePlayer ? !suppressMultiplayerNames : !suppressAiNames;
         }
 
         return true;
+    }
+
+    internal static bool ShouldSuppressSameVehicleName(string label)
+    {
+        if (!WorldHudDrawContext.InsidePlayerWorldHud ||
+            !Settings.HidePlayerNamesInSameVehicle.Value ||
+            string.IsNullOrWhiteSpace(label))
+        {
+            return false;
+        }
+
+        var player = Soldier.CurrentControlledSoldierOrNull();
+        var squad = player?.joinedSquad;
+        if (player == null || squad == null)
+            return false;
+
+        for (var index = 0; index < squad.CountMembers; index++)
+        {
+            var member = squad.GetMember(index);
+            if (member == null ||
+                member == player ||
+                !MatchesNativeLabel(member, label))
+            {
+                continue;
+            }
+
+            return WorldHudVisibility.ShouldHideSquadmateNameInSameVehicle(member);
+        }
+
+        return false;
     }
 
     private static bool MatchesNativeLabel(Soldier member, string label)
@@ -216,6 +281,37 @@ internal static class NativeContextualSquadNamePatch
     private static bool IsNear(float value, float target)
     {
         return Mathf.Abs(value - target) <= 0.03f;
+    }
+}
+
+[HarmonyPatch(
+    typeof(GuiExtension),
+    nameof(GuiExtension.OutlinedLabel),
+    typeof(Rect),
+    typeof(string),
+    typeof(int))]
+internal static class NativeSimpleSquadNamePatch
+{
+    [HarmonyPrefix]
+    private static bool Prefix(string __1)
+    {
+        return !NativeContextualSquadNamePatch.ShouldSuppressSameVehicleName(__1);
+    }
+}
+
+[HarmonyPatch(
+    typeof(GuiExtension),
+    nameof(GuiExtension.OutlinedLabel),
+    typeof(Rect),
+    typeof(string),
+    typeof(GUIStyle),
+    typeof(int))]
+internal static class NativeStyledSquadNamePatch
+{
+    [HarmonyPrefix]
+    private static bool Prefix(string __1)
+    {
+        return !NativeContextualSquadNamePatch.ShouldSuppressSameVehicleName(__1);
     }
 }
 
@@ -287,6 +383,7 @@ internal sealed class ImmersiveWorldHudController : MonoBehaviour
     {
         if (member == null || member == player || !member.IsAlive ||
             !member.gameObject.activeInHierarchy ||
+            WorldHudVisibility.ShouldHideSquadmateNameInSameVehicle(member) ||
             Vector3.Distance(player.transform.position, member.transform.position) > maximumRange)
         {
             return;

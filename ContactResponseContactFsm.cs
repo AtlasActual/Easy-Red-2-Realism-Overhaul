@@ -269,7 +269,7 @@ internal static partial class ContactResponse
         // The last decision granted locomotion. Re-assert it through the same single write
         // site (a granting owner releases the brake; Free writes nothing and simply records
         // that this mod is not holding him), then the moving-fire gate and the owned
-        // movement crouch exactly as the pass-through tail does — all cheap write-through
+        // movement pose exactly as the pass-through tail does — all cheap write-through
         // (no ownership refresh, no hold selection, no cover geometry).
         ApplyResolvedMovementDecision(
             ai, soldier, state, id, staggerOwner, deltaTime, now,
@@ -291,11 +291,7 @@ internal static partial class ContactResponse
 
         state.NextWriteThroughMaintenanceAt = now + WriteThroughMaintenanceSeconds;
 
-        var suppression = soldier.GetSuppressionValue();
-        var activeThreatMovement = HasActiveContact(id, now) ||
-                                   IncomingFireAwareness.HasActiveCue(id, now);
-        SoldierTacticalSprintPatch.ApplyTacticalMovementPose(
-            ai, soldier, id, now, suppression, activeThreatMovement);
+        SoldierTacticalSprintPatch.ApplyTacticalMovementPose(ai, soldier, id, now);
         if (updateFireInhibitionOnPass)
             ApplyFireDecision(ai, soldier, now, authoritative: false);
         ReleaseStationaryThreatFacingForMovement(ai, soldier);

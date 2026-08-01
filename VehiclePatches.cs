@@ -65,7 +65,7 @@ internal static class TankTactics
         return hasTurret;
     }
 
-    internal static bool TryGetCloseArmoredThreat(
+    internal static bool TryGetVisibleArmoredThreat(
         AIVehicle ai,
         out Vehicle vehicle,
         out float distance,
@@ -87,9 +87,6 @@ internal static class TankTactics
             return false;
 
         distance = towardEnemy.magnitude;
-        if (distance > Settings.TankStandoffDistance.Value)
-            return false;
-
         signedHullAngle = Vector3.SignedAngle(vehicle.transform.forward, towardEnemy, Vector3.up);
         return true;
     }
@@ -262,6 +259,7 @@ internal static class TankTactics
         var retroLapsed = !ai.going_in_retro;
         var wouldConsiderReverse =
             (previousState == TankEngagementState.Hold &&
+                hullFacesThreat &&
                 (distance <= Settings.TankReverseDistance.Value ||
                  lifeFraction <= Settings.TankDamagedThreshold.Value)) ||
             (previousState == TankEngagementState.Reverse && retroLapsed);
@@ -428,28 +426,31 @@ internal static class AiTankPivotProtectionPatch
                     return false;
                 }
 
-                if (state == TankEngagementState.Hold)
-                {
-                    var allowRotation = TankEngagementDecisionCore.AllowHullRotation(
-                        state,
-                        runtime.LastKnownDistance,
-                        Settings.TankReverseDistance.Value,
-                        runtime.LastKnownHullFacesThreat);
-                    if (allowRotation)
-                    {
-                        // Standoff range and not yet facing: let the native routine
-                        // rotate the hull toward the threat, as vision.md prescribes.
-                        return true;
-                    }
+                var hasVisibleArmoredTarget = TankTactics.TryGetVisibleArmoredThreat(
+                    __instance, out _, out _, out var signedHullAngle);
+                var hullFacesTarget = hasVisibleArmoredTarget &&
+                                      TankTactics.HullFacesThreat(signedHullAngle);
 
-                    // Close range, or already facing: stop and do not resume the
-                    // native path. This is the fix for the reported yo-yo — the hold
-                    // must not advance one node every time this runs.
+                if (TankEngagementDecisionCore.ShouldOrientHull(
+                        hasVisibleArmoredTarget, hullFacesTarget))
+                {
+                    // The base routine supplies the actual track steering. It owns a
+                    // stationary hull turn only while the tank it is currently seeing
+                    // remains outside the configured frontal arc.
+                    return true;
+                }
+
+                if (hasVisibleArmoredTarget || state == TankEngagementState.Hold)
+                {
+                    // The spotted tank is already inside the frontal arc, or a recent
+                    // armored contact is still inside the FSM's short hold grace.
+                    // Clear steering instead of letting target tracking keep pivoting.
                     TankTactics.StopWithoutHullTurn(vehicle);
                     return false;
                 }
 
-                // Follow: no armored contact close enough to hold or reverse against.
+                // Follow: no currently visible armored target owns a stationary hull
+                // turn. Infantry tracking stays with the turret.
                 if (__instance.destinationActive && !__instance.DestinationReached)
                 {
                     // stopToShoot routes tanks here even with a valid path. Continue

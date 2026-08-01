@@ -52,6 +52,7 @@ internal static class TankEngagementDecisionCore
 
                 if ((input.Distance <= input.ReverseDistance ||
                      input.LifeFraction <= input.DamagedLifeFraction) &&
+                    input.HullFacesThreat &&
                     input.ReverseAvailable && !input.RearBlocked)
                 {
                     return TankEngagementState.Reverse;
@@ -73,7 +74,8 @@ internal static class TankEngagementDecisionCore
                 // A blind reverse must never loop forever: losing the ability to
                 // reverse, or discovering the rear is blocked, ends the retreat and
                 // falls back to holding and fighting instead.
-                if (input.RearBlocked || !input.ReverseAvailable ||
+                if (!input.HullFacesThreat ||
+                    input.RearBlocked || !input.ReverseAvailable ||
                     (input.ReverseTimerElapsed &&
                      input.Distance >= input.ReverseDistance * ReverseReleaseDistanceMultiplier))
                 {
@@ -96,17 +98,14 @@ internal static class TankEngagementDecisionCore
         => state == TankEngagementState.Hold;
 
     /// <summary>
-    /// Hull rotation toward the threat is permitted only in Hold, only outside the
-    /// close reverse band, and only while not already facing it. Rotating the hull
-    /// through the enemy's firing line at close range, or while reversing, remains
-    /// forbidden.
+    /// A stationary hull turn belongs only to a currently visible armored target.
+    /// Distance and remembered engagement state cannot authorize a pivot, and the
+    /// turn ends as soon as the configured frontal arc contains the target.
     /// </summary>
-    internal static bool AllowHullRotation(
-        TankEngagementState state,
-        float distance,
-        float reverseDistance,
+    internal static bool ShouldOrientHull(
+        bool hasVisibleArmoredTarget,
         bool hullFacesThreat)
-        => state == TankEngagementState.Hold && distance > reverseDistance && !hullFacesThreat;
+        => hasVisibleArmoredTarget && !hullFacesThreat;
 
     private static bool IsFinite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
 }

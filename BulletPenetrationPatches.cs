@@ -500,13 +500,24 @@ internal static class BulletPenetration
                 continuationQueued = true;
             }
 
-            // OnHit already produced the native entry effect. Recreate the same
-            // material family at the back face without calling BulletDamage again.
+            // Recreate cosmetic impact feedback without calling BulletDamage again.
+            // Ordinary rounds need only the back face; solid AP prop hits can miss
+            // the native front-face effect and therefore restore both faces.
             if (continuationQueued)
             {
-                PlayExitImpactEffect(impact);
                 if (state.IsArmorPiercing)
+                {
+                    // Easy Red 2 can return from an AP hit on a nondamageable prop
+                    // before creating even its front-face impact effect. Explicitly
+                    // restore both faces for solid AP shot; the ordinary-bullet path
+                    // still keeps its native entry effect and only adds the exit.
+                    PlayPenetrationImpactEffects(impact, bulletData, playEntryEffect: true);
                     PlayArmorPiercingImpactHoles(impact, bulletData.caliber);
+                }
+                else
+                {
+                    PlayPenetrationImpactEffects(impact, bulletData, playEntryEffect: false);
+                }
             }
 
             if (Settings.VerboseLogging.Value)
@@ -1215,13 +1226,34 @@ internal static class BulletPenetration
         };
     }
 
-    private static void PlayExitImpactEffect(PenetrationImpact impact)
+    private static void PlayPenetrationImpactEffects(
+        PenetrationImpact impact,
+        BulletData bulletData,
+        bool playEntryEffect)
     {
         try
         {
             var effectName = ImpactDatabase.GetImpactID(impact.ImpactType, out var bundle);
             if (string.IsNullOrEmpty(effectName))
                 return;
+
+            var renderDistance = Mathf.Max(300, bulletData.GetExplosionrenderDistance());
+            var forceSpawnIfNotLooking = bulletData.RenderExplosionIfNotLooking();
+            if (playEntryEffect)
+            {
+                var entryFace = impact.EntryPosition + impact.EntryNormal * 0.008f;
+                var entryRotation = Quaternion.FromToRotation(Vector3.up, impact.EntryNormal);
+                ResourcesManager.PlayImpactEffect(
+                    entryFace,
+                    entryRotation,
+                    effectName,
+                    false,
+                    false,
+                    bundle,
+                    renderDistance,
+                    forceSpawnIfNotLooking,
+                    null);
+            }
 
             var exitFace = impact.ExitPosition - impact.Direction * (ExitEpsilon - 0.008f);
             var rotation = Quaternion.FromToRotation(Vector3.up, impact.Direction);
@@ -1231,23 +1263,25 @@ internal static class BulletPenetration
                 effectName,
                 false,
                 false,
-                bundle);
+                bundle,
+                renderDistance,
+                forceSpawnIfNotLooking,
+                null);
         }
         catch (Exception ex)
         {
-            // A missing optional effect must never suppress the actual continuation.
+            // Missing optional effects must never suppress the actual continuation.
             if (Settings.VerboseLogging.Value)
-                Plugin.LogSource.LogWarning($"Could not create penetration exit effect: {ex.Message}");
+                Plugin.LogSource.LogWarning($"Could not create penetration impact effects: {ex.Message}");
         }
     }
 
     private static void PlayArmorPiercingImpactHoles(PenetrationImpact impact, float caliber)
     {
         // The native OnHit path can return before it reaches its persistent-hole
-        // block when an AP shell crosses a nondamageable structural prop. In that
-        // case particles still play, but the entry mark is absent. Spawn both faces
-        // only after a continuation was successfully queued so stopped impacts keep
-        // the game's original decal behavior.
+        // block when an AP shell crosses a nondamageable structural prop. Spawn both
+        // faces only after a continuation was successfully queued so stopped impacts
+        // keep the game's original decal behavior.
         if (impact.Surface is PenetrationSurface.Foliage or PenetrationSurface.Glass or PenetrationSurface.Earth)
             return;
 

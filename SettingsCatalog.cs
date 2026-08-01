@@ -36,9 +36,19 @@ internal sealed class MenuSetting
         IsQuickSetup = quickSetup;
         Id = entry.Definition.Section + "\u001f" + entry.Definition.Key;
         SectionName = SettingsCatalog.CleanSectionName(entry.Definition.Section);
-        DisplayName = entry.Definition.Key == "Enabled"
-            ? SectionName
-            : SettingsCatalog.Humanize(entry.Definition.Key);
+        DisplayName = entry.Definition.Key switch
+        {
+            "Enabled" => SectionName,
+            "WorldSpeedScale" => "Aircraft Speed",
+            "PitchAuthority" => "Pitch Authority",
+            "RollAuthority" => "Roll Authority",
+            "RudderAuthority" => "Rudder Authority",
+            "EnginePowerMultiplier" => "Engine Power",
+            "AerodynamicDrag" => "Aerodynamic Drag",
+            "ExperimentalAiFlightModel" => "EXPERIMENTAL: AI Flight Model",
+            "HidePlayerNamesInSameVehicle" => "Hide Squadmate Names In Same Vehicle",
+            _ => SettingsCatalog.Humanize(entry.Definition.Key)
+        };
         Description = entry.Description.Description ?? string.Empty;
         Unit = SettingsCatalog.InferUnit(entry.Definition.Key);
         (LowerEffect, HigherEffect) = SettingsCatalog.DirectionFor(
@@ -97,7 +107,33 @@ internal static class SettingsCatalog
         // Only meaningful at load time, so it must never look like a live toggle:
         // keeping it out of All also keeps it out of Disable All and settings sync.
         "AI - Diagnostics\u001fInstallGameplayPatches",
-        "AI - Diagnostics\u001fDeferredInteropHandleCleanup"
+        "AI - Diagnostics\u001fDeferredInteropHandleCleanup",
+
+        // The aircraft page exposes one coherent set of direct controls. These legacy
+        // engineering knobs remain available in the config file for compatibility and
+        // diagnostics, but presenting them beside the direct controls makes several
+        // sliders appear to counteract one another.
+        "6c. Aircraft flight physics\u001fApplyToPlayerAircraftOffline",
+        "6c. Aircraft flight physics\u001fApplyToPlayerAircraftMultiplayer",
+        "6c. Aircraft flight physics\u001fUseAdvancedConfigTuning",
+        "6c. Aircraft flight physics\u001fRealismStrength",
+        "6c. Aircraft flight physics\u001fFighterSpeedMultiplier",
+        "6c. Aircraft flight physics\u001fBomberSpeedMultiplier",
+        "6c. Aircraft flight physics\u001fNativeControlResponseMultiplier",
+        "6c. Aircraft flight physics\u001fEngineResponseTimeMultiplier",
+        "6c. Aircraft flight physics\u001fThrottleControlsEnginePower",
+        "6c. Aircraft flight physics\u001fThrottleReductionResponseMultiplier",
+        "6c. Aircraft flight physics\u001fManeuverEnergyLossMultiplier",
+        "6c. Aircraft flight physics\u001fEnergyRetentionEnabled",
+        "6c. Aircraft flight physics\u001fProgressiveStalls",
+        "6c. Aircraft flight physics\u001fStallRecoveryPitchAuthority",
+        "6c. Aircraft flight physics\u001fStallRecoveryRollAuthority",
+        "6c. Aircraft flight physics\u001fStallNoseDropStrength",
+        "6c. Aircraft flight physics\u001fSpinStrength",
+        "6c. Aircraft flight physics\u001fSpinRecoverySpeedMultiplier",
+        "6c. Aircraft flight physics\u001fDamageAffectsHandling",
+        "6c. Aircraft flight physics\u001fTelemetryLogging",
+        "6c. Aircraft flight physics\u001fTelemetryIntervalSeconds"
     };
 
     private static readonly Regex SectionPrefix = new(@"^\d+[a-z]?\.\s*", RegexOptions.Compiled);
@@ -184,15 +220,17 @@ internal static class SettingsCatalog
         "6. Ordnance effects\u001fEnhancedFragmentation",
         "6. Ordnance effects\u001fSmallExplosionAiThrowForceMultiplier",
 
+        "6c. Aircraft flight physics\u001fMousePointAiming",
+        "6c. Aircraft flight physics\u001fAircraftFreeLookZoom",
         "6c. Aircraft flight physics\u001fFreeLookSteering",
         "6c. Aircraft flight physics\u001fEnabled",
-        "6c. Aircraft flight physics\u001fRealismStrength",
+        "6c. Aircraft flight physics\u001fExperimentalAiFlightModel",
         "6c. Aircraft flight physics\u001fWorldSpeedScale",
+        "6c. Aircraft flight physics\u001fPitchAuthority",
+        "6c. Aircraft flight physics\u001fRollAuthority",
+        "6c. Aircraft flight physics\u001fRudderAuthority",
         "6c. Aircraft flight physics\u001fEnginePowerMultiplier",
-        "6c. Aircraft flight physics\u001fEnergyRetentionEnabled",
-        "6c. Aircraft flight physics\u001fProgressiveStalls",
-        "6c. Aircraft flight physics\u001fDamageAffectsHandling",
-
+        "6c. Aircraft flight physics\u001fAerodynamicDrag",
         "6d. Aircraft instruments\u001fEnabled",
         "6d. Aircraft instruments\u001fHudScale",
         "6d. Aircraft instruments\u001fUseKnotsAndFeet",
@@ -250,10 +288,16 @@ internal static class SettingsCatalog
         "7e. First-person view\u001fCompassUseMils",
         "7e. First-person view\u001fHeadshotDeathBlackout",
 
+        "7g. Vehicle aiming\u001fDirectTurretAimingEnabled",
+        "7g. Vehicle aiming\u001fUnstabilizedGunsightEnabled",
+        "7g. Vehicle aiming\u001fOpticsZoom",
+        "7j. Third-person view\u001fThirdPersonZoom",
+
         "7f. Multiplayer nameplates\u001fKeepPlayerNamesWithHudDisabled",
         "7f. Multiplayer nameplates\u001fImmersiveWorldHudEnabled",
         "7f. Multiplayer nameplates\u001fContextualSquadNamesEnabled",
         "7f. Multiplayer nameplates\u001fContextualSquadNameRangeMeters",
+        "7f. Multiplayer nameplates\u001fHidePlayerNamesInSameVehicle",
         "7f. Multiplayer nameplates\u001fLeaveSquadRedeployEnabled",
 
         "7h. Animation quality\u001fRagdollMomentumEnabled",
@@ -385,9 +429,13 @@ internal static class SettingsCatalog
 
     internal static string InferUnit(string key)
     {
+        if (key == "EnginePowerMultiplier")
+            return "1-10";
         if (key is "Aggressiveness" or "Accuracy" or "ReactionSpeed" or "Awareness" or
             "SuppressionResistance" or "VehicleEngineSound" or "TracerBrightness" or
-            "TracerSizeMultiplier")
+            "TracerSizeMultiplier" or "OpticsZoom" or "ThirdPersonZoom" or
+            "AircraftFreeLookZoom" or
+            "PitchAuthority" or "RollAuthority" or "RudderAuthority")
             return "x";
         if (key == "MachineGunTracerRetention")
             return "0-1";
@@ -531,17 +579,16 @@ internal static class SettingsCatalog
 
         "RealismStrength" => ("more native handling", "stronger realism forces"),
         "WorldSpeedScale" => ("slower aircraft", "faster aircraft"),
+        "PitchAuthority" => ("less pitch authority", "more pitch authority"),
+        "RollAuthority" => ("less roll authority", "more roll authority"),
+        "RudderAuthority" => ("less rudder authority", "more rudder authority"),
+        "EnginePowerMultiplier" => ("slower acceleration and climb", "faster acceleration and climb"),
         "FighterSpeedMultiplier" => ("slower fighters", "faster fighters"),
         "BomberSpeedMultiplier" => ("slower bombers", "faster bombers"),
         "NativeControlResponseMultiplier" => ("slower controls", "more immediate controls"),
         "EngineResponseTimeMultiplier" => ("faster thrust response", "slower thrust response"),
-        "EnginePowerMultiplier" => ("less engine thrust", "more engine thrust"),
         "ThrottleReductionResponseMultiplier" => ("quicker power reduction", "slower power reduction"),
-        "ManeuverEnergyLossMultiplier" => ("retain more energy", "lose more energy"),
-        "NativeCoastDragMultiplier" => ("coast longer", "slow down faster"),
-        "NativeVelocityLossMultiplier" => ("preserve physical momentum", "restore stock speed loss"),
-        "GlideEnergyLossMultiplier" => ("flatter glide", "steeper glide"),
-        "MaximumEnergyRetentionAcceleration" => ("weaker retention correction", "stronger retention correction"),
+        "AerodynamicDrag" => ("retain more energy", "lose more energy"),
         "StallRecoveryPitchAuthority" => ("less pitch control", "more pitch control"),
         "StallRecoveryRollAuthority" => ("less roll control", "more roll control"),
         "StallNoseDropStrength" => ("gentler nose drop", "stronger nose drop"),
@@ -579,6 +626,9 @@ internal static class SettingsCatalog
         "PlayerFootstepVolumeMultiplier" => ("quieter player footsteps", "louder player footsteps"),
         "UnsupportedAimFatigueSeconds" => ("fatigue sooner", "fatigue later"),
         "HoldBreathZoomMultiplier" => ("weaker hold-breath zoom", "stronger hold-breath zoom"),
+        "OpticsZoom" => ("weaker optics zoom", "stronger optics zoom"),
+        "ThirdPersonZoom" => ("weaker third-person aim zoom", "stronger third-person aim zoom"),
+        "AircraftFreeLookZoom" => ("weaker aircraft freelook zoom", "stronger aircraft freelook zoom"),
         "BinocularZoomMultiplier" => ("wider binocular view", "stronger binocular zoom"),
         "FreeLookHorizontalArcDegrees" => ("narrower freelook arc", "wider freelook arc"),
         "ContextualSquadNameRangeMeters" => ("names appear closer", "names appear farther"),
@@ -624,6 +674,8 @@ internal static class SettingsCatalog
         if (section.StartsWith("7a.", StringComparison.Ordinal) ||
             section.StartsWith("7e.", StringComparison.Ordinal) ||
             section.StartsWith("7f.", StringComparison.Ordinal) ||
+            section.StartsWith("7g.", StringComparison.Ordinal) ||
+            section.StartsWith("7j.", StringComparison.Ordinal) ||
             section.StartsWith("7i.", StringComparison.Ordinal))
             return SettingsMenuCategory.PlayerExperience;
         if (section.StartsWith("7", StringComparison.Ordinal))

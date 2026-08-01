@@ -405,10 +405,6 @@ internal static class SoldierTacticalSprintPatch
 
         ModTimeProbe.Stage(TacticalStage.ChargeCheck);
         var actualCharge = ContactResponse.IsActualCharge(soldier);
-        var hazardEvading = flameEvading;
-        var activeThreatMovement = (ContactResponse.HasActiveContact(id, now) ||
-                                    IncomingFireAwareness.HasActiveCue(id, now)) &&
-                                   !hazardEvading;
         // The three stationary holds are owner DECLARATIONS (plan 018): each hands the
         // frame to the movement arbiter and only gates native locomotion when the arbiter
         // actually halted the soldier. A higher owner (flame escape) or the bounded
@@ -429,8 +425,7 @@ internal static class SoldierTacticalSprintPatch
         }
 
         ModTimeProbe.Stage(TacticalStage.PoseApply);
-        var suppression = soldier.GetSuppressionValue();
-        ApplyTacticalMovementPose(ai, soldier, id, now, suppression, activeThreatMovement);
+        ApplyTacticalMovementPose(ai, soldier, id, now);
 
         ModTimeProbe.Stage(TacticalStage.FireDecision);
         if (updateFireInhibitionOnPass)
@@ -506,39 +501,21 @@ internal static class SoldierTacticalSprintPatch
         SoldierAI ai,
         Soldier soldier,
         int id,
-        float now,
-        int suppression,
-        bool activeThreatMovement)
+        float now)
     {
         // Moving pose write: runs on both decision frames (the prefix tail) and the
         // per-frame moving write-through, so it uses the round-robin stagger cadence for
-        // the arbiter's interop-heavy decision tail.
+        // the arbiter's interop-heavy decision tail. Contact alone no longer forces the
+        // locomotion crouch: the movement contract stands normally and crouches only while
+        // suppression owns posture.
         var resolveDecisionTail = ContactResponse.RunsDecisionThisFrame(id);
-        if (ContactResponse.IsPinned(id) && !AiState.IsFlameEvading(id, now))
-        {
-            ContactResponse.ApplyArbitratedPose(
-                ai, soldier, now, resolveDecisionTail,
-                ContactResponse.SuppressionPose(soldier), "move-pinned");
-        }
-        else
-        {
-            var state = AiState.GetContactState(id);
-            if (activeThreatMovement)
-            {
-                if (ContactResponse.HasActiveContact(id, now))
-                    state.ContactCrouchOwned = true;
-                else
-                    state.TacticalCrouchUntil = now + ContactResponse.TacticalCrouchPersistenceSeconds;
-            }
-
-            if ((Settings.DangerReactionsEnabled.Value &&
-                 suppression >= AiBehaviorTuning.CrouchSuppressionThreshold) ||
-                activeThreatMovement || ContactResponse.ShouldOwnCrouch(id, now))
-            {
-                ContactResponse.ApplyArbitratedPose(
-                    ai, soldier, now, resolveDecisionTail, SoldierPose.Crouch, "move-crouch");
-            }
-        }
+        var suppressed = Settings.DangerReactionsEnabled.Value &&
+                         AiState.GetContactState(id).SuppressionPoseOwned;
+        ContactResponse.ApplyArbitratedPose(
+            ai, soldier, now, resolveDecisionTail,
+            suppressed ? SoldierPose.Crouch : SoldierPose.Idle,
+            suppressed ? "move-suppressed" : "move-standing",
+            movementActive: true);
     }
 
 }
@@ -614,7 +591,8 @@ internal static class SoldierPinnedPosePatch
             // round-robin stagger cadence.
             var state = AiState.GetContactState(id);
             var pose = ContactResponse.ResolvePose(
-                soldier, state, now, ContactResponse.RunsDecisionThisFrame(id), out var owner);
+                soldier, state, now, ContactResponse.RunsDecisionThisFrame(id), out var owner,
+                movementActive: __instance.moveCharacter);
             if (owner != PoseOwner.None)
             {
                 __result = ContactResponse.CommitArbitratedPose(soldier, state, owner, pose, now, null);

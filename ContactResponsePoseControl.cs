@@ -40,7 +40,8 @@ internal static partial class ContactResponse
         ContactResponseState state,
         float now,
         bool resolveDecisionTail,
-        out PoseOwner owner)
+        out PoseOwner owner,
+        bool movementActive = false)
     {
         var id = soldier.GetInstanceID();
 
@@ -71,22 +72,27 @@ internal static partial class ContactResponse
         }
 
         // c. The movement contract (plan 019). The committed movement decision from the
-        // single movement write site is an INPUT here. An ordinary mod-owned bound uses
-        // Crouch, while a suppressed attacker released by the maximum combat halt keeps
-        // Prone and crawls toward the objective. Native locomotion is not claimed here:
-        // MovementOwner.Free leaves the game's own favourite pose untouched, including
-        // native crawl movement. This rank stays above the stagger cache so a cached
-        // fighting pose cannot leak into a newly committed move.
+        // single movement write site is an INPUT here. Active locomotion stands when
+        // unsuppressed and crouches while suppression owns posture; an attacker released
+        // by the maximum combat halt can keep Prone and crawl toward the objective.
+        // MovementOwner.Free is claimed only when the native locomotion path is active.
+        // This rank stays above the stagger cache so a cached fighting pose cannot leak
+        // into a newly committed move.
         var committedMovement = state.LastMovementOwner;
-        if (PoseMovementContractCore.MovementOwnsPose(
-                committedMovement,
-                state.MovementHalted))
+        if (!state.MovementHalted &&
+            (movementActive ||
+             PoseMovementContractCore.MovementOwnsPose(
+                 committedMovement,
+                 halted: false)))
         {
+            var suppressed = Settings.DangerReactionsEnabled.Value &&
+                             state.SuppressionPoseOwned;
             owner = PoseOwner.MovementPose;
             return FromTacticalStance(PoseMovementContractCore.MovementStance(
                 committedMovement,
+                suppressed,
                 state.AttackProgressForced &&
-                state.SuppressionPoseOwned &&
+                suppressed &&
                 !state.HasOverheadProtection));
         }
 
@@ -540,10 +546,12 @@ internal static partial class ContactResponse
         float now,
         bool resolveDecisionTail,
         SoldierPose fallbackPose,
-        string? traceSource = null)
+        string? traceSource = null,
+        bool movementActive = false)
     {
         var state = AiState.GetContactState(soldier.GetInstanceID());
-        var pose = ResolvePose(soldier, state, now, resolveDecisionTail, out var owner);
+        var pose = ResolvePose(
+            soldier, state, now, resolveDecisionTail, out var owner, movementActive);
         if (owner == PoseOwner.None)
         {
             owner = PoseOwner.HaltFallback;
@@ -795,7 +803,9 @@ internal static partial class ContactResponse
         if (state.ContactCrouchOwned && now >= state.ContactUntil)
             state.ContactCrouchOwned = false;
 
-        var pose = ResolvePose(soldier, state, now, resolvePose, out var owner);
+        var pose = ResolvePose(
+            soldier, state, now, resolvePose, out var owner,
+            movementActive: ai.moveCharacter);
         if (owner == PoseOwner.None)
             return; // No mod owner: leave the native favourite pose untouched.
 

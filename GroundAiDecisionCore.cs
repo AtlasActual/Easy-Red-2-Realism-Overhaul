@@ -280,9 +280,10 @@ internal enum PoseOwner
     // d: muzzle-clearance stand (OwnsCurrentCoverClearancePose) -> Idle.
     CoverClearance = 5,
 
-    // c2: the MOVEMENT contract (plan 019). A mod-committed movement decision owns the
-    // locomotion pose. Ordinary bounds use Crouch, while a suppressed attacker forced
-    // onward by the maximum combat halt may deliberately crawl. It outranks every
+    // c2: the MOVEMENT contract (plan 019). An active movement decision owns the
+    // locomotion pose. Unsuppressed movement uses Standing, suppressed movement uses
+    // Crouch, and an attacker forced onward by the maximum combat halt may deliberately
+    // crawl. It outranks every
     // FIGHTING pose below it and yields to every SAFETY pose above it, which is exactly
     // where the two ladders meet: see PoseMovementContractCore.
     MovementPose = 6,
@@ -299,9 +300,9 @@ internal enum PoseOwner
 /// POSE ladder (<see cref="PoseOwner"/>, plan 014). Each was internally consistent but they
 /// did not talk to each other, so a soldier could be granted a bound (CommittedMove /
 /// OrderedMove) while the pose ladder independently supplied an unrelated Prone cover
-/// posture. Movement now owns the stance only for mod-committed moves: ordinary bounds
-/// crouch, while an explicitly authorized suppressed crawl remains prone. Native movement
-/// keeps the game's native favourite pose instead of being raised out of a crawl.
+/// posture. Movement now owns the stance while the soldier is actually moving: an
+/// unsuppressed soldier stands, a suppressed soldier crouches, and an explicitly authorized
+/// suppressed crawl remains prone. Native locomotion is claimed only while it is active.
 ///
 /// The invariant that keeps the two ladders consistent, verified rank by rank:
 /// every pose owner ABOVE <see cref="PoseOwner.MovementPose"/> that can demand Prone has a
@@ -334,17 +335,21 @@ internal static class PoseMovementContractCore
     }
 
     /// <summary>
-    /// The pose a mod-owned moving soldier takes. Hazard escapes and spacing steps must
-    /// remain mobile crouch moves. An ordered or committed attacker whose combat-halt
+    /// The pose a moving soldier takes. Standing is the normal locomotion posture; active
+    /// suppression lowers it to crouch. An ordered or committed attacker whose combat-halt
     /// deadline explicitly forced progress may instead crawl while suppressed.
     /// </summary>
     internal static TacticalStance MovementStance(
         MovementOwner committed,
+        bool suppressed,
         bool suppressedForcedAdvance)
-        => suppressedForcedAdvance &&
+        => suppressed &&
+           suppressedForcedAdvance &&
            committed is MovementOwner.OrderedMove or MovementOwner.CommittedMove
             ? TacticalStance.Prone
-            : TacticalStance.Crouched;
+            : suppressed
+                ? TacticalStance.Crouched
+                : TacticalStance.Standing;
 }
 
 /// <summary>
@@ -1486,7 +1491,6 @@ internal readonly record struct DefenderSquadCandidate(
     int SquadId,
     float EffectiveStrength,
     int CombatReadyOnFoot,
-    bool PlannedReserve,
     bool ExternallyOwned);
 
 internal readonly record struct DefenderCrewCandidate(
@@ -1510,15 +1514,15 @@ internal readonly record struct DefensiveWeaponCandidate(
 internal readonly record struct DefensiveWeaponAssignment(int WeaponId, int SoldierId, int SquadId);
 
 internal sealed record DefenderAllocationPlan(
-    IReadOnlyList<int> ReserveSquadIds,
     IReadOnlyList<DefensiveWeaponAssignment> WeaponAssignments,
     IReadOnlyList<int> UnstaffedWeaponIds);
 
 internal static class DefenderAllocationCore
 {
-    // Was CommanderPlannerCore.ReserveFraction; inlined once the commander planner
-    // that owned that constant was removed.
-    internal const float ReserveFraction = 0.20f;
+    // A gun crew remains part of its squad. Keep the leader and one mobile
+    // squadmate on foot, but do not sideline an arbitrary complete squad while
+    // useful defensive weapons stand empty.
+    internal const int MinimumMobileFootStrength = 2;
 
     internal static DefenderAllocationPlan Allocate(
         IReadOnlyList<DefenderSquadCandidate>? squads,
@@ -1532,16 +1536,6 @@ internal static class DefenderAllocationCore
             .GroupBy(squad => squad.SquadId)
             .Select(group => group.OrderByDescending(squad => squad.EffectiveStrength).First())
             .ToArray();
-        var reserveCount = availableSquads.Length >= 2
-            ? Math.Max(1, (int)Math.Ceiling(availableSquads.Length * ReserveFraction))
-            : 0;
-        var reserve = availableSquads
-            .OrderByDescending(squad => squad.PlannedReserve)
-            .ThenByDescending(squad => squad.EffectiveStrength)
-            .ThenBy(squad => squad.SquadId)
-            .Take(reserveCount)
-            .Select(squad => squad.SquadId)
-            .ToHashSet();
 
         var squadsById = availableSquads.ToDictionary(squad => squad.SquadId);
         var onFootRemaining = availableSquads.ToDictionary(
@@ -1549,8 +1543,7 @@ internal static class DefenderAllocationCore
         var specialistRemaining = new Dictionary<(int SquadId, int Kind), int>();
         var crewPool = (crews ?? Array.Empty<DefenderCrewCandidate>())
             .Where(crew => crew.SoldierId != 0 && crew.SquadId != 0 && crew.Reachable &&
-                           !crew.IsLeader && squadsById.ContainsKey(crew.SquadId) &&
-                           !reserve.Contains(crew.SquadId))
+                           !crew.IsLeader && squadsById.ContainsKey(crew.SquadId))
             .GroupBy(crew => crew.SoldierId)
             .Select(group => group.OrderBy(crew => crew.SquadId).First())
             .ToArray();
@@ -1585,7 +1578,7 @@ internal static class DefenderAllocationCore
             DefenderCrewCandidate? selected = null;
             foreach (var crew in crewPool
                          .Where(crew => !assignedSoldiers.Contains(crew.SoldierId) &&
-                                        onFootRemaining[crew.SquadId] > 3 &&
+                                        onFootRemaining[crew.SquadId] > MinimumMobileFootStrength &&
                                         SpecialistCanLeave(crew, specialistRemaining))
                          .OrderBy(crew => SpecialistCount(crew))
                          .ThenByDescending(crew => onFootRemaining[crew.SquadId])
@@ -1609,8 +1602,7 @@ internal static class DefenderAllocationCore
             DecrementSpecialists(gunner, specialistRemaining);
         }
 
-        return new DefenderAllocationPlan(
-            reserve.OrderBy(id => id).ToArray(), assignments, unstaffed);
+        return new DefenderAllocationPlan(assignments, unstaffed);
     }
 
     private static int SpecialistCount(DefenderCrewCandidate crew)

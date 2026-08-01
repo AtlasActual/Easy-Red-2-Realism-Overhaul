@@ -16,7 +16,7 @@ public sealed class Plugin : BasePlugin
 {
     public const string PluginGuid = "ca.antoi.er2.tacticalai";
     public const string PluginName = "Easy Red 2 Realism Overhaul";
-    public const string PluginVersion = "1.0.8";
+    public const string PluginVersion = "1.0.9";
 
     internal static ManualLogSource LogSource { get; private set; } = null!;
     private Harmony? _harmony;
@@ -28,6 +28,7 @@ public sealed class Plugin : BasePlugin
     private PlayerViewFeaturesController? _playerViewFeaturesController;
     private PlayerSuppressionBlurController? _playerSuppressionBlurController;
     private PlayerHeadshotBlackoutController? _playerHeadshotBlackoutController;
+    private VehicleAimingReticleController? _vehicleAimingReticleController;
     private MultiplayerPlayerNameController? _multiplayerPlayerNameController;
     private MultiplayerSharedSquadController? _multiplayerSharedSquadController;
     private ImmersiveWorldHudController? _immersiveWorldHudController;
@@ -64,6 +65,7 @@ public sealed class Plugin : BasePlugin
         _playerViewFeaturesController = AddComponent<PlayerViewFeaturesController>();
         _playerSuppressionBlurController = AddComponent<PlayerSuppressionBlurController>();
         _playerHeadshotBlackoutController = AddComponent<PlayerHeadshotBlackoutController>();
+        _vehicleAimingReticleController = AddComponent<VehicleAimingReticleController>();
         _multiplayerPlayerNameController = AddComponent<MultiplayerPlayerNameController>();
         _multiplayerSharedSquadController = AddComponent<MultiplayerSharedSquadController>();
         _immersiveWorldHudController = AddComponent<ImmersiveWorldHudController>();
@@ -94,7 +96,7 @@ public sealed class Plugin : BasePlugin
                     $"largeCraters={Settings.HeavyOrdnanceCratersEnabled.Value}, " +
                     $"layeredBlast={Settings.LayeredBlastEffectsEnabled.Value}, " +
                     $"fragmentation={Settings.EnhancedFragmentationEnabled.Value}, " +
-                    $"aircraftPhysics={Settings.AircraftFlightPhysicsEnabled.Value}, " +
+                    $"aircraftPhysics={Settings.AircraftFlightPhysicsEnabled.Value}, aircraftAiFlightExperimental={Settings.AircraftAiFlightModelExperimentalEnabled.Value}, aircraftMousePointAim={Settings.AircraftMousePointAimingEnabled.Value}, " +
                     $"bulletPenetration={Settings.BulletPenetrationEnabled.Value}, " +
                     $"addedRicochets={Settings.AddedSmallArmsRicochetsEnabled.Value}, " +
                     $"tracers={Settings.TracerReductionEnabled.Value}, tracerRetention={Settings.MachineGunTracerRetention.Value:F2}, tracerBrightness={Settings.TracerBrightness.Value:F2}x, tracerSize={Settings.TracerSizeMultiplier.Value:F2}x, tracerLength={Settings.TracerLengthMultiplier.Value:F2}x, chatter={Settings.BattleChatterEnabled.Value}, " +
@@ -108,12 +110,18 @@ public sealed class Plugin : BasePlugin
                     $"meleeReachExtension={Settings.MeleeAdditionalReach.Value:F2}m, " +
                     $"firstPersonPlayerShadow={Settings.FirstPersonPlayerShadowEnabled.Value}, " +
                     $"aimFatigue={Settings.RealisticAimFatigueEnabled.Value}, " +
+                    $"directTurretAiming={Settings.DirectTurretAimingEnabled.Value}, " +
+                    $"unstabilizedGunsight={Settings.UnstabilizedGunsightEnabled.Value}, " +
+                    $"vehicleOpticsZoom={Settings.OpticsZoom.Value:F3}x, " +
+                    $"infantryThirdPersonZoom={Settings.ThirdPersonZoom.Value:F3}x, " +
+                    $"aircraftFreeLookZoom={Settings.AircraftFreeLookZoom.Value:F3}x, " +
                     $"binoculars={Settings.BinocularsEnabled.Value}, binocularZoom={Settings.BinocularZoomMultiplier.Value:F1}x, " +
                     $"freeLook={Settings.FreeLookEnabled.Value}, freeLookArc={Settings.FreeLookHorizontalArcDegrees.Value:F0}deg, " +
                     $"compassAlwaysVisible={Settings.CompassAlwaysVisible.Value}, " +
                     $"compassUnits={(Settings.CompassUseMils.Value ? "mils" : "degrees")}, " +
                     $"namesWithHudDisabled={Settings.KeepMultiplayerPlayerNamesWithHudDisabled.Value}, " +
                     $"immersiveWorldHud={Settings.ImmersiveWorldHudEnabled.Value}, " +
+                    $"hidePlayerNamesInSameVehicle={Settings.HidePlayerNamesInSameVehicle.Value}, " +
                     $"leaveSquadRedeploy={Settings.LeaveSquadRedeployEnabled.Value}, " +
                     $"ragdollMomentum={Settings.RagdollMomentumEnabled.Value}, " +
                     $"highQualityDistantAnimations={Settings.KeepHighQualityDistantAnimations.Value}, " +

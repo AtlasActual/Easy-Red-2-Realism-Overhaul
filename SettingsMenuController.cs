@@ -1493,6 +1493,7 @@ internal sealed class SettingsMenuController : MonoBehaviour
         _descriptionStyle.fontSize = FontSize(12f);
         _descriptionStyle.alignment = TextAnchor.UpperLeft;
         _descriptionStyle.wordWrap = true;
+        _descriptionStyle.richText = true;
         SetTextColors(_descriptionStyle, new Color(0.68f, 0.72f, 0.75f, 1f));
 
         _statusStyle = CloneStyle(GUI.skin.label);

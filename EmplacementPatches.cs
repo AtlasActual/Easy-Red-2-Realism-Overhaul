@@ -7,11 +7,11 @@ using UnityEngine;
 namespace ER2RealismOverhaul;
 
 /// <summary>
-/// Global defender emplacement allocator. It inventories a complete objective
-/// position, protects the mobile reserve, and sends one selected soldier through
-/// the native vehicle destination API for each viable gun. Guns count as viable
-/// whether they belong to a static emplacement or to an empty armed vehicle
-/// parked inside the position, such as a halftrack with a mounted machine gun.
+/// Global defensive emplacement allocator. It inventories every active AI hold
+/// area and sends one selected soldier through the native vehicle destination API
+/// for each viable gun. Guns count as viable whether they belong to a static
+/// emplacement or to an empty armed vehicle parked inside the position, such as a
+/// halftrack with a mounted machine gun.
 /// </summary>
 internal static class StaticAntiTankStaffing
 {
@@ -30,13 +30,13 @@ internal static class StaticAntiTankStaffing
     internal static void Update(Squad squad, float now)
     {
         if (!Settings.StaticWeaponStaffingEnabled.Value || !MultiplayerAuthority.CanMutateGameplay() ||
-            squad == null || squad.IsVehicleCrew || !GroundAiDirector.IsDefendingSquad(squad) ||
+            squad == null || squad.IsVehicleCrew ||
             now < _nextInventoryAt || _updating)
         {
             return;
         }
 
-        // A full inventory walks every friendly squad and static weapon, then
+        // A full inventory walks every eligible squad and static weapon, then
         // allocates and sorts several temporary collections.  Honor the exposed
         // setting instead of running that global work several times per second;
         // especially after reinforcements arrive, the old cadence produced enough
@@ -45,7 +45,7 @@ internal static class StaticAntiTankStaffing
         _updating = true;
         try
         {
-            InventoryAndAllocate(squad, now);
+            InventoryAndAllocate(now);
         }
         catch (Exception ex)
         {
@@ -123,22 +123,64 @@ internal static class StaticAntiTankStaffing
         _updating = false;
     }
 
-    private static void InventoryAndAllocate(Squad trigger, float now)
+    private static void InventoryAndAllocate(float now)
     {
         RefreshPlayerOverrides(now);
-        var faction = trigger.Leader?.faction ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(faction) ||
-            !TryGetDefensiveArea(trigger, out var center, out var radius))
+        var defensiveSquads = CollectDefensiveSquads();
+        var factions = defensiveSquads
+            .Select(squad => squad.Leader?.faction ?? string.Empty)
+            .Concat(AssignmentsByWeapon.Values.Select(assignment => assignment.Faction))
+            .Where(faction => !string.IsNullOrWhiteSpace(faction))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(faction => faction, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        foreach (var faction in factions)
         {
-            return;
+            var revision = GroundAiDirector.CurrentObjectiveRevision(faction);
+            RefreshAssignments(faction, revision, now);
+            var pendingSquads = defensiveSquads
+                .Where(squad => SameFaction(squad.Leader?.faction ?? string.Empty, faction))
+                .ToList();
+            while (pendingSquads.Count > 0)
+            {
+                var anchor = pendingSquads[0];
+                pendingSquads.RemoveAt(0);
+                if (!TryGetDefensiveArea(anchor, out var center, out var radius))
+                    continue;
+
+                // Squads holding nearby sectors share one gun inventory and crew pool.
+                // Remove them from the pending list so the global cadence visits every
+                // distinct position once instead of repeatedly servicing whichever
+                // squad leader happens to update first.
+                var squads = new List<Squad> { anchor };
+                for (var index = pendingSquads.Count - 1; index >= 0; index--)
+                {
+                    var candidate = pendingSquads[index];
+                    if (!TryGetDefensiveArea(candidate, out var candidateCenter, out var candidateRadius) ||
+                        HorizontalDistance(candidateCenter, center) >
+                        Mathf.Max(radius, candidateRadius))
+                    {
+                        continue;
+                    }
+
+                    squads.Add(candidate);
+                    pendingSquads.RemoveAt(index);
+                }
+
+                AllocateDefensiveArea(faction, revision, center, radius, squads, now);
+            }
         }
+    }
 
-        var revision = GroundAiDirector.CurrentObjectiveRevision(faction);
-        RefreshAssignments(faction, revision, now);
-        var squads = CollectDefensiveSquads(faction, center, radius);
-        if (squads.Count == 0)
-            return;
-
+    private static void AllocateDefensiveArea(
+        string faction,
+        int revision,
+        Vector3 center,
+        float radius,
+        IReadOnlyList<Squad> squads,
+        float now)
+    {
         var armor = CollectReportedArmor(faction, center);
         var runtimeWeapons = CollectWeapons(faction, center, radius, armor);
         if (runtimeWeapons.Count == 0)
@@ -180,7 +222,6 @@ internal static class StaticAntiTankStaffing
                 SquadIdentity.GetSquadId(candidateSquad),
                 effectiveStrength,
                 combatReadyOnFoot,
-                false,
                 GroundAiDirector.IsExternallyControlledSquad(candidateSquad)));
         }
 
@@ -244,10 +285,7 @@ internal static class StaticAntiTankStaffing
         }
     }
 
-    private static List<Squad> CollectDefensiveSquads(
-        string faction,
-        Vector3 objective,
-        float objectiveRadius)
+    private static List<Squad> CollectDefensiveSquads()
     {
         var result = new List<Squad>();
         var all = Squad.AllSquads;
@@ -259,17 +297,13 @@ internal static class StaticAntiTankStaffing
             var squad = pair.Value;
             var leader = squad?.Leader;
             if (squad == null || leader == null || squad.IsVehicleCrew ||
-                !SameFaction(leader.faction, faction) ||
                 GroundAiDirector.IsExternallyControlledSquad(squad) ||
-                !TryGetDefensiveArea(squad, out var squadCenter, out var squadRadius))
+                !TryGetDefensiveArea(squad, out _, out _))
             {
                 continue;
             }
 
-            var centersClose = HorizontalDistance(squadCenter, objective) <=
-                               Mathf.Max(objectiveRadius, squadRadius);
-            if (centersClose)
-                result.Add(squad);
+            result.Add(squad);
         }
 
         return result.GroupBy(SquadIdentity.GetSquadId).Select(group => group.First())
@@ -405,6 +439,7 @@ internal static class StaticAntiTankStaffing
         {
             if (assignment.ObjectiveRevision != revision ||
                 assignment.Soldier == null || !assignment.Soldier.CanFight() ||
+                !SoldierStillHoldingDefense(assignment.Soldier) ||
                 assignment.Weapon == null || assignment.Weapon.life <= 0 ||
                 !WeaponStillHasAmmunition(assignment.Weapon) ||
                 GroundAiDirector.IsExternallyControlledSquad(assignment.Soldier.joinedSquad))
@@ -587,6 +622,18 @@ internal static class StaticAntiTankStaffing
     private static bool ReachableForAssignment(Soldier soldier, Vector3 center, float radius)
         => soldier != null && IsFinite(soldier.transform.position) &&
            HorizontalDistance(soldier.transform.position, center) <= radius + 35f;
+
+    private static bool SoldierStillHoldingDefense(Soldier soldier)
+    {
+        try
+        {
+            return soldier?.joinedSquad != null && soldier.joinedSquad.order == Order.defend;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     private static Soldier? FindMember(Squad squad, int soldierId)
     {

@@ -94,6 +94,50 @@ internal static class TurretMachineGunFakeProjectileTracerPatch
         => TurretMachineGunProjectileTracerPatch.ApplyRetention(ref use_tracer);
 }
 
+[HarmonyPatch(
+    typeof(Corvostudio.Weapons.BulletInstance),
+    nameof(Corvostudio.Weapons.BulletInstance.ShooterIsOnRoot))]
+internal static class AircraftProjectileSelfCollisionPatch
+{
+    [HarmonyPostfix]
+    private static void Postfix(
+        Corvostudio.Weapons.BulletInstance __instance,
+        UnityEngine.Transform refTransform,
+        ref bool __result)
+    {
+        if (__result || __instance == null || refTransform == null)
+            return;
+
+        try
+        {
+            var shooter = __instance.shooter;
+            var vehicle = shooter?.GetCurrentVehicle();
+            if (vehicle is not VehiclePlane plane ||
+                !AircraftFlightPhysics
+                    .IsLocallyControlledHumanRealisticPlane(plane))
+            {
+                return;
+            }
+
+            var planeTransform = plane.transform;
+            var planeRoot = planeTransform?.root;
+            if (planeRoot != null &&
+                refTransform.root == planeRoot)
+            {
+                // RaycastAll passes each hit's hierarchy root to the native
+                // shooter filter. Extend it to the aircraft carrying that
+                // shooter, then continue to the first genuine target.
+                __result = true;
+            }
+        }
+        catch
+        {
+            // Preserve native collision handling if the firing seat is being
+            // destroyed or detached while the projectile is processed.
+        }
+    }
+}
+
 [HarmonyPatch(typeof(SoldierAI), nameof(SoldierAI.UseBestWearedWeaponCheck))]
 internal static class SoldierAiLauncherSelectionPatch
 {

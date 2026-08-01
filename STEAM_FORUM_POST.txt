@@ -1,66 +1,156 @@
 [h1]Easy Red 2 Realism Overhaul[/h1]
 
-[b]Current mod version:[/b] 1.0.2
-[b]Compatible game version:[/b] 2.0.7 Stable (Steam build 24246380)
-[b]Download:[/b] [url=https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul]Easy Red 2 Realism Overhaul[/url]
+[b]Current mod version:[/b] 1.0.9
+[b]Compatible game version:[/b] 2.0.8 Stable (Steam build 24420558)
+[b]Download:[/b] [url=https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul/releases/]Easy Red 2 Realism Overhaul releases[/url]
 
-I've been working on this overhaul to make Easy Red 2's battles feel less mechanical without changing what makes the game fun. Version 1.0.2 is ready for public release.
+Easy Red 2 Realism Overhaul is a configurable BepInEx mod for more believable, tactical, and immersive combined-arms battles.
 
-The main focus is battlefield behaviour. Infantry react more naturally to contact and suppression, squads work with imperfect information, and vehicles and aircraft make better tactical decisions. It is not a health or damage multiplier mod; the game's missions, armour system, and basic damage model remain intact.
+AI is the largest part of the overhaul, but it is not the only part. Infantry behaviour, tank tactics, weapon handling, bullet penetration, explosions, suppression, battlefield effects, audio, visuals, first-person features, and multiplayer support are designed around the same goal: making the battlefield feel coherent without replacing the game underneath it.
 
-[h2]Main features[/h2]
+This is not a health or damage multiplier mod, and it does not turn the AI into an aimbot. Easy Red 2's missions, armour system, and basic damage model remain intact. Soldiers are still human: they need time to react, work with incomplete information, make mistakes, become suppressed, and can be outmanoeuvred.
+
+[h2]Believable infantry AI[/h2]
 
 [list]
-[*]AI no longer snap their aim to targets: they must actually see them before engaging, within a configurable 120-degree default field of view.
-[*]Improved infantry awareness, suppressive fire, and movement under fire. Defenders deliberately occupy and hold protective trenches, buildings, and fortified cover, while attackers use cover as bounds and support-by-fire positions before advancing.
-[*]Cover scoring recognizes substantial earthworks, sandbags, masonry, and buildings instead of treating foliage, glass, canvas, and thin props as equivalent protection. Soldiers also hold when a movement route fails instead of walking in place.
-[*]Suppression slows reactions, limits awareness, pins exposed troops, and makes mounted gunners duck. Players can configure an expanded near-miss suppression radius; suppression blur now scales correctly, stacks on rapid hits, and clears fully afterward. Nearby allied wounds and deaths can also suppress autonomous AI.
-[*]Squad contact reports are passed by voice and radio instead of perfect enemy tracking.
-[*]Optional host-authoritative High Command derives attack or defence from objective ownership, coordinates squads, vehicles, aircraft, emplacements, and support, respects player and mission-script orders, and prevents AI systems from repeatedly overwriting one another.
-[*]Defenders continuously crew viable objective-area static weapons, prioritize anti-armour guns when armour is reported, preserve essential squad strength and a mobile reserve, and honor player [b]Get In[/b] orders. Low-velocity AI anti-tank launchers wait for targets to enter their configurable engagement range before switching weapons.
-[*]Safer AI firing and grenade use, more reliable melee and bayonet hits, and a fix that prevents controller-owned soldiers from being mistaken for AI.
-[*]Better tank positioning and reversing: tanks clear stale steering, turn into route nodes without needless spinning, and keep their hull oriented toward armoured threats while the turret tracks them.
-[*]AI aircraft autonomously engage visible air and ground targets when unassigned. Commander-directed strikes remain near their active objective, and bombs require a valid impact prediction and a live hostile ground target. Simplified controls use Easy Red 2's native flight controller; Realistic Mouse, Realistic Keyboard, and AI aircraft use the overhaul flight model.
-[*]Material-aware bullet penetration with energy loss, exit effects, tracers, and ricochets.
-[*]Reworked explosions, smoke and dust durations, audio rebalance, tracer quantity, battle chatter, and many more visual options. Combat stutter is reduced by more efficient cover evaluation and throttled repeated AI work.
-[*]New first-person tools: clean 10x binoculars with [b]Caps Lock[/b], hold either [b]Alt[/b] key for configurable 200-degree freelook, and a map-north-aligned scrolling compass shown for five seconds with [b]K[/b]. The compass defaults to NATO mils, can use degrees, and can remain visible permanently.
-[*]Allied multiplayer infantry can select another allied player and choose [b]Join [player]'s squad[/b]. This moves only the current soldier, excludes vehicle crews, and must be chosen again after respawning.
-[*]A built-in settings menu is available with [b]F10[/b] or from the main and pause menus. Most features can be tuned or switched off.
+[*][b]Human perception instead of omniscience.[/b] Soldiers use a limited configurable field of view, visual confirmation, reaction delays, and imperfect target memory. When contact is lost, they remember a last-known position rather than tracking the enemy's live location through terrain and buildings.
+
+[*][b]Contextual reactions to contact.[/b] AI considers distance, weapon type, movement, stance, suppression, and immediate danger before deciding whether to stop, return fire, move to cover, or continue an assault. Riflemen and machine gunners stop before firing; suitable submachine guns retain limited close-range moving fire.
+
+[*][b]Suppression changes behaviour, not just accuracy.[/b] Incoming fire narrows awareness, slows reactions, affects posture, interrupts exposed actions, and can pin soldiers down. Heavily suppressed troops seek protection or get low, mounted gunners duck, and nearby allied wounds and deaths can cause a morale shock.
+
+[*][b]Cover is judged by actual protection.[/b] The AI evaluates protection across the body, firing lanes, material resistance, thickness, occupancy, route safety, and the direction of the threat. Earthworks, sandbags, masonry, trenches, and buildings are valued as protection; foliage, glass, canvas, wire, and thin props are not treated as bulletproof cover.
+
+[*][b]Stable, readable decisions.[/b] Soldiers commit to useful cover and sensible postures instead of constantly switching between standing, crouching, prone, and moving. They recover from failed routes and walking-in-place loops, spread across available positions, and avoid stacking multiple soldiers into one cover slot.
+
+[*][b]Imperfect local communication.[/b] A soldier can call out a personally confirmed target to nearby friendly AI, but only as a short-lived last-known position after a human delay. Recipients still need to stop, see the enemy themselves, and complete their own target-acquisition time before firing.
 [/list]
 
-[h2]Coming soon[/h2]
+[h2]Attacks, defence, and combined arms[/h2]
 
-Tank ballistics, armour values, and internal vehicle subsystems are all being reworked for a future release. These changes are still work in progress and are not part of v1.0.2; for now, the mod leaves Easy Red 2's existing tank ballistics and armour model alone.
+[list]
+[*][b]Attackers fight their way forward.[/b] Assaulting infantry use trenches, buildings, and other strong positions as covered bounds or support-by-fire points. They stop to engage visible opposition, then resume the advance once covering fire is established or a bounded combat halt expires instead of remaining frozen in the open forever.
+
+[*][b]Defenders use prepared ground.[/b] Defensive squads deliberately occupy and hold protective trenches, buildings, windows, and fortified positions. They value both survival and the ability to return fire, spread across separate posts, and do not casually abandon strong cover while attackers approach.
+
+[*][b]Forces make better use of multiple objectives.[/b] A lightweight coordinator spreads available attacking squads across active objectives and alternate approach angles while keeping enough strength together to sustain an attack. Defenders cover each objective before reinforcing contested areas. It uses Easy Red 2's native synchronized orders and leaves player-led and mission-scripted squads untouched.
+
+[*][b]Static weapons become part of the defence.[/b] Defenders crew viable machine guns, anti-tank guns, and abandoned armed transports in their defence areas. They prioritize anti-armour weapons when armour is present, preserve leaders and essential squad strength, and immediately respect player [b]Get In[/b] orders.
+
+[*][b]Transports react before disaster.[/b] AI-led infantry can dismount from APCs when visible contact or incoming fire makes staying inside more dangerous than getting out.
+
+[*][b]Tanks behave more like armoured vehicles.[/b] AI tanks hold useful standoff distances against enemy armour, keep their frontal protection toward threats while reversing, avoid needless hull pivots, check behind themselves before backing up, continue moving against infantry when ordered, and attempt to free themselves when stuck.
+[/list]
+
+[h2]Weapons and battlefield realism[/h2]
+
+[list]
+[*][b]Safer fire discipline.[/b] Handheld and mounted weapons check for friendlies in the firing lane. AI withholds unsafe shots, stops ordinary rifles and machine guns from firing while moving, and avoids wasting small-arms fire against tanks.
+
+[*][b]More deliberate grenades and anti-tank weapons.[/b] Grenades require a useful target, practical range, a clear throw path, and a safe expected blast area. Low-velocity anti-tank launchers remain stowed until a vehicle enters a believable engagement range, while shaped-charge warheads detonate on the first object they strike.
+
+[*][b]Material-aware bullet penetration.[/b] Suitable bullets can pass through thin props with energy loss, exit effects, decals, tracers, and ricochets. Resistance and thickness matter, while terrain, bunkers, and vehicle armour retain their native role.
+
+[*][b]Explosions have weight and aftermath.[/b] Artillery, bombs, fragmentation, suppression, smoke, dust, craters, ragdoll force, and lingering battlefield effects are reworked as separate configurable systems instead of applying one blanket damage multiplier.
+
+[*][b]Improved melee and weapon handling.[/b] Melee and bayonet attacks connect across a more believable hit area without changing their damage. AI weapon accuracy reacts to movement, stance, range, suppression, skill, and close-quarters distance, while unsupported first-person aiming develops recoverable sway.
+
+[*][b]More convincing automatic fire.[/b] Machine-gun tracer frequency, brightness, thickness, and streak length are configurable, including a true zero-tracer option. The automatic-weapon audio limit is expanded so large firefights do not lose most of their machine-gun loops after only a few weapons begin firing.
+[/list]
+
+[h2]Player immersion and presentation[/h2]
+
+[list]
+[*][b]First-person field tools.[/b] Toggle clean configurable binoculars with [b]Caps Lock[/b], hold either [b]Alt[/b] key for a configurable freelook arc, and press [b]K[/b] for a map-north-aligned compass. The compass supports NATO mils, degrees, and an always-visible mode.
+
+[*][b]Physical player-aircraft flight.[/b] Enabled by default for locally controlled human aircraft in both offline and multiplayer Realistic controls, direct input and mouse point aiming command the same aerodynamic surfaces with physical momentum and gravity, angle-of-attack stalls, drag-based energy loss, speed-dependent authority, and damage-sensitive handling. The compact instrument display remains optional and off by default. [b]EXPERIMENTAL: A disabled-by-default AI Flight Model option applies the same tuning to AI planes and may cause unforeseen issues, including planes crashing.[/b] Remote-player aircraft are never altered.
+
+[*][b]Less intrusive battlefield information.[/b] The optional immersive world HUD can hide floating squad and marked-unit icons in the 3D view while preserving them on the tactical map. Allied multiplayer names remain available when other markers are hidden.
+
+[*][b]Expanded visual and audio tuning.[/b] Configure distant animation quality, smoke and dust duration, impact decals, tracers, battle chatter, weapon and vehicle audio, simultaneous sound capacity, player footsteps, weather particles, first-person shadows, ragdoll momentum, and player suppression effects.
+
+[*][b]Optional lethal-headshot presentation.[/b] A bullet to the head that kills the player can cut the view to black and silence immediately while keeping the native death information readable. Other deaths remain unchanged, and sight and audio return through the normal respawn flow.
+[/list]
+
+[h2]Configuration, performance, and diagnostics[/h2]
+
+Press [b]F10[/b], or open [b]Realism Overhaul Settings[/b] from the main or pause menu. Major systems can be adjusted or disabled individually, and the recommended defaults are designed to work as one cohesive package.
+
+[list]
+[*][b]Simple top-level AI controls:[/b] Aggressiveness, Accuracy, Reaction Speed, Awareness, and Suppression Resistance can each be adjusted from 0.5x to 1.5x, while detailed controls remain available in their normal categories.
+
+[*][b]Three performance starting points:[/b] Quality restores the recommended experience, Balanced keeps every gameplay system with lighter presentation costs, and Large Battle preserves the core AI and fire-safety systems while reducing expensive supplemental effects.
+
+[*][b]One-click system controls:[/b] Enable All, Disable All, Reset to Defaults, Apply, and Cancel make broad changes manageable without editing configuration files.
+
+[*][b]Optional visual AI diagnostics:[/b] press [b]F8[/b] to inspect perception, target memory, movement, cover, suppression, firing safety, command state, vehicles, recent decisions, and AI update timings. The overlay is local, read-only, and disabled by default.
+
+[*][b]Large-battle performance work:[/b] expensive AI, cover, penetration, explosion, audio, decal, and diagnostic work is bounded or distributed over time, and the release includes a mixed-mod-safe fix for a major late-battle memory and finalizer backlog.
+[/list]
+
+[h2]Multiplayer support[/h2]
+
+Host-authoritative gameplay systems require only the host to install the mod. Unmodified friends can join normally and experience the AI behaviour and battlefield results that Easy Red 2 synchronizes from the host.
+
+Players using the same mod version also receive the host's settings for the session, while keeping their own configuration for later. Modded allied infantry players can select another player and choose [b]Join [player]'s squad[/b]; dead players can leave a joined squad and return to the deployment screen.
+
+[h2]Version 1.0.9 highlights[/h2]
+
+Version 1.0.9 strengthens the existing overhaul rather than changing its purpose:
+
+[list]
+[*]Added lightweight multi-objective coordination for attackers and defenders using native orders.
+[*]Improved close-quarters target detection, local contact callouts, danger memory, grenade use, cover occupation, spacing, and suppressed movement.
+[*]Added Quality, Balanced, and Large Battle presets plus five simple core AI tuning sliders.
+[*]Expanded automatic-weapon audio capacity, machine-gun tracer controls, immersive world-HUD options, first-person shadows, ragdoll momentum, and multiplayer redeployment flow.
+[*]Restored the large-battle stutter fix with safeguards for Unity objects and other BepInEx plugins.
+[*]Added split controls for player-operated ground turrets and direct-fire static weapons. Third-person view uses War Thunder-style point aiming: the camera moves independently while the weapon follows its center-screen direction at native traverse and elevation rates. Parallel exterior sight lines prevent the elevated camera from forcing the gun upward; thin translucent gray rings mark the commanded camera aim and visible true bore. Holding vehicle freelook moves only the camera while the large ring stays anchored to the saved aim direction—even at the screen edge—and the weapon keeps traversing toward it; releasing freelook smoothly returns the camera to that ring. In the right-click optical gunsight, the enabled-by-default Unstabilized Gunsight option instead applies relative input directly to the weapon and attaches the view to the physical gun, removing artificial vertical compensation as the vehicle moves. Players can disable that separate option to keep stabilized point aiming in the gunsight, whose native reticle remains unchanged. The horizon stays level; other vehicle seats remain native unless they are currently operating a weapon.
+[*]Added a separate Mouse Point Aiming switch for player-flown aircraft. In third-person view with mouse and keyboard Realistic controls, the same rings show the saved world-space flight command and the aircraft's actual gun or nose direction while native flight controls bank and pitch toward it. Holding the configurable vehicle-look action freezes the command and detaches the camera; also holding the configurable hold-breath action smoothly applies the separate Aircraft Free Look Zoom setting. The same chord works during native first-person vehicle look, the setting defaults to 4x, and releasing either action smoothly restores the ordinary field of view. Releasing vehicle look smoothly returns the third-person camera. First-person aircraft controls and camera movement remain native apart from this optical zoom; bomb-sight views, Simplified controls, AI, and remote aircraft remain unchanged. The new option never intercepts physical-controller input or changes the existing separate controller-freelook steering option. Ground-vehicle controllers continue to use the same point-aim behavior as mouse input.
+[*]The visible flight sliders now default to the playtested 0.714x Aircraft Speed, 1x Pitch, 1.225x Roll, 2x Rudder, 4.87/10 Engine Power, and 1.423x Aerodynamic Drag tune. Rudder's 2x default is centered in an expanded, functional 0.25x-3.75x range so players have equal adjustment room in either direction.
+[/list]
+
+The complete version history is included with the download and available in the [url=https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul/blob/main/CHANGELOG.md]online changelog[/url].
+
+[h2]Coming next[/h2]
+
+Vehicle combat remains the next major research area, beginning with adjustable range zeroing and a read-only audit of Easy Red 2's existing vehicle damage systems. Large-calibre ballistics and any historically sourced armour tuning will follow only where the game data and runtime behaviour can be mapped reliably.
+
+Direct player-controlled vehicle and stationary-gun aiming is included in v1.0.9. Adjustable zeroing changes, whole-vehicle health changes, tank-ballistic changes, and armour changes are not; the current release leaves those native systems intact.
 
 [h2]Installation[/h2]
 
-ER2RealismOverhaul requires BepInEx 6 for Unity IL2CPP.
+[b]Windows x64 only.[/b] ER2RealismOverhaul requires BepInEx 6 for Unity IL2CPP.
 
 [olist]
-[*]Download the latest build whose filename contains [b]Unity.IL2CPP-win-x64[/b] from the [url=https://builds.bepinex.dev/projects/bepinex_be]official BepInEx builds page[/url]. The [url=https://docs.bepinex.dev/master/articles/user_guide/installation/unity_il2cpp.html]official IL2CPP installation guide[/url] is also available.
+[*]Download the latest release ZIP from the [url=https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul/releases/]Releases page[/url]. New users can use the larger file ending in [b]Windows-x64-BepInEx.zip[/b]. If BepInEx 6 for Unity IL2CPP is already installed, use the smaller [b]Windows-x64-No-BepInEx.zip[/b] package.
+[*]Close Easy Red 2.
 [*]In Steam, right-click Easy Red 2 and select [b]Manage > Browse local files[/b].
-[*]Extract BepInEx into that folder, beside [b]Easy Red 2.exe[/b].
-[*]Start the game once, then close it. The first launch may take longer while BepInEx generates its files.
-[*]Extract the entire contents of this mod's latest release ZIP into the game folder.
-[*]Start the game and press [b]F10[/b] to confirm the mod is loaded.
+[*]Extract the entire ZIP directly into that folder, beside [b]Easy Red 2.exe[/b]. Merge folders and allow replacement if prompted. Do not extract it into [b]Easy Red 2_Data[/b].
+[*]Start the game. The first BepInEx launch may take longer while its cache and interop files are generated.
+[*]Press [b]F10[/b] in game to confirm the mod is loaded and review its settings.
 [/olist]
 
-To update, close the game and extract the latest release ZIP into the game folder, overwriting the existing mod files. To uninstall, close the game and remove the mod's files. Saved settings are kept in [b]BepInEx\config\ca.antoi.er2.tacticalai.cfg[/b].
+After installation, this file should exist:
 
-[h2]Multiplayer[/h2]
+[code]Easy Red 2\BepInEx\plugins\ER2RealismOverhaul\ER2RealismOverhaul.dll[/code]
 
-Only the host needs the mod for its host-authoritative gameplay systems. Friends without BepInEx or ER2RealismOverhaul can join normally and experience the battlefield state synchronized by Easy Red 2, including the results of the host-controlled AI behaviour.
+To update while preserving custom settings, close the game and replace the existing DLL or extract the latest release ZIP over the game folder. To uninstall the mod, remove [b]BepInEx\plugins\ER2RealismOverhaul[/b]. Saved settings are stored in [b]BepInEx\config\ca.antoi.er2.tacticalai.cfg[/b].
+
+[h2]Multiplayer details[/h2]
 
 [list]
-[*][b]Without the mod:[/b] Players do not receive the F10 menu, the host's settings, or local HUD, audio, and first-person options.
-[*][b]With the same version:[/b] Players receive the host's settings for the session. Their menu stays read-only and their own configuration returns after disconnecting.
+[*][b]Unmodded players:[/b] can join a modded host and experience synchronized gameplay results, but do not receive the F10 menu, host settings, or local HUD, audio, and first-person options.
+[*][b]Players with the same mod version:[/b] receive the host's settings for that session. Their settings menu remains read-only until they disconnect, when their personal configuration returns.
+[*][b]Aircraft:[/b] every player running the mod uses the physical flight model on the human aircraft they personally control in Realistic mode. Easy Red 2's native vehicle synchronizer carries that aircraft's motion to the room; unmodded pilots and remote aircraft retain native flight physics on that client. AI aircraft remain native by default, and only the authoritative host applies the experimental AI Flight Model when it is enabled.
 [/list]
 
 If an unmodded player becomes host after the original host leaves, the host-authoritative overhaul systems stop running. A player with the same mod version should remain host.
 
 [h2]Compatibility and feedback[/h2]
 
-Version 1.0.2 is compatible with Easy Red 2 version 2.0.7 Stable, Steam public-branch build [b]24246380[/b] (July 20, 2026). Game updates can sometimes break BepInEx mods, so please report loading problems, unusual AI behaviour, multiplayer issues, or settings that need adjustment.
+Version 1.0.9 is compatible with Easy Red 2 version 2.0.8 Stable, Steam public-branch build [b]24420558[/b] (July 27, 2026). It is not compatible with the beta branch.
+
+Game updates can sometimes break BepInEx mods. Please report loading problems, unusual AI behaviour, multiplayer issues, performance regressions, or settings that need adjustment on the [url=https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul/issues]GitHub Issues page[/url].
 
 [h2]License[/h2]
 

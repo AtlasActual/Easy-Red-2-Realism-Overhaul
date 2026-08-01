@@ -144,26 +144,29 @@ internal static class Settings
     internal static ConfigEntry<int> AircraftBombSuppression = null!;
     internal static ConfigEntry<float> BlastCoverEffectMultiplier = null!;
 
+    internal static ConfigEntry<bool> AircraftMousePointAimingEnabled = null!;
     internal static ConfigEntry<bool> AircraftFreeLookSteeringEnabled = null!;
+    internal static ConfigEntry<float> AircraftFreeLookZoom = null!;
     internal static ConfigEntry<bool> AircraftFlightPhysicsEnabled = null!;
+    internal static ConfigEntry<bool> AircraftAiFlightModelExperimentalEnabled = null!;
     internal static ConfigEntry<bool> AircraftPhysicsApplyToOfflinePlayers = null!;
     internal static ConfigEntry<bool> AircraftPhysicsApplyToMultiplayerPlayers = null!;
     internal static ConfigEntry<bool> AircraftAdvancedTuningEnabled = null!;
     internal static ConfigEntry<float> AircraftPhysicsStrength = null!;
     internal static ConfigEntry<float> AircraftWorldSpeedScale = null!;
+    internal static ConfigEntry<float> AircraftPitchAuthorityMultiplier = null!;
+    internal static ConfigEntry<float> AircraftRollAuthorityMultiplier = null!;
+    internal static ConfigEntry<float> AircraftRudderAuthorityMultiplier = null!;
     internal static ConfigEntry<float> AircraftFighterSpeedMultiplier = null!;
     internal static ConfigEntry<float> AircraftBomberSpeedMultiplier = null!;
     internal static ConfigEntry<float> AircraftControlResponseMultiplier = null!;
     internal static ConfigEntry<float> AircraftEngineResponseMultiplier = null!;
     internal static ConfigEntry<float> AircraftEnginePowerMultiplier = null!;
+    internal static ConfigEntry<float> AircraftAerodynamicDragMultiplier = null!;
     internal static ConfigEntry<bool> AircraftThrottleControlsEnginePower = null!;
     internal static ConfigEntry<float> AircraftThrottleReductionResponseMultiplier = null!;
     internal static ConfigEntry<float> AircraftEnergyLossMultiplier = null!;
     internal static ConfigEntry<bool> AircraftEnergyRetentionEnabled = null!;
-    internal static ConfigEntry<float> AircraftNativeCoastDragMultiplier = null!;
-    internal static ConfigEntry<float> AircraftNativeVelocityLossMultiplier = null!;
-    internal static ConfigEntry<float> AircraftGlideEnergyLossMultiplier = null!;
-    internal static ConfigEntry<float> AircraftMaximumEnergyRetentionAcceleration = null!;
     internal static ConfigEntry<bool> AircraftStallPhysicsEnabled = null!;
     internal static ConfigEntry<float> AircraftStallRecoveryPitchAuthority = null!;
     internal static ConfigEntry<float> AircraftStallRecoveryRollAuthority = null!;
@@ -228,6 +231,10 @@ internal static class Settings
     internal static ConfigEntry<bool> RealisticAimFatigueEnabled = null!;
     internal static ConfigEntry<float> UnsupportedAimFatigueSeconds = null!;
     internal static ConfigEntry<float> HoldBreathZoomMultiplier = null!;
+    internal static ConfigEntry<bool> DirectTurretAimingEnabled = null!;
+    internal static ConfigEntry<bool> UnstabilizedGunsightEnabled = null!;
+    internal static ConfigEntry<float> OpticsZoom = null!;
+    internal static ConfigEntry<float> ThirdPersonZoom = null!;
     internal static ConfigEntry<bool> BinocularsEnabled = null!;
     internal static ConfigEntry<KeyCode> BinocularsKey = null!;
     internal static ConfigEntry<float> BinocularZoomMultiplier = null!;
@@ -243,6 +250,7 @@ internal static class Settings
     internal static ConfigEntry<bool> ImmersiveWorldHudEnabled = null!;
     internal static ConfigEntry<bool> ContextualSquadNamesEnabled = null!;
     internal static ConfigEntry<float> ContextualSquadNameRangeMeters = null!;
+    internal static ConfigEntry<bool> HidePlayerNamesInSameVehicle = null!;
     internal static ConfigEntry<bool> LeaveSquadRedeployEnabled = null!;
 
     internal static ConfigEntry<bool> RagdollMomentumEnabled = null!;
@@ -355,7 +363,7 @@ internal static class Settings
             "Spreads AI attackers across as many active objectives as their squad count can support, gives some squads offset approach angles, and keeps defenders distributed around nearby cover at every active objective. Uses native synchronized squad orders and never controls player-led or mission-scripted squads.");
 
         StaticWeaponStaffingEnabled = config.Bind("AI - Defense", "Enabled", true,
-            "Sends AI defenders to staff viable static defensive weapons (crewed guns, emplacements) inside their squad's defend order area.");
+            "Proactively sends autonomous AI squads on defend orders to staff viable loaded static weapons in every active hold area, regardless of which faction began the battle on defense.");
 
         SuppressionAwarenessEnabled = config.Bind("AI - Infantry tactics - Suppression", "Enabled", true,
             "Makes suppression narrow awareness and shorten target memory.");
@@ -443,7 +451,7 @@ internal static class Settings
         StaticAtEnemyTankRange = config.Bind("AI - Defense", "EnemyTankResponseRangeMeters", 350f,
             new ConfigDescription("Range used to identify reported armor and prioritize AP-capable guns. All other viable defensive weapons are staffed even without armor contact.", new AcceptableValueRange<float>(75f, 600f)));
         StaticAtAssignmentCooldown = config.Bind("AI - Defense", "AssignmentCooldownSeconds", 12f,
-            new ConfigDescription("Maximum interval between full defensive-emplacement inventories; vacancies caused by death, destruction, empty ammunition, or lost ownership are handled immediately.", new AcceptableValueRange<float>(3f, 60f)));
+            new ConfigDescription("Interval between complete static-weapon inventories across every active AI hold area. Lower values replace lost crews sooner; higher values reduce periodic battlefield scanning.", new AcceptableValueRange<float>(3f, 60f)));
         StaticAtMinimumCaliber = config.Bind("AI - Defense", "MinimumGunCaliberMm", 20f,
             new ConfigDescription("Minimum static-gun caliber considered suitable for anti-tank use.", new AcceptableValueRange<float>(12f, 75f)));
         VehicleGunStaffingEnabled = config.Bind("AI - Defense", "StaffAbandonedVehicleGuns", true,
@@ -527,63 +535,69 @@ internal static class Settings
         BlastCoverEffectMultiplier = config.Bind("6. Ordnance effects", "BlastCoverEffectMultiplier", 0.3f,
             new ConfigDescription("Outer-ring injury and suppression retained when terrain or a structure obstructs the blast.", new AcceptableValueRange<float>(0f, 1f)));
 
-        AircraftFlightPhysicsEnabled = config.Bind("6c. Aircraft flight physics", "Enabled", false,
-            "Adds energy loss, speed-dependent control authority, progressive stalls, aerodynamic damping, and damage-sensitive handling while preserving the native vehicle controller. Off by default; opt in if you want a heavier flight model. Applies to player-flown aircraft only; AI aircraft always fly the vanilla flight model.");
+        AircraftFlightPhysicsEnabled = config.Bind("6c. Aircraft flight physics", "Enabled", true,
+            "Keeps Easy Red 2's native Realistic aircraft model for lift, stalls, damage, and attitude while applying one coherent player-aircraft power and energy envelope: gravity wins in a vertical climb, glides retain momentum, and flight-path turns cost energy. Aircraft Speed, Engine Power, Aerodynamic Drag, and separate Pitch, Roll, and Rudder Authority controls are the only visible flight-model tuning. Direct controls and mouse aim feed the same native control-surface filter. Enabled by default for the locally controlled human aircraft offline and in multiplayer; AI aircraft remain native unless the separate experimental AI option is enabled, and remote-player aircraft always remain native.");
+        AircraftAiFlightModelExperimentalEnabled = config.Bind("6c. Aircraft flight physics", "ExperimentalAiFlightModel", false,
+            "<b>EXPERIMENTAL: May cause unforeseen issues, including AI planes crashing.</b> Applies this page's advanced flight-model tuning to AI-controlled aircraft while leaving their native mission and steering logic intact. Disabled by default. In multiplayer, only the authoritative host simulates it.");
         AircraftPhysicsApplyToOfflinePlayers = config.Bind("6c. Aircraft flight physics", "ApplyToPlayerAircraftOffline", true,
-            "Applies the flight model to player-controlled aircraft while the game is offline.");
+            "Legacy compatibility setting. The master Enabled control now applies consistently to the local human aircraft offline and multiplayer, so this hidden value no longer changes flight-model scope.");
         AircraftPhysicsApplyToMultiplayerPlayers = config.Bind("6c. Aircraft flight physics", "ApplyToPlayerAircraftMultiplayer", true,
-            "Experimental: applies the flight model to human-controlled aircraft on the multiplayer master client. Leave disabled until network synchronization has been tested with unmodified clients.");
+            "Legacy compatibility setting. Multiplayer flight now follows the master Enabled control and native ownership of the local human aircraft, so this hidden value no longer changes flight-model scope.");
+        AircraftMousePointAimingEnabled = config.Bind("6c. Aircraft flight physics", "MousePointAiming", true,
+            "Gives player-flown aircraft War Thunder-style point aiming in third-person view with mouse and keyboard: the camera commands a world direction and the aircraft banks and pitches toward it while separate camera and gun-direction circles show the alignment. Holding the vehicle-look action detaches the camera without changing the saved flight direction, and releasing it smoothly returns the view. This option never intercepts physical-controller input or first-person aircraft controls, and it works independently of the optional aircraft flight-physics model.");
+        AircraftFreeLookZoom = config.Bind("6c. Aircraft flight physics", "AircraftFreeLookZoom", 4f,
+            new ConfigDescription("Magnification applied in either first- or third-person aircraft view while both the vehicle-look action (C by default) and hold-breath action (Shift by default) are held. Both actions use Easy Red 2's configurable bindings. The default is 4x; bomb-sight views are unchanged.", new AcceptableValueRange<float>(0.5f, 10f)));
         // Bound after Enabled so the section's master switch keeps the Quick Setup slot, which
         // goes to the first primary bool in the section. This one works whether or not the flight
         // model is on, since it only restores input the game discards during freelook.
         AircraftFreeLookSteeringEnabled = config.Bind("6c. Aircraft flight physics", "FreeLookSteering", true,
             "When playing with a controller, puts pitch and roll on the left stick while the vehicle freelook button is held, instead of the aircraft being limited to rudder for as long as you look around. The freelook camera is always the right stick, so the left one is free to fly in either stick layout. Rudder yields for the duration of the hold when it shares that stick, and the throttle is held steady while you are actually pitching so the same stick cannot do both at once. Keyboard controls are never remapped by this option.");
-        AircraftAdvancedTuningEnabled = config.Bind("6c. Aircraft flight physics", "UseAdvancedConfigTuning", true,
-            "Uses the detailed aircraft values in the in-game Aircraft category. Leave disabled for the coherent built-in flight preset so detailed values cannot counteract one another accidentally.");
-        AircraftPhysicsStrength = config.Bind("6c. Aircraft flight physics", "RealismStrength", 1.128f,
-            new ConfigDescription("Overall strength of corrective aerodynamic forces and control-rate limits. Zero leaves only the native model; one applies the original built-in strength.", new AcceptableValueRange<float>(0f, 2f)));
-        AircraftWorldSpeedScale = config.Bind("6c. Aircraft flight physics", "WorldSpeedScale", 1.1f,
-            new ConfigDescription("Scales aircraft propulsion and the full flight-speed envelope. Lower this when aircraft cross the map too quickly for its apparent scale.", new AcceptableValueRange<float>(0.65f, 1.35f)));
+        AircraftAdvancedTuningEnabled = config.Bind("6c. Aircraft flight physics", "UseAdvancedConfigTuning", false,
+            "Legacy compatibility setting. The coherent flight model no longer layers hidden advanced gains over the direct aircraft controls.");
+        AircraftPhysicsStrength = config.Bind("6c. Aircraft flight physics", "RealismStrength", 1f,
+            new ConfigDescription("Legacy compatibility setting. The coherent flight model now runs at one consistent strength so this value no longer counteracts the direct aircraft controls.", new AcceptableValueRange<float>(0f, 2f)));
+        AircraftWorldSpeedScale = config.Bind("6c. Aircraft flight physics", "WorldSpeedScale", 0.714f,
+            new ConfigDescription("Scales the native maximum-speed and lift-speed envelope while preserving the stock flight implementation. Lower this when aircraft cross the map too quickly for its apparent scale.", new AcceptableValueRange<float>(0.65f, 1.35f)));
+        AircraftPitchAuthorityMultiplier = config.Bind("6c. Aircraft flight physics", "PitchAuthority", 1f,
+            new ConfigDescription("Scales actual elevator authority after the native control-surface filter. Easy Red 2's native airflow response remains responsible for speed-dependent handling; forward-stick nose-down authority remains 58% of pull-up authority.", new AcceptableValueRange<float>(0.25f, 2f)));
+        AircraftRollAuthorityMultiplier = config.Bind("6c. Aircraft flight physics", "RollAuthority", 1.225f,
+            new ConfigDescription("Scales actual roll authority after the native aileron filter, so it changes full-key and mouse-aim roll rate as well as partial commands. Fighters use a faster baseline than bombers, while Easy Red 2's native airflow response remains responsible for speed-dependent handling.", new AcceptableValueRange<float>(0.25f, 2f)));
+        AircraftRudderAuthorityMultiplier = config.Bind("6c. Aircraft flight physics", "RudderAuthority", 2f,
+            new ConfigDescription("Scales actual rudder authority after the native control-surface filter. The recommended 2x default is centered in the 0.25x-3.75x range. Full travel remains available at low and moderate speed. At high speed, increasing pedal force progressively caps large deflections without weakening fine alignment corrections.", new AcceptableValueRange<float>(0.25f, 3.75f)));
         AircraftFighterSpeedMultiplier = config.Bind("6c. Aircraft flight physics", "FighterSpeedMultiplier", 1f,
             new ConfigDescription("Additional speed-envelope multiplier for fighters.", new AcceptableValueRange<float>(0.75f, 1.25f)));
         AircraftBomberSpeedMultiplier = config.Bind("6c. Aircraft flight physics", "BomberSpeedMultiplier", 1f,
             new ConfigDescription("Additional speed-envelope multiplier for bombers.", new AcceptableValueRange<float>(0.75f, 1.25f)));
         AircraftControlResponseMultiplier = config.Bind("6c. Aircraft flight physics", "NativeControlResponseMultiplier", 0.771f,
-            new ConfigDescription("Multiplier applied once to the native control-response coefficient. Lower values make rotation less immediate.", new AcceptableValueRange<float>(0.45f, 1f)));
+            new ConfigDescription("Legacy compatibility setting. Control response now uses the coherent built-in value.", new AcceptableValueRange<float>(0.45f, 1f)));
         AircraftEngineResponseMultiplier = config.Bind("6c. Aircraft flight physics", "EngineResponseTimeMultiplier", 1.25f,
-            new ConfigDescription("Multiplier for the native zero-to-maximum-thrust response time.", new AcceptableValueRange<float>(1f, 2.5f)));
-        AircraftEnginePowerMultiplier = config.Bind("6c. Aircraft flight physics", "EnginePowerMultiplier", 3.669f,
-            new ConfigDescription("Multiplier for physically available propulsive power. Higher values improve acceleration, climb, and sustained-turn performance, while the propeller curve remains power-limited at speed and below aircraft weight at low speed.", new AcceptableValueRange<float>(0.5f, 4f)));
+            new ConfigDescription("Legacy compatibility setting. Rising and falling engine response now use coherent built-in curves.", new AcceptableValueRange<float>(1f, 2.5f)));
+        AircraftEnginePowerMultiplier = config.Bind("6c. Aircraft flight physics", "EnginePowerMultiplier", 4.87f,
+            new ConfigDescription("A 1-10 engine rating mapped to a bounded thrust-to-weight and propeller-power envelope. Higher ratings give stronger low-speed acceleration and climb, but thrust falls with airspeed and even rating 10 cannot hold the aircraft vertically against gravity. Native throttle response, engine damage, and shutdown remain in use.", new AcceptableValueRange<float>(1f, 10f)));
+        AircraftAerodynamicDragMultiplier = config.Bind("6c. Aircraft flight physics", "AerodynamicDrag", 1.423f,
+            new ConfigDescription("Scales both the low airborne coasting-drag baseline and the bounded energy cost of bending the flight path. A value of 1 retains glide and dive momentum while making sustained hard turns lose energy; lower values retain more energy and higher values lose more.", new AcceptableValueRange<float>(0.60f, 1.60f)));
         AircraftThrottleControlsEnginePower = config.Bind("6c. Aircraft flight physics", "ThrottleControlsEnginePower", true,
             "Treats throttle as an engine-power command instead of a target airspeed. Propulsive force remains available above the native throttle-proportional speed limit, while aerodynamic drag determines the resulting speed.");
         AircraftThrottleReductionResponseMultiplier = config.Bind("6c. Aircraft flight physics", "ThrottleReductionResponseMultiplier", 1.8f,
-            new ConfigDescription("Additional smoothing applied only when commanded thrust is decreasing. Higher values make power reduction and the transition into a glide less abrupt; engine shutdown and propeller loss bypass it.", new AcceptableValueRange<float>(1f, 4f)));
+            new ConfigDescription("Legacy compatibility setting. Native engine response now handles power reduction directly, so this hidden value no longer changes behavior.", new AcceptableValueRange<float>(1f, 4f)));
         AircraftEnergyLossMultiplier = config.Bind("6c. Aircraft flight physics", "ManeuverEnergyLossMultiplier", 0.976f,
-            new ConfigDescription("Scales parasite, induced, sideslip, landing-gear, and overspeed drag added by the flight model.", new AcceptableValueRange<float>(0f, 2f)));
+            new ConfigDescription("Legacy compatibility setting. Aerodynamic Drag now controls modeled energy losses without inheriting old extreme values.", new AcceptableValueRange<float>(0f, 2f)));
         AircraftEnergyRetentionEnabled = config.Bind("6c. Aircraft flight physics", "EnergyRetentionEnabled", true,
-            "Prevents the native controller from bleeding implausible amounts of total energy as soon as the throttle is reduced, while preserving configured maneuver, stall, gear, and damage drag.");
-        AircraftNativeCoastDragMultiplier = config.Bind("6c. Aircraft flight physics", "NativeCoastDragMultiplier", 0.525f,
-            new ConfigDescription("Multiplier for the native aircraft fall/coast drag. Lower values retain speed longer after reducing throttle; the realism model continues to supply aerodynamic drag.", new AcceptableValueRange<float>(0f, 1f)));
-        AircraftNativeVelocityLossMultiplier = config.Bind("6c. Aircraft flight physics", "NativeVelocityLossMultiplier", 0.488f,
-            new ConfigDescription("Fraction of the native per-tick velocity subtraction retained in addition to force-based aerodynamic drag. Zero removes the artificial speed rewrite; one restores the stock rewrite.", new AcceptableValueRange<float>(0f, 1f)));
-        AircraftGlideEnergyLossMultiplier = config.Bind("6c. Aircraft flight physics", "GlideEnergyLossMultiplier", 1.448f,
-            new ConfigDescription("Scales the permitted clean power-off glide energy loss. Lower values retain more speed and altitude; higher values produce a steeper glide.", new AcceptableValueRange<float>(0.25f, 2.5f)));
-        AircraftMaximumEnergyRetentionAcceleration = config.Bind("6c. Aircraft flight physics", "MaximumEnergyRetentionAcceleration", 3.364f,
-            new ConfigDescription("Maximum non-propulsive acceleration used to cancel excessive native energy loss after reducing throttle. It fades out near full throttle and is disabled during stalls, overspeed, and discontinuities.", new AcceptableValueRange<float>(0f, 12f)));
+            "Legacy compatibility setting. The coherent model keeps native velocity steering while explicit coasting and maneuver drag own speed loss, so this hidden value no longer changes behavior.");
         AircraftStallPhysicsEnabled = config.Bind("6c. Aircraft flight physics", "ProgressiveStalls", true,
-            "Reduces low-speed control authority and adds progressive drag, nose drop, and recoverable autorotation beyond the aircraft profile's critical angle of attack.");
+            "Legacy compatibility setting. Stalls are handled entirely by Easy Red 2's native Realistic flight model.");
         AircraftStallRecoveryPitchAuthority = config.Bind("6c. Aircraft flight physics", "StallRecoveryPitchAuthority", 0.741f,
-            new ConfigDescription("Minimum pitch authority retained in a developed stall so the nose can be unloaded for recovery.", new AcceptableValueRange<float>(0.35f, 1f)));
+            new ConfigDescription("Legacy compatibility setting. Developed-stall pitch recovery uses the coherent built-in reserve.", new AcceptableValueRange<float>(0.35f, 1f)));
         AircraftStallRecoveryRollAuthority = config.Bind("6c. Aircraft flight physics", "StallRecoveryRollAuthority", 0.801f,
-            new ConfigDescription("Minimum roll authority retained in a developed stall, including inverted-stall recovery.", new AcceptableValueRange<float>(0.40f, 1f)));
+            new ConfigDescription("Legacy compatibility setting. Developed-stall roll recovery uses the coherent built-in reserve.", new AcceptableValueRange<float>(0.40f, 1f)));
         AircraftStallNoseDropStrength = config.Bind("6c. Aircraft flight physics", "StallNoseDropStrength", 0.715f,
-            new ConfigDescription("Strength of the aerodynamic pitching moment that forces the nose toward the flight path during a developed stall, including inverted stalls.", new AcceptableValueRange<float>(0f, 2f)));
+            new ConfigDescription("Legacy compatibility setting. Forced stall nose-down torque has been removed.", new AcceptableValueRange<float>(0f, 2f)));
         AircraftSpinStrength = config.Bind("6c. Aircraft flight physics", "SpinStrength", 0.762f,
-            new ConfigDescription("Strength of coupled yaw and roll autorotation in a developed stall. Zero disables forced spin moments without disabling the rest of the stall model.", new AcceptableValueRange<float>(0f, 2f)));
+            new ConfigDescription("Legacy compatibility setting. Developed-spin yaw and roll use the coherent built-in strength.", new AcceptableValueRange<float>(0f, 2f)));
         AircraftSpinRecoverySpeedMultiplier = config.Bind("6c. Aircraft flight physics", "SpinRecoverySpeedMultiplier", 1.179f,
-            new ConfigDescription("Forward airspeed, as a multiple of stall speed, required before an unloaded aircraft can stop autorotating.", new AcceptableValueRange<float>(1.05f, 1.60f)));
+            new ConfigDescription("Legacy compatibility setting. Spin recovery uses the coherent built-in speed threshold.", new AcceptableValueRange<float>(1.05f, 1.60f)));
         AircraftDamagePhysicsEnabled = config.Bind("6c. Aircraft flight physics", "DamageAffectsHandling", true,
-            "Makes detached wings, tails, and propellers produce asymmetric lift, instability, drag, and power loss.");
+            "Legacy compatibility setting. Aircraft damage handling is controlled entirely by Easy Red 2's native flight model.");
         AircraftPhysicsTelemetryEnabled = config.Bind("6c. Aircraft flight physics", "TelemetryLogging", false,
             "Writes rate-limited aircraft speed, angle-of-attack, sideslip, control-authority, stall, damage, and altitude data to the BepInEx log.");
         AircraftPhysicsTelemetryInterval = config.Bind("6c. Aircraft flight physics", "TelemetryIntervalSeconds", 1f,
@@ -688,6 +702,13 @@ internal static class Settings
             new ConfigDescription("Approximate continuous standing aim time before unsupported aiming becomes fatigued. Crouching lasts longer and prone aiming is supported.", new AcceptableValueRange<float>(2f, 12f)));
         HoldBreathZoomMultiplier = config.Bind("7e. First-person view", "HoldBreathZoomMultiplier", 1.646f,
             new ConfigDescription("Strength of the extra first-person zoom while the hold-breath input is active (Shift by default). One preserves the base game, values above one zoom farther in, and values below one zoom less.", new AcceptableValueRange<float>(0.5f, 2f)));
+        DirectTurretAimingEnabled = config.Bind("7g. Vehicle aiming", "DirectTurretAimingEnabled", true,
+            "Enables the custom player controls for selected ground-vehicle turrets and direct-fire static weapons. Third-person view uses War Thunder-style point aiming: the mouse or stick independently moves the leveled camera while the weapon follows its center-screen direction at the native traverse and elevation rates. Exterior camera and bore sight lines remain parallel so a level camera does not introduce artificial gun elevation. Native damage slowdown, movement limits, adjustable zeroing, firing, AI control, and synchronization remain in use.");
+        UnstabilizedGunsightEnabled = config.Bind("7g. Vehicle aiming", "UnstabilizedGunsightEnabled", true,
+            "While using the right-click optical gunsight, directly moves the selected weapon with relative mouse or stick input and attaches the view to the physical gun. This removes the artificial vertical stabilization that otherwise makes the gun chase a world aim point while the vehicle moves. Disable this option to keep the native stabilized point-aim behavior inside the gunsight. Third-person aiming is unchanged.");
+        OpticsZoom = config.Bind("7g. Vehicle aiming", "OpticsZoom", 1.646f,
+            new ConfigDescription("Strength of the extra zoom while the hold-breath input is active in tank and static-weapon gunsights. One matches the base game's infantry hold-breath zoom. Third-person vehicle view is unchanged.", new AcceptableValueRange<float>(0.5f, 2f)));
+        ThirdPersonZoom = BindThirdPersonZoom(config);
         BinocularsEnabled = config.Bind("7e. First-person view", "BinocularsEnabled", true,
             "Enables first-person binoculars while alive and on foot.");
         BinocularsKey = config.Bind("7e. First-person view", "BinocularsKey", KeyCode.CapsLock,
@@ -717,8 +738,10 @@ internal static class Settings
             "Shows restrained names for nearby AI squadmates near the center of the view when immersive world markers are hidden.");
         ContextualSquadNameRangeMeters = config.Bind("7f. Multiplayer nameplates", "ContextualSquadNameRangeMeters", 25f,
             new ConfigDescription("Maximum range for contextual AI squadmate names.", new AcceptableValueRange<float>(10f, 75f)));
+        HidePlayerNamesInSameVehicle = config.Bind("7f. Multiplayer nameplates", "HidePlayerNamesInSameVehicle", true,
+            "Hides AI squadmate and allied multiplayer player names in first- and third-person views only while they occupy the same vehicle as the local player. Names return as soon as either soldier leaves; world and tactical-map marker icons are unchanged.");
         LeaveSquadRedeployEnabled = config.Bind("7f. Multiplayer nameplates", "LeaveSquadRedeployEnabled", true,
-            "Adds a native-canvas leave-squad and redeploy action while dead on the multiplayer squad-selection screen.");
+            "Adds a Change Squad button while dead on the squad-selection screen, returning to deployment to choose a new squad.");
 
         KeepHighQualityDistantAnimations = config.Bind("7h. Animation quality", "KeepHighQualityDistantAnimations", true,
             "Keeps visible distant soldiers at the full animation refresh rate instead of using distance-based animation throttling. This can reduce performance in large battles.");
@@ -785,6 +808,46 @@ internal static class Settings
             legacyDefault,
             new ConfigDescription("Legacy melee reach extension; migrated to the longer forward-reach setting."));
         if (!currentExists && MathF.Abs(legacy.Value - legacyDefault) > 0.0001f)
+            current.Value = legacy.Value;
+
+        config.Remove(legacyDefinition);
+        config.Save();
+        return current;
+    }
+
+    private static ConfigEntry<float> BindThirdPersonZoom(ConfigFile config)
+    {
+        const string section = "7j. Third-person view";
+        const string legacySection = "7g. Vehicle aiming";
+        const string key = "ThirdPersonZoom";
+        const float defaultValue = 1.646f;
+
+        var legacyExists = ConfigFileContainsSetting(
+            config.ConfigFilePath,
+            legacySection,
+            key);
+        var currentExists = ConfigFileContainsSetting(
+            config.ConfigFilePath,
+            section,
+            key);
+        var current = config.Bind(
+            section,
+            key,
+            defaultValue,
+            new ConfigDescription(
+                "Magnification applied while infantry aim in third-person view. One preserves the base game, values above one zoom farther in, and values below one zoom less. Vehicle third-person cameras are unchanged.",
+                new AcceptableValueRange<float>(0.5f, 10f)));
+
+        if (!legacyExists)
+            return current;
+
+        var legacyDefinition = new ConfigDefinition(legacySection, key);
+        var legacy = config.Bind(
+            legacyDefinition,
+            defaultValue,
+            new ConfigDescription(
+                "Legacy vehicle-section entry; migrated to infantry third-person view."));
+        if (!currentExists)
             current.Value = legacy.Value;
 
         config.Remove(legacyDefinition);
