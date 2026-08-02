@@ -31,6 +31,8 @@ internal static class AircraftCameraScenarios
                 ForwardHemisphereAllowsEveryVisibleScreenEdgeAndCorner),
             (nameof(ForwardHemispherePreventsRearwardAimAndSaturatesSmoothly),
                 ForwardHemispherePreventsRearwardAimAndSaturatesSmoothly),
+            (nameof(RearCameraOrbitDoesNotMoveTheHeldFlightCommand),
+                RearCameraOrbitDoesNotMoveTheHeldFlightCommand),
             (nameof(ForwardHemisphereTravelsWithTheAircraftThroughACompleteLoop),
                 ForwardHemisphereTravelsWithTheAircraftThroughACompleteLoop),
             (nameof(PointAimCameraSmoothlyFollowsWithoutSnappingTheCircle),
@@ -539,6 +541,94 @@ internal static class AircraftCameraScenarios
             "Saturated outward input retained false instructor feed-forward.");
     }
 
+    private static void RearCameraOrbitDoesNotMoveTheHeldFlightCommand()
+    {
+        var limit = AircraftCameraCore.MaximumPointAimConeRadians;
+        var state = AircraftCameraCore.Initialize(
+            211,
+            Quaternion.Identity,
+            Vector3.UnitY);
+
+        state = AircraftCameraCore.UpdatePointAim(
+            state,
+            0f,
+            100f * DegreesToRadians);
+        state = AircraftCameraCore.ConstrainPointAimToAircraftCone(
+            state,
+            Vector3.UnitZ,
+            Vector3.UnitY,
+            limit);
+        var heldFlightCommand = state.Aim.Direction;
+
+        True(state.CameraTarget.IsOutsideFlightCone,
+            "Crossing behind the forward hemisphere did not detach camera orbit from flight aim.");
+        Near(limit,
+            DirectionAngle(Vector3.UnitZ, heldFlightCommand),
+            0.00001f,
+            "Flight aim did not stop at the legal forward boundary.");
+
+        state = AircraftCameraCore.UpdatePointAim(
+            state,
+            0f,
+            100f * DegreesToRadians);
+        state = AircraftCameraCore.ConstrainPointAimToAircraftCone(
+            state,
+            Vector3.UnitZ,
+            Vector3.UnitY,
+            limit);
+
+        Near(heldFlightCommand, state.Aim.Direction, 0.00001f,
+            "Mouse movement around the rear hemisphere changed the flight command.");
+        Near(160f * DegreesToRadians,
+            DirectionAngle(Vector3.UnitZ, state.CameraTarget.Direction),
+            0.0001f,
+            "The unrestricted camera target stopped at the old forward-hemisphere wall.");
+
+        for (var frame = 0; frame < 240; frame++)
+        {
+            state = AircraftCameraCore.UpdateHorizonChase(
+                state,
+                state.CameraTarget.Direction,
+                Vector3.UnitY,
+                1f / 60f);
+        }
+
+        Near(state.CameraTarget.Direction, state.Chase.Forward, 0.001f,
+            "The rendered chase camera did not follow the rearward camera target.");
+        Near(heldFlightCommand, state.Aim.Direction, 0.00001f,
+            "Camera pursuit of a rearward target leaked into flight guidance.");
+
+        // Turning the aircraft must not reconnect the rear camera on its own.
+        var turnedForward = Vector3.Transform(
+            Vector3.UnitZ,
+            Quaternion.CreateFromAxisAngle(
+                Vector3.UnitY,
+                140f * DegreesToRadians));
+        state = AircraftCameraCore.ConstrainPointAimToAircraftCone(
+            state,
+            turnedForward,
+            Vector3.UnitY,
+            limit);
+        Near(heldFlightCommand, state.Aim.Direction, 0.00001f,
+            "Aircraft rotation reconnected the rear camera without fresh mouse input.");
+
+        // Fresh input that returns the view to the now-forward hemisphere may
+        // deliberately reconnect it to flight control.
+        state = AircraftCameraCore.UpdatePointAim(
+            state,
+            0f,
+            -80f * DegreesToRadians);
+        state = AircraftCameraCore.ConstrainPointAimToAircraftCone(
+            state,
+            turnedForward,
+            Vector3.UnitY,
+            limit);
+        False(state.CameraTarget.IsOutsideFlightCone,
+            "Returning the camera to the forward hemisphere did not reconnect flight aim.");
+        Near(state.CameraTarget.Direction, state.Aim.Direction, 0.00001f,
+            "Reconnected flight aim did not adopt the legal camera target.");
+    }
+
     private static void ForwardHemisphereTravelsWithTheAircraftThroughACompleteLoop()
     {
         var limit = AircraftCameraCore.MaximumPointAimConeRadians;
@@ -1015,6 +1105,11 @@ internal static class AircraftCameraScenarios
                 Aim = state.Aim with
                 {
                     Orientation = aimRotation
+                },
+                CameraTarget = state.CameraTarget with
+                {
+                    Orientation = aimRotation,
+                    HasPendingMouseUpdate = true
                 }
             };
             state = AircraftCameraCore.ConstrainPointAimToAircraftCone(

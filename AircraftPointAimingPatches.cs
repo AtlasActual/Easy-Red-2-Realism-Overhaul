@@ -61,7 +61,8 @@ internal static class AircraftMousePointAiming
     /// <summary>
     /// Strict active-ownership gate. Input can consume camera state only after
     /// the third-person camera has explicitly acquired and seeded that state.
-    /// Aircraft activity/stall flags do not revoke established ownership.
+    /// Aircraft activity/stall flags do not revoke established ownership. The
+    /// selected native control scheme does: Simplified always remains native.
     /// </summary>
     internal static bool TryGetPlayerPlane(
         PlayerController? controller,
@@ -295,10 +296,10 @@ internal static class AircraftMousePointAiming
             if (_cameraOwnershipMode == CameraOwnershipMode.ThirdPersonOwned &&
                 _cameraStateInitialized)
             {
-                // Once acquired, transient driver-alive or native
-                // realistic-control false negatives must not hand one frame
-                // back to the stock chase camera. Release only when the real
-                // owner, vehicle, view mode, setting, or input device changes.
+                // Once acquired, transient driver-alive/activity changes must
+                // not hand one frame back to the stock chase camera. The saved
+                // control selection is stable and deliberately remains part of
+                // this gate so switching to Simplified releases ownership.
                 if (!TryGetStablePlayerPlane(controller, out plane) ||
                     plane.GetInstanceID() != _planeId)
                 {
@@ -387,9 +388,9 @@ internal static class AircraftMousePointAiming
                         AircraftCameraCore.ReleaseFreeLook(_cameraState);
                 }
 
-                // The command may use the whole forward travel hemisphere.
-                // Reapply after freelook because the aircraft may have turned
-                // while its world-space aim direction was held.
+                // Keep the flight command in its forward travel hemisphere.
+                // The separately stored camera target remains unrestricted,
+                // including while the player orbits behind the aircraft.
                 ConstrainPointAimToPlane(plane);
                 var aimInputActive =
                     _lastAimInputFrame >= 0 &&
@@ -403,7 +404,7 @@ internal static class AircraftMousePointAiming
                         deltaTime);
                 _cameraState = AircraftCameraCore.UpdateHorizonChase(
                     _cameraState,
-                    _cameraState.Aim.Direction,
+                    _cameraState.CameraTarget.Direction,
                     System.Numerics.Vector3.UnitY,
                     deltaTime,
                     _forwardFollowSharpness,
@@ -452,7 +453,11 @@ internal static class AircraftMousePointAiming
         direction =
             _cameraOwnershipMode == CameraOwnershipMode.ThirdPersonOwned &&
             _cameraStateInitialized
-            ? ToUnity(_cameraState.Aim.Direction)
+            ? ToUnity(
+                _cameraState.FreeLook.IsActive ||
+                _cameraState.Return.IsActive
+                    ? _cameraState.Aim.Direction
+                    : _cameraState.CameraTarget.Direction)
             : Vector3.zero;
         return _planeId != int.MinValue &&
                direction.sqrMagnitude > 0.000001f;
@@ -727,8 +732,7 @@ internal static class AircraftMousePointAiming
         if (!TryGetStablePlayerPlane(controller, out plane))
             return false;
 
-        return plane.HasDriverAlive &&
-               plane.PlayerIsDrivingWithRealisticControls();
+        return plane.HasDriverAlive;
     }
 
     private static bool TryGetStablePlayerPlane(
@@ -739,6 +743,7 @@ internal static class AircraftMousePointAiming
         if (!Settings.AircraftMousePointAimingEnabled.Value ||
             controller == null ||
             controller != PlayerController.currentController ||
+            !AircraftControlSelection.IsRealisticSelected() ||
             IsPhysicalControllerAssigned() ||
             controller.ControlledVehicle is not VehiclePlane controlledPlane)
         {

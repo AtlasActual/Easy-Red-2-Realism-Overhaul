@@ -2154,6 +2154,115 @@ internal static class AircraftFreeLookSteering
     }
 }
 
+internal static class AircraftControlSelection
+{
+    internal static bool IsSimplifiedSelected()
+    {
+        try
+        {
+            var controls = SavableData.Settings?.controls;
+            return controls != null && controls.simplifiedPlaneControls;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    internal static bool IsRealisticSelected()
+    {
+        try
+        {
+            var controls = SavableData.Settings?.controls;
+            return controls != null && !controls.simplifiedPlaneControls;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+}
+
+/// <summary>
+/// Adds the player's configured axial-roll keys to the native Simplified
+/// attitude solver. GetFixedTargetRotation calculates its automatic bank in
+/// rollAngle immediately before FixedUpdate consumes it, so replacing that one
+/// value while a key is held preserves native mouse guidance and auto-leveling.
+/// </summary>
+internal static class AircraftSimplifiedManualRoll
+{
+    private const float ManualBankDegrees = 65f;
+    private const float InputDeadZone = 0.01f;
+    private static bool _loggedFailure;
+
+    internal static void Apply(VehiclePlane plane)
+    {
+        if (!Settings.AircraftSimplifiedManualRollEnabled.Value)
+            return;
+
+        try
+        {
+            var controller = PlayerController.currentController;
+            if (plane == null ||
+                controller == null ||
+                controller.ControlledVehicle?.GetInstanceID() !=
+                    plane.GetInstanceID() ||
+                !AircraftControlSelection.IsSimplifiedSelected())
+            {
+                return;
+            }
+
+            var input = GamepadsAPI.GetGamepad(0);
+            if (input == null || input.IsGamepad)
+                return;
+
+            var roll = 0f;
+            if (input.GetButton(
+                    GameInput.realisticPlane_roll,
+                    StickPressCondition.StickCentered))
+            {
+                roll += 1f;
+            }
+
+            if (input.GetButton(
+                    GameInput.realisticPlane_rollNegative,
+                    StickPressCondition.StickCentered))
+            {
+                roll -= 1f;
+            }
+
+            if (Mathf.Abs(roll) <= InputDeadZone)
+                return;
+
+            // Native FixedUpdate negates rollAngle before applying its local-Z
+            // bank, so positive remains right roll and negative remains left.
+            // On release this override stops and the native Simplified solver
+            // immediately resumes its own coordinated-bank/auto-level target.
+            plane.rollAngle = Mathf.Clamp(roll, -1f, 1f) *
+                              ManualBankDegrees;
+        }
+        catch (Exception ex)
+        {
+            if (_loggedFailure)
+                return;
+
+            _loggedFailure = true;
+            Plugin.LogSource.LogWarning(
+                $"Simplified aircraft manual roll disabled after an input failure: {ex.Message}");
+        }
+    }
+}
+
+[HarmonyPatch(
+    typeof(VehiclePlane),
+    nameof(VehiclePlane.GetFixedTargetRotation))]
+internal static class AircraftSimplifiedManualRollPatch
+{
+    [HarmonyPostfix]
+    private static void Postfix(VehiclePlane __instance)
+        => AircraftSimplifiedManualRoll.Apply(__instance);
+}
+
 [HarmonyPatch(
     typeof(VehiclePlane),
     nameof(VehiclePlane.RotateRealisticJoystick))]

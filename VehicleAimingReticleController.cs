@@ -49,7 +49,8 @@ internal sealed class VehicleAimingReticleController : MonoBehaviour
                     out _,
                     out var turret))
             {
-                if (controller.IsAiming)
+                if (controller.IsAiming ||
+                    !Settings.GroundVehicleAimRingsEnabled.Value)
                     return;
 
                 var fireTransform = turret.GetFirePosTransform();

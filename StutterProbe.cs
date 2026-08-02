@@ -15,7 +15,7 @@ namespace ER2RealismOverhaul;
 internal enum ModTimeSite
 {
     TacticalMove,        // MoveOptimized/MoveFPSOptimized prefix+postfix pipeline
-    FightingPose,        // GetFavouriteFightingPose postfix
+    FightingPose,        // reserved final stationary-pose boundary bucket
     SequentialUpdate,    // SoldierAI sequential update pre/postfix (director pipeline)
     IncomingFire,        // per-FixedUpdate incoming-fire/suppression patches
     SuppressiveFire,     // KnownTargetSuppressiveFire FixedUpdate postfix

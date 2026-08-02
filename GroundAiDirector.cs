@@ -207,11 +207,11 @@ internal static class GroundAiDirector
         var ai = soldier.aiController;
         if (ai == null)
             return;
-        // Fire PERMISSION belongs to the arbiter (rank b reads ExposedReloadProneOwned);
+        // Fire PERMISSION belongs to the arbiter (rank b reads ExposedReloadSafetyOwned);
         // the halt only kills the shot already in flight.
         ContactResponse.ExecuteStopFire(soldier);
-        // Declared, because the crawling-action caller halts a soldier who has no
-        // ExposedReloadProneOwned ownership for the arbiter to resolve from.
+        // Declared because the moving-prone action restriction can halt a soldier who
+        // has no ExposedReloadSafetyOwned fire ownership for the arbiter to resolve.
         ContactResponse.StopDangerMovement(
             ai, soldier, Time.deltaTime, "required-action-halt",
             MovementOwner.SafetyHalt);
@@ -325,7 +325,13 @@ internal static class GroundAiDirector
         // Perception and the squad-change cleanup above are cheap and time-sensitive, so
         // they always run; only the heavy tail is budgeted.
         if (!TryTakeDirectorBudget())
+        {
+            // Native SequentialUpdate has already run and may have overwritten actualPose.
+            // Even when the expensive tactical tail is deferred, reassert the cached pose
+            // authority so a synchronized update wave cannot visibly flip whole squads.
+            ContactResponse.MaintainOwnedPose(ai, soldier, now, resolvePose: false);
             return;
+        }
 
         ExclusiveCoverAssignmentPatch.MaintainOccupiedCoverClaim(soldier, now);
 
@@ -376,7 +382,8 @@ internal static class GroundAiDirector
                 ai,
                 soldier,
                 releaseDefensiveAnchor:
-                    movementSource is ProposalSource.External or ProposalSource.ProtectedAssignment);
+                    movementSource is ProposalSource.External or ProposalSource.ProtectedAssignment or
+                        ProposalSource.VehicleBoarding);
 
         ModTimeProbe.Stage(SequentialStage.DirectorHazard);
         if (movementSource == ProposalSource.Hazard)
@@ -399,8 +406,8 @@ internal static class GroundAiDirector
         ContactResponse.MaintainOwnedPose(ai, soldier, now);
         InfantryAntiArmorFireDiscipline.Update(ai, soldier);
         HandheldWeaponClassifier.EnforceEngagementRange(soldier, ai);
-        // Last word on the fire channel each authoritative tick, exactly as
-        // MaintainOwnedPose is the last word on the pose channel.
+        // Last word on the fire channel each authoritative tick. MaintainOwnedPose
+        // prepares the pose channel; the Soldier.StopMove boundary enforces it.
         ContactResponse.ApplyFireDecision(ai, soldier, now, authoritative: true);
 
         if (Settings.BattleChatterEnabled.Value)
@@ -453,6 +460,7 @@ internal static class GroundAiDirector
             scriptOwned = string.Equals(externalLease.Owner, ScriptOwner, StringComparison.Ordinal);
         }
         var lethalHazard = SoldierFireDanger.TrySense(soldier, Time.time, out var escape);
+        var mounted = soldier.IsOnVehicle();
         return new SoldierTacticalSnapshot(
             soldier.GetInstanceID(),
             squad == null ? 0 : SquadIdentity.GetSquadId(squad),
@@ -461,7 +469,7 @@ internal static class GroundAiDirector
             playerLed,
             scriptOwned,
             soldier.IsAlive,
-            soldier.IsOnVehicle(),
+            mounted,
             soldier.GetSuppressionValue() >= AiBehaviorTuning.CrouchSuppressionThreshold,
             soldier.IsReloading,
             lethalHazard,
@@ -471,7 +479,29 @@ internal static class GroundAiDirector
             ContactResponse.SenseMovement(ai, soldier, Time.time),
             AiOwnership.IsAutonomous(soldier),
             ContactResponse.TryGetPlayerHoldOrder(soldier, out _, out _),
-            HasProtectedInfantryAssignment(soldier));
+            HasProtectedInfantryAssignment(soldier),
+            HasNativeVehicleBoardingOrder(soldier, mounted));
+    }
+
+    private static bool HasNativeVehicleBoardingOrder(Soldier soldier, bool mounted)
+    {
+        if (mounted || !soldier.HasDestinationAssigned)
+            return false;
+
+        try
+        {
+            var vehicle = soldier.VehicleToOperate();
+            return !ReferenceEquals(vehicle, null) && vehicle != null &&
+                   !vehicle.WasCollected && vehicle.Pointer != IntPtr.Zero;
+        }
+        catch (Il2CppInterop.Runtime.ObjectCollectedException)
+        {
+            return false;
+        }
+        catch (Il2CppInterop.Runtime.Il2CppException)
+        {
+            return false;
+        }
     }
 
     private static void CollectProposals(

@@ -9,7 +9,8 @@ internal static class CoverOccupancy
     // Cover props and terrain colliders share this all-layer non-alloc query with
     // soldiers. A small buffer can fill with geometry before the occupying soldier
     // is returned, making a genuinely occupied slot appear empty.
-    private const int NearbyColliderCapacity = 96;
+    private const int NearbyColliderCapacity = 512;
+    private const float VerticalQueryHalfHeightMeters = 3f;
 
     [ThreadStatic]
     private static Collider[]? _nearbyColliders;
@@ -20,13 +21,7 @@ internal static class CoverOccupancy
         try
         {
             var radius = InfantryCoverPolicy.OccupancyRadiusMeters;
-            var nearby = _nearbyColliders ??= new Collider[NearbyColliderCapacity];
-            var count = Physics.OverlapSphereNonAlloc(
-                coverPosition,
-                radius,
-                nearby,
-                Physics.AllLayers,
-                QueryTriggerInteraction.Ignore);
+            var nearby = GetNearbyColliders(coverPosition, radius, out var count);
             for (var index = 0; index < count; index++)
             {
                 var collider = nearby[index];
@@ -38,7 +33,7 @@ internal static class CoverOccupancy
                     !other.IsAlive || other.IsOnVehicle() || !other.gameObject.activeInHierarchy)
                     continue;
 
-                if ((other.transform.position - coverPosition).sqrMagnitude <= radius * radius)
+                if (HorizontalDistanceSqr(other.transform.position, coverPosition) <= radius * radius)
                     return true;
             }
 
@@ -51,13 +46,12 @@ internal static class CoverOccupancy
     }
 
     /// <summary>
-    /// Nearest already-halted friendly within <paramref name="radius"/> (plan 018 item 3).
-    /// Only an ALREADY-HALTED neighbour makes a doorway stack - two men walking the same
-    /// path are not crowding anything yet - so the movement arbiter's own MovementHalted
-    /// output is the filter. Same bounded overlap query as the occupancy check above, and
-    /// it runs only on the rising edge of a fighting halt behind a long cooldown.
+    /// Nearest friendly within <paramref name="radius"/> when this soldier enters a
+    /// fighting halt (plan 018 item 3). A whole squad can reach the same stop on one frame,
+    /// before any neighbour has committed its halt output, so spatial crowding is the fact
+    /// that matters here. The caller invokes this only once per halt episode.
     /// </summary>
-    internal static bool TryFindHaltedNeighbour(
+    internal static bool TryFindCrowdedFriendly(
         Vector3 position,
         Soldier soldier,
         float radius,
@@ -67,13 +61,7 @@ internal static class CoverOccupancy
         var __t = ModTimeProbe.Begin();
         try
         {
-            var nearby = _nearbyColliders ??= new Collider[NearbyColliderCapacity];
-            var count = Physics.OverlapSphereNonAlloc(
-                position,
-                radius,
-                nearby,
-                Physics.AllLayers,
-                QueryTriggerInteraction.Ignore);
+            var nearby = GetNearbyColliders(position, radius, out var count);
             var nearestSqr = radius * radius;
             var found = false;
             for (var index = 0; index < count; index++)
@@ -91,15 +79,8 @@ internal static class CoverOccupancy
                     continue;
                 }
 
-                if (!AiState.ContactStates.TryGetValue(
-                        other.GetInstanceID(), out var otherState) ||
-                    !otherState.MovementHalted)
-                {
-                    continue;
-                }
-
                 var otherPosition = other.transform.position;
-                var distanceSqr = (otherPosition - position).sqrMagnitude;
+                var distanceSqr = HorizontalDistanceSqr(otherPosition, position);
                 if (distanceSqr > nearestSqr)
                     continue;
 
@@ -114,6 +95,44 @@ internal static class CoverOccupancy
         {
             ModTimeProbe.EndSub(ModSubSite.Occupancy, __t);
         }
+    }
+
+    private static Collider[] GetNearbyColliders(
+        Vector3 position,
+        float radius,
+        out int count)
+    {
+        var reusable = _nearbyColliders ??= new Collider[NearbyColliderCapacity];
+        var lower = position + Vector3.down * VerticalQueryHalfHeightMeters;
+        var upper = position + Vector3.up * VerticalQueryHalfHeightMeters;
+        count = Physics.OverlapCapsuleNonAlloc(
+            lower,
+            upper,
+            radius,
+            reusable,
+            Physics.AllLayers,
+            QueryTriggerInteraction.Collide);
+        if (count < reusable.Length)
+            return reusable;
+
+        // Saturation is rare, but treating a full geometry-heavy query as empty is
+        // exactly how an occupied trench slot becomes available to a second soldier.
+        // Pay for one complete query only in that exceptional case.
+        var complete = Physics.OverlapCapsule(
+            lower,
+            upper,
+            radius,
+            Physics.AllLayers,
+            QueryTriggerInteraction.Collide);
+        count = complete.Length;
+        return complete;
+    }
+
+    private static float HorizontalDistanceSqr(Vector3 first, Vector3 second)
+    {
+        var deltaX = first.x - second.x;
+        var deltaZ = first.z - second.z;
+        return deltaX * deltaX + deltaZ * deltaZ;
     }
 }
 
@@ -203,8 +222,6 @@ internal static partial class ContactResponse
     // posture raycasting.
     private const float CoverPostureCacheSeconds = 4f;
 
-    private const float CoverPostureDirectionDotTolerance = 0.9f;
-
     private const float MovingBodyHeight = 0.9f;
 
     private const float ThreatEndpointTolerance = 1.25f;
@@ -238,7 +255,8 @@ internal static partial class ContactResponse
 
     private readonly record struct CurrentCoverEvaluation(
         bool IsProtective,
-        SoldierPose Pose);
+        SoldierPose Pose,
+        CoverPositionQuality Quality);
 
     private static IntPtr CurrentCoverId(Soldier soldier)
     {
@@ -318,43 +336,80 @@ internal static partial class ContactResponse
         if (state.LastUsableCoverFrame == frame)
             return state.UsableCoverCached;
 
-        var result = EvaluateUsableCover(soldier);
+        var result = EvaluateUsableCover(soldier, state);
         state.LastUsableCoverFrame = frame;
         state.UsableCoverCached = result;
         return result;
     }
 
-    private static bool EvaluateUsableCover(Soldier soldier)
+    private static bool EvaluateUsableCover(Soldier soldier, ContactResponseState state)
     {
-        if (!soldier.IsOnCover())
-            return false;
+        var nativeOnCover = soldier.IsOnCover();
+        var hasStableAnchor = TryGetStableCoverAnchor(
+            state, out var anchorPosition, out _);
+        var anchorDistance = hasStableAnchor
+            ? HorizontalDistance(soldier.transform.position, anchorPosition)
+            : float.PositiveInfinity;
 
         try
         {
             var cover = soldier.targetDestination;
-            if (cover == null || cover.WasCollected || cover.Pointer == IntPtr.Zero ||
-                cover.IsCoverDestroyed() || cover.IsUnsafeCover())
+            if (cover == null || cover.WasCollected || cover.Pointer == IntPtr.Zero)
             {
-                return false;
+                return nativeOnCover || StableCoverInteropCore.CanUseAnchor(
+                    hasStableAnchor, anchorDistance, destinationKnownInvalid: false);
             }
+
+            var destinationKnownInvalid = cover.IsCoverDestroyed() || cover.IsUnsafeCover();
+            if (destinationKnownInvalid)
+                return false;
 
             // IsCoverAvailable also rejects an occupied slot, including the
             // soldier's own reached cover, so it must not be used as an occupancy-
             // time facing test here. Threat direction is enforced when selecting it.
-            return true;
+            return nativeOnCover || StableCoverInteropCore.CanUseAnchor(
+                hasStableAnchor, anchorDistance, destinationKnownInvalid: false);
         }
         catch (NullReferenceException)
         {
-            return false;
+            return nativeOnCover || StableCoverInteropCore.CanUseAnchor(
+                hasStableAnchor, anchorDistance, destinationKnownInvalid: false);
         }
         catch (Il2CppException)
         {
-            return false;
+            return nativeOnCover || StableCoverInteropCore.CanUseAnchor(
+                hasStableAnchor, anchorDistance, destinationKnownInvalid: false);
         }
         catch (ObjectCollectedException)
         {
-            return false;
+            return nativeOnCover || StableCoverInteropCore.CanUseAnchor(
+                hasStableAnchor, anchorDistance, destinationKnownInvalid: false);
         }
+    }
+
+    private static bool TryGetStableCoverAnchor(
+        ContactResponseState state,
+        out Vector3 anchorPosition,
+        out IntPtr anchorId)
+    {
+        if (state.DefensiveCoverHold && state.HasDefensiveCoverAnchor &&
+            state.DefensiveCoverAnchorId != IntPtr.Zero)
+        {
+            anchorPosition = state.DefensiveCoverAnchorPosition;
+            anchorId = state.DefensiveCoverAnchorId;
+            return true;
+        }
+
+        if (state.ManeuverCoverAnchorId != IntPtr.Zero)
+        {
+            anchorPosition = state.ManeuverCoverAnchorPosition;
+            anchorId = state.ManeuverCoverAnchorId;
+            return true;
+        }
+
+        anchorPosition = default;
+        anchorId = IntPtr.Zero;
+        return false;
     }
 
     private static bool IsCurrentCoverProtective(
@@ -383,13 +438,13 @@ internal static partial class ContactResponse
         if (!IsOnUsableCover(soldier))
             return false;
 
+        var soldierPosition = default(Vector3);
+        var stableAxis = default(Vector3);
+        var hasPositionAndAxis = false;
+        var nativeOnCover = false;
         try
         {
-            var cover = soldier.targetDestination;
-            if (cover == null || cover.WasCollected || cover.Pointer == IntPtr.Zero)
-                return false;
-
-            var soldierPosition = soldier.transform.position;
+            soldierPosition = soldier.transform.position;
             var toThreat = threatPosition - soldierPosition;
             toThreat.y = 0f;
             var threatDistance = toThreat.magnitude;
@@ -414,11 +469,20 @@ internal static partial class ContactResponse
                 axisResult.State.PendingAxis.X, 0f, axisResult.State.PendingAxis.Z);
             state.PostureThreatPendingSince = axisResult.State.PendingSince;
 
-            var stableAxis = state.PostureThreatAxis;
+            stableAxis = state.PostureThreatAxis;
             // Before the stable axis is first established, fall back to the raw bearing.
             if (stableAxis.sqrMagnitude < 0.5f)
                 stableAxis = observedAxis;
+            hasPositionAndAxis = true;
             var stableThreatPosition = soldierPosition + stableAxis * threatDistance;
+
+            nativeOnCover = soldier.IsOnCover();
+            var cover = soldier.targetDestination;
+            if (cover == null || cover.WasCollected || cover.Pointer == IntPtr.Zero)
+            {
+                return TryReuseCachedCoverEvaluation(
+                    state, soldierPosition, stableAxis, nativeOnCover, out evaluation);
+            }
 
             // A material rotation of the stable axis forces a fresh evaluation; a small
             // drift keeps the cached one, which is what reduces posture raycasting.
@@ -428,12 +492,11 @@ internal static partial class ContactResponse
                                state.EvaluatedCoverThreatDirection.sqrMagnitude > 0.5f &&
                                Vector3.Dot(
                                    state.EvaluatedCoverThreatDirection,
-                                   stableAxis) >= CoverPostureDirectionDotTolerance;
+                                   stableAxis) >=
+                               StableCoverPostureCore.ThreatDirectionDotTolerance;
             if (cacheMatches)
             {
-                evaluation = new CurrentCoverEvaluation(
-                    state.EvaluatedCoverIsProtective,
-                    state.EvaluatedCoverPosture);
+                evaluation = CachedCoverEvaluation(state);
                 return true;
             }
 
@@ -460,11 +523,12 @@ internal static partial class ContactResponse
             // frame once a slot frees.
             if (!TryBeginPostureEvaluation())
             {
-                if (hasStaleCachedEvaluation)
+                if (hasStaleCachedEvaluation ||
+                    TryReuseCachedCoverEvaluation(
+                        state, soldierPosition, stableAxis, nativeOnCover, out evaluation))
                 {
-                    evaluation = new CurrentCoverEvaluation(
-                        state.EvaluatedCoverIsProtective,
-                        state.EvaluatedCoverPosture);
+                    if (hasStaleCachedEvaluation)
+                        evaluation = CachedCoverEvaluation(state);
                     return true;
                 }
 
@@ -491,37 +555,114 @@ internal static partial class ContactResponse
             var isProtective = AuthoredPoseFallbackCore.ResolveProtective(
                 geometry.IsProtective, geometry.ClassificationSucceeded, true);
             var pose = ToSoldierPose(finalChoice);
+            var finalPosture = InfantryCoverDecisionCore.SelectCoverPostureInput(
+                finalChoice, geometry.Standing, geometry.Crouched, geometry.Prone);
+            var protectionPosture = finalChoice == CoverPostureChoice.Standing &&
+                                    InfantryCoverDecisionCore.HasMeaningfulProtection(
+                                        geometry.Crouched)
+                ? geometry.Crouched
+                : finalPosture;
+            var hasFiringLane = finalPosture.CanFire ||
+                                geometry.Standing.CanFire &&
+                                (InfantryCoverDecisionCore.HasMeaningfulProtection(
+                                     geometry.Standing) ||
+                                 InfantryCoverDecisionCore.HasMeaningfulProtection(
+                                     geometry.Crouched));
+            var quality = new CoverPositionQuality(
+                isProtective,
+                geometry.ClassificationSucceeded,
+                InfantryCoverDecisionCore.ProtectionFraction(protectionPosture),
+                hasFiringLane);
             state.EvaluatedCoverPostureId = cover.Pointer;
+            state.EvaluatedCoverPosition = soldierPosition;
             state.EvaluatedCoverPosture = pose;
             state.EvaluatedCoverIsProtective = isProtective;
+            state.EvaluatedCoverProtectionMeasured = quality.IsMeasured;
+            state.EvaluatedCoverProtectionFraction = quality.ProtectionFraction;
+            state.EvaluatedCoverHasFiringLane = quality.HasFiringLane;
             state.EvaluatedCoverThreatDirection = stableAxis;
             // Per-soldier jitter spreads cache expiries over ~1.4s so a mass contact
             // event (barrage, contact wave) that synchronizes many soldiers' caches
             // cannot make them all re-evaluate on the same frame 4s later.
             state.EvaluatedCoverPostureUntil = now + CoverPostureCacheSeconds +
                                                 (soldier.GetInstanceID() & 7) * 0.2f;
-            evaluation = new CurrentCoverEvaluation(isProtective, pose);
+            evaluation = new CurrentCoverEvaluation(isProtective, pose, quality);
             return true;
         }
         catch (NullReferenceException)
         {
-            return false;
+            return hasPositionAndAxis && TryReuseCachedCoverEvaluation(
+                state, soldierPosition, stableAxis, nativeOnCover, out evaluation);
         }
         catch (Il2CppException)
         {
-            return false;
+            return hasPositionAndAxis && TryReuseCachedCoverEvaluation(
+                state, soldierPosition, stableAxis, nativeOnCover, out evaluation);
         }
         catch (ObjectCollectedException)
         {
-            return false;
+            return hasPositionAndAxis && TryReuseCachedCoverEvaluation(
+                state, soldierPosition, stableAxis, nativeOnCover, out evaluation);
         }
     }
+
+    private static bool TryReuseCachedCoverEvaluation(
+        ContactResponseState state,
+        Vector3 soldierPosition,
+        Vector3 stableThreatAxis,
+        bool nativeOnCover,
+        out CurrentCoverEvaluation evaluation)
+    {
+        evaluation = default;
+        var hasStableAnchor = TryGetStableCoverAnchor(
+            state, out var stableAnchorPosition, out var stableAnchorId);
+        var stableAnchorDistance = hasStableAnchor
+            ? HorizontalDistance(soldierPosition, stableAnchorPosition)
+            : float.PositiveInfinity;
+        var evaluatedPositionDistance = HorizontalDistance(
+            soldierPosition, state.EvaluatedCoverPosition);
+        var hasEvaluatedDirection =
+            state.EvaluatedCoverThreatDirection.sqrMagnitude > 0.5f;
+        var directionDot = hasEvaluatedDirection && stableThreatAxis.sqrMagnitude > 0.5f
+            ? Vector3.Dot(state.EvaluatedCoverThreatDirection, stableThreatAxis)
+            : float.NegativeInfinity;
+
+        if (!StableCoverPostureCore.CanReuse(
+                nativeOnCover,
+                evaluatedPositionDistance,
+                hasStableAnchor,
+                stableAnchorDistance,
+                stableAnchorId,
+                state.EvaluatedCoverPostureId,
+                hasEvaluatedDirection,
+                directionDot))
+        {
+            return false;
+        }
+
+        evaluation = CachedCoverEvaluation(state);
+        return true;
+    }
+
+    private static CurrentCoverEvaluation CachedCoverEvaluation(ContactResponseState state)
+        => new(
+            state.EvaluatedCoverIsProtective,
+            state.EvaluatedCoverPosture,
+            new CoverPositionQuality(
+                state.EvaluatedCoverIsProtective,
+                state.EvaluatedCoverProtectionMeasured,
+                state.EvaluatedCoverProtectionFraction,
+                state.EvaluatedCoverHasFiringLane));
 
     private static void ResetCoverPostureEvaluation(ContactResponseState state)
     {
         state.EvaluatedCoverPostureId = IntPtr.Zero;
+        state.EvaluatedCoverPosition = default;
         state.EvaluatedCoverPosture = SoldierPose.Crouch;
         state.EvaluatedCoverIsProtective = false;
+        state.EvaluatedCoverProtectionMeasured = false;
+        state.EvaluatedCoverProtectionFraction = 0f;
+        state.EvaluatedCoverHasFiringLane = false;
         state.EvaluatedCoverThreatDirection = default;
         state.EvaluatedCoverPostureUntil = 0f;
         state.PostureThreatAxis = default;
@@ -614,9 +755,11 @@ internal static partial class ContactResponse
         bool respectAttackWaypoint,
         bool evaluateFiringQuality,
         out float bestFortifiedScore,
-        out bool searchDeferred)
+        out bool searchDeferred,
+        out CoverPositionQuality selectedQuality)
     {
         bestFortifiedScore = float.NegativeInfinity;
+        selectedQuality = default;
         searchDeferred = !TryBeginDetailedCoverSearch();
         if (searchDeferred)
             return null;
@@ -755,8 +898,10 @@ internal static partial class ContactResponse
 
         AiDestination? best = null;
         var bestScore = float.MaxValue;
+        var bestQuality = default(CoverPositionQuality);
         AiDestination? bestAuthoredFallback = null;
         var bestAuthoredFallbackScore = float.MaxValue;
+        var bestAuthoredFallbackQuality = default(CoverPositionQuality);
         var defensiveOccupation = selectionMode == CoverSelectionMode.DefensiveOccupation;
         var detailedIndices = CoverCandidateSamplingCore.SelectIndices(
             coarseCandidates.Count,
@@ -871,6 +1016,11 @@ internal static partial class ContactResponse
                     {
                         bestAuthoredFallback = candidate;
                         bestAuthoredFallbackScore = fallbackScore;
+                        bestAuthoredFallbackQuality = new CoverPositionQuality(
+                            IsProtective: true,
+                            IsMeasured: false,
+                            ProtectionFraction: 0f,
+                            HasFiringLane: assignedPoseCanFire || standingCanFire);
                     }
                     continue;
                 }
@@ -879,6 +1029,11 @@ internal static partial class ContactResponse
                 {
                     best = candidate;
                     bestScore = score;
+                    bestQuality = new CoverPositionQuality(
+                        primaryProtected,
+                        geometry.ClassificationSucceeded,
+                        primaryProtectionFraction,
+                        assignedPoseCanFire || standingCanFire);
                     var firingLaneQuality = assignedPoseCanFire
                         ? 1f
                         : standingCanFire ? 0.7f : 0f;
@@ -913,8 +1068,12 @@ internal static partial class ContactResponse
         {
             best = bestAuthoredFallback;
             bestScore = bestAuthoredFallbackScore;
+            bestQuality = bestAuthoredFallbackQuality;
             usedAuthoredFallback = true;
         }
+
+        if (best != null)
+            selectedQuality = bestQuality;
 
         AiState.Trace(
             $"Cover inventory: soldier {soldier.GetInstanceID()} mode={selectionMode} " +
@@ -1153,7 +1312,8 @@ internal static partial class ContactResponse
         {
             CoverPostureChoice.Standing => SoldierPose.Idle,
             CoverPostureChoice.Crouched => SoldierPose.Crouch,
-            _ => SoldierPose.Prone
+            CoverPostureChoice.Prone => SoldierPose.Prone,
+            _ => SoldierPose.Crouch
         };
 
     private static float MeasureExposedRouteFraction(
@@ -1321,8 +1481,20 @@ internal static partial class ContactResponse
         }
 
         var relocateUntil = now + InfantryCoverPolicy.MoveProgressWindowSeconds;
-        AiState.ReserveCover(
-            coverId, coverPosition, soldierId, relocateUntil + 2f);
+        if (!AiState.TryReserveCover(
+                coverId,
+                coverPosition,
+                soldierId,
+                now,
+                relocateUntil + 2f,
+                InfantryCoverPolicy.OccupancyRadiusMeters))
+        {
+            MarkFailedCover(state, coverId, now);
+            BackOffFromContestedCover(state, now);
+            AiState.Trace(
+                $"Cover occupancy: soldier {soldierId} lost a selected position before moving");
+            return false;
+        }
         var previousCoverExecutor = _coverAssignmentExecutorSoldierId;
         try
         {
@@ -1361,6 +1533,9 @@ internal static partial class ContactResponse
         }
 
         state.Relocating = true;
+        state.AttackObjectiveBoundActive = false;
+        state.AttackObjectiveBoundStartedAt = 0f;
+        state.AttackFiringCommitUntil = 0f;
         state.ConsecutiveCoverSearchFailures = 0;
         state.LastOutgoingShotWasStationary = false;
         state.RelocationPausedBySuppression = false;
@@ -1388,6 +1563,69 @@ internal static partial class ContactResponse
 
         state.FailedCoverId = coverId;
         state.FailedCoverUntil = now + InfantryCoverPolicy.RelocationCooldownSeconds;
+    }
+
+    private static void BackOffFromContestedCover(
+        ContactResponseState state,
+        float now)
+    {
+        state.ConsecutiveCoverSearchFailures = Math.Max(
+            1, state.ConsecutiveCoverSearchFailures + 1);
+        var retryAt = now + CoverSearchBackoffCore.NextDecisionDelaySeconds(
+            InfantryCoverPolicy.DecisionIntervalSeconds,
+            state.ConsecutiveCoverSearchFailures);
+        state.NextDecisionAt = Mathf.Max(state.NextDecisionAt, retryAt);
+        state.NextRelocationAllowedAt = Mathf.Max(
+            state.NextRelocationAllowedAt, retryAt);
+    }
+
+    /// <summary>
+    /// A cover route owns its physical destination for its entire lifetime. If that
+    /// claim has expired and another soldier now owns the scarce slot, the old mover
+    /// must stop immediately rather than overwrite the new owner and continue into a
+    /// crowd. The ordinary failed-search cadence later allows a newly vacant slot to
+    /// be claimed without producing a queue around it.
+    /// </summary>
+    private static bool TryRenewRelocationCoverReservation(
+        SoldierAI ai,
+        Soldier soldier,
+        ContactResponseState state,
+        int soldierId,
+        float now,
+        float expiresAt)
+    {
+        if (state.ReservedCoverId == IntPtr.Zero)
+            return true;
+
+        if (AiState.TryReserveCover(
+                state.ReservedCoverId,
+                state.ReservedCoverPosition,
+                soldierId,
+                now,
+                expiresAt,
+                InfantryCoverPolicy.OccupancyRadiusMeters))
+        {
+            return true;
+        }
+
+        var contestedCoverId = state.ReservedCoverId;
+        FinishRelocation(
+            ai,
+            soldier,
+            state,
+            soldierId,
+            now,
+            keepOccupiedCover: false,
+            completedMove: false);
+        BackOffFromContestedCover(state, now);
+        state.EngagementHoldUntil = Mathf.Max(
+            state.EngagementHoldUntil, state.NextDecisionAt);
+        ExecuteOwnedCoverWrite(soldier, () => soldier.CoverPosition(null!));
+        StopTacticalMovement(
+            ai, soldier, Time.deltaTime, "cover-claim-lost");
+        AiState.Trace(
+            $"Cover occupancy: soldier {soldierId} abandoned contested route {contestedCoverId}");
+        return false;
     }
 
     private static bool SameNativeDestination(AiDestination? actual, AiDestination expected)
@@ -1447,7 +1685,7 @@ internal static partial class ContactResponse
     {
         if (state.Pinned || state.SuppressionMovementOwned)
         {
-            PauseRelocation(state, soldier.GetInstanceID(), now, true);
+            PauseRelocation(ai, soldier, state, soldier.GetInstanceID(), now, true);
             ApplyPinnedSuppression(ai, soldier, state, now, Time.deltaTime);
             return;
         }
@@ -1491,10 +1729,20 @@ internal static partial class ContactResponse
         state.SuppressionMovementOwned = false;
         state.RelocationPausedBySuppression = false;
         state.ContactCrouchOwned = true;
-        state.SuppressionPoseOwned = suppressed;
-        ApplyMovementDecision(
+        // A bound must not erase the moderate-band hysteresis established by
+        // UpdateSuppressionReaction. The soldier keeps the crouched locomotion pose
+        // until the dedicated 15-point release threshold is reached.
+        state.SuppressionPoseOwned = state.SuppressionPoseOwned || suppressed;
+        var startingNewBound = !state.AttackObjectiveBoundActive;
+        var movementOwner = ApplyMovementDecision(
             ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
             "attack-advance");
+        if (MovementArbiterCore.Grants(movementOwner) &&
+            startingNewBound)
+        {
+            state.AttackObjectiveBoundActive = true;
+            state.AttackObjectiveBoundStartedAt = Mathf.Max(now, 0.0001f);
+        }
         soldier.isSprinting = false;
 
         if (state.SuppressionFireInhibited && now >= state.PinnedFireBlockedUntil)
@@ -1505,11 +1753,7 @@ internal static partial class ContactResponse
             soldier,
             now,
             resolveDecisionTail: true,
-            state.Pinned ||
-            (Settings.DangerReactionsEnabled.Value &&
-             soldier.GetSuppressionValue() >= AiBehaviorTuning.ProneSuppressionThreshold)
-                ? SoldierPose.Prone
-                : SoldierPose.Crouch,
+            SoldierPose.Crouch,
             "attack-advance");
 
         if (wasHoldingMovement)
@@ -1576,6 +1820,9 @@ internal static partial class ContactResponse
             state.FailedCoverId = IntPtr.Zero;
 
         state.Relocating = false;
+        state.AttackObjectiveBoundActive = false;
+        state.AttackObjectiveBoundStartedAt = 0f;
+        state.AttackFiringCommitUntil = 0f;
         SetCoverState(
             state,
             completedMove ? InfantryCoverState.Holding : InfantryCoverState.WaitingForSafeMove,
@@ -1629,11 +1876,17 @@ internal static partial class ContactResponse
             state.NextDecisionAt = Mathf.Max(state.NextDecisionAt, retryAt);
         if (keepOccupiedCover && state.ReservedCoverId != IntPtr.Zero)
         {
-            AiState.ReserveCover(
-                state.ReservedCoverId,
-                occupiedCoverPosition,
-                soldierId,
-                now + InfantryCoverPolicy.CoverReservationLeaseSeconds);
+            if (!TryKeepExclusiveCoverReservation(
+                    soldier,
+                    state,
+                    soldierId,
+                    state.ReservedCoverId,
+                    occupiedCoverPosition,
+                    now,
+                    now + InfantryCoverPolicy.CoverReservationLeaseSeconds))
+            {
+                return;
+            }
         }
         else
         {
@@ -1648,8 +1901,7 @@ internal static partial class ContactResponse
         Soldier soldier,
         ContactResponseState state,
         Vector3 targetPosition,
-        float now,
-        bool preferProne = false)
+        float now)
     {
         // A contact is a fighting halt, not permission to continue jogging along a
         // native objective route. Moving fire remains available during a committed
@@ -1658,7 +1910,9 @@ internal static partial class ContactResponse
         // D4 (plan 015): every caller of this method only runs while target != null
         // in UpdateInternal, so the hold is bounded to the contact's own
         // persistence timer instead of +inf.
-        state.EngagementHoldUntil = state.ContactUntil;
+        state.EngagementHoldUntil = Mathf.Max(
+            state.ContactUntil,
+            state.AttackFiringCommitUntil);
         state.ContactCrouchOwned = true;
         StopTacticalMovement(
             ai,

@@ -47,6 +47,7 @@ internal sealed class MenuSetting
             "AerodynamicDrag" => "Aerodynamic Drag",
             "ExperimentalAiFlightModel" => "EXPERIMENTAL: AI Flight Model",
             "HidePlayerNamesInSameVehicle" => "Hide Squadmate Names In Same Vehicle",
+            "LauncherAccuracySpreadMultiplier" => "AT Launcher Accuracy",
             _ => SettingsCatalog.Humanize(entry.Definition.Key)
         };
         Description = entry.Description.Description ?? string.Empty;
@@ -91,6 +92,7 @@ internal static class SettingsCatalog
         "6d. Aircraft instruments\u001fUseKnotsAndFeet",
         "6d. Aircraft instruments\u001fShowAltitudeAboveGround",
         "7e. First-person view\u001fCompassUseMils",
+        "7g. Vehicle aiming\u001fShowGroundVehicleAimRings",
         "7i. Settings menu\u001fShowLauncherButton",
         "AI - Diagnostics\u001fVisualDebugStartEnabled",
         "AI - Diagnostics\u001fVerboseLogging",
@@ -145,7 +147,7 @@ internal static class SettingsCatalog
         "AI - Core behavior\u001fAggressiveness",
         "AI - Core behavior\u001fAccuracy",
         "AI - Core behavior\u001fReactionSpeed",
-        "AI - Core behavior\u001fAwareness",
+        "AI - Core behavior\u001fPerception",
         "AI - Core behavior\u001fSuppressionResistance",
 
         "AI - Attack posture bonuses\u001fAttackPostureBonusesEnabled",
@@ -165,11 +167,13 @@ internal static class SettingsCatalog
         "AI - Infantry tactics - Contact response\u001fCoverSearchRadiusMeters",
         "AI - Infantry tactics - Contact response\u001fEngagementHaltDistanceMeters",
         "AI - Infantry tactics - Contact response\u001fMaximumAttackCombatHaltSeconds",
+        "AI - Infantry tactics - Contact response\u001fAttackFiringHoldSeconds",
         "AI - Infantry tactics - Contact response\u001fSuppressKnownTargets",
 
         "AI - Infantry tactics - Moving fire\u001fRestrictMovingFire",
         "AI - Infantry tactics - Moving fire\u001fSmgMaximumEngagementDistanceMeters",
         "AI - Infantry tactics - Moving fire\u001fLauncherMaximumEngagementDistanceMeters",
+        "AI - Infantry tactics - Moving fire\u001fLauncherAccuracySpreadMultiplier",
 
         "AI - Infantry tactics - Suppression\u001fEnabled",
 
@@ -221,6 +225,7 @@ internal static class SettingsCatalog
         "6. Ordnance effects\u001fSmallExplosionAiThrowForceMultiplier",
 
         "6c. Aircraft flight physics\u001fMousePointAiming",
+        "6c. Aircraft flight physics\u001fSimplifiedManualRoll",
         "6c. Aircraft flight physics\u001fAircraftFreeLookZoom",
         "6c. Aircraft flight physics\u001fFreeLookSteering",
         "6c. Aircraft flight physics\u001fEnabled",
@@ -289,6 +294,8 @@ internal static class SettingsCatalog
         "7e. First-person view\u001fHeadshotDeathBlackout",
 
         "7g. Vehicle aiming\u001fDirectTurretAimingEnabled",
+        "7g. Vehicle aiming\u001fShowGroundVehicleAimRings",
+        "7g. Vehicle aiming\u001fLockGunnerViewElevation",
         "7g. Vehicle aiming\u001fUnstabilizedGunsightEnabled",
         "7g. Vehicle aiming\u001fOpticsZoom",
         "7j. Third-person view\u001fThirdPersonZoom",
@@ -431,7 +438,7 @@ internal static class SettingsCatalog
     {
         if (key == "EnginePowerMultiplier")
             return "1-10";
-        if (key is "Aggressiveness" or "Accuracy" or "ReactionSpeed" or "Awareness" or
+        if (key is "Aggressiveness" or "Accuracy" or "ReactionSpeed" or "Perception" or
             "SuppressionResistance" or "VehicleEngineSound" or "TracerBrightness" or
             "TracerSizeMultiplier" or "OpticsZoom" or "ThirdPersonZoom" or
             "AircraftFreeLookZoom" or
@@ -478,7 +485,7 @@ internal static class SettingsCatalog
         "Aggressiveness" => ("more cautious", "push and return fire more"),
         "Accuracy" => ("less accurate", "more accurate"),
         "ReactionSpeed" => ("slower reactions", "faster reactions"),
-        "Awareness" => ("narrower awareness", "broader awareness"),
+        "Perception" => ("notice and react closer", "notice and react farther"),
         "SuppressionResistance" => ("take cover sooner", "fight longer under fire"),
 
         "AttackPostureAccuracySpreadMultiplier" or
@@ -503,10 +510,12 @@ internal static class SettingsCatalog
         "CoverSearchRadiusMeters" => ("search nearer cover", "search farther cover"),
         "EngagementHaltDistanceMeters" => ("halt only closer", "halt from farther"),
         "MaximumAttackCombatHaltSeconds" => ("push sooner under fire", "hold and fire longer"),
+        "AttackFiringHoldSeconds" => ("resume sooner after bounds", "fire longer after bounds"),
         "MountedGunnerRiseSettleSeconds" => ("fire sooner", "wait longer to fire"),
         "SmgMovingFireMaxDistanceMeters" or
         "RifleMovingFireMaxDistanceMeters" => ("moving fire closer", "moving fire farther"),
         "SmgMaximumEngagementDistanceMeters" => ("SMG fires closer", "SMG fires farther"),
+        "LauncherAccuracySpreadMultiplier" => ("more accurate launchers", "less accurate launchers"),
         "ForwardReachExtensionMeters" => ("shorter melee reach", "longer melee reach"),
         "MinimumSweepRadiusMeters" => ("narrower melee sweep", "wider melee sweep"),
 
@@ -515,8 +524,9 @@ internal static class SettingsCatalog
         "MemoryMultiplierAtMaximumSuppression" => ("forget faster pinned", "remember longer pinned"),
 
         "CrouchSuppressionThreshold" => ("crouch sooner", "crouch later"),
-        "ProneSuppressionThreshold" => ("go prone sooner", "go prone later"),
-        "ProneReleaseSuppressionThreshold" => ("stay prone longer", "rise sooner"),
+        "CrouchSuppressionReleaseThreshold" => ("stay crouched longer", "stand sooner"),
+        "ProneSuppressionThreshold" => ("be pinned sooner", "be pinned later"),
+        "ProneReleaseSuppressionThreshold" => ("stay pinned longer", "recover sooner"),
         "PinnedMinimumSeconds" => ("shorter pinned time", "longer pinned time"),
         "FlameSafetyMarginMeters" => ("approach flames closer", "keep farther away"),
         "FlameEscapeDistanceMeters" => ("shorter escape move", "longer escape move"),

@@ -27,6 +27,7 @@ internal enum CommandAuthority
     ImmediateCombat = 200,
     ProtectedFortification = 300,
     CriticalSuppression = 400,
+    VehicleBoarding = 450,
     RequiredSafety = 500,
     LethalEmergency = 600,
     PlayerOrScript = 700
@@ -268,31 +269,64 @@ internal enum PoseOwner
     // pose, so ownerless halts behave exactly as they did before the arbiter.
     HaltFallback = 1,
 
+    // The baseline stationary-combat contract. Once contact or a tactical hold is
+    // active, the mod owns the final pose even when none of the more specific safety,
+    // cover, or suppression owners below applies. This closes the old "owner = native"
+    // escape hatch through which SequentialUpdate could alternate crouch and prone.
+    StationaryCombat = 2,
+
     // g: defensive / contact / tactical crouch owners (ShouldOwnCrouch) -> Crouch.
-    TacticalCrouch = 2,
+    TacticalCrouch = 3,
 
     // f: suppression band / recovery (SuppressionRecoveryPoseCore) off owned cover.
-    SuppressionRecovery = 3,
+    SuppressionRecovery = 4,
 
     // e: cover-geometry evaluation on an owned cover slot (with downgrade hysteresis).
-    CoverEvaluation = 4,
+    CoverEvaluation = 5,
 
     // d: muzzle-clearance stand (OwnsCurrentCoverClearancePose) -> Idle.
-    CoverClearance = 5,
+    CoverClearance = 6,
 
     // c2: the MOVEMENT contract (plan 019). An active movement decision owns the
-    // locomotion pose. Unsuppressed movement uses Standing, suppressed movement uses
-    // Crouch, and an attacker forced onward by the maximum combat halt may deliberately
-    // crawl. It outranks every
+    // locomotion pose. Unsuppressed route movement uses Standing; movement under contact
+    // and the bounded fighting-halt spacing correction use Crouch. It outranks every
     // FIGHTING pose below it and yields to every SAFETY pose above it, which is exactly
     // where the two ladders meet: see PoseMovementContractCore.
-    MovementPose = 6,
+    MovementPose = 7,
 
-    // b: pinned / on-fire / flame safety (SuppressionPose) - instant.
-    Suppression = 7,
+    // b: pinned / on-fire safety. These reactions may halt or crouch a soldier, but
+    // they cannot manufacture a prone request.
+    Suppression = 8,
 
-    // a: required-action safety (exposed reload / bandage prone).
-    RequiredAction = 8
+    // a2: a moving soldier has visually acquired a new contact and deliberately dived
+    // to fire. This is the only non-cover owner permitted to request Prone.
+    ContactDive = 9
+}
+
+/// <summary>
+/// Pure policy at the native locomotion boundary. Easy Red 2's live IL2CPP build
+/// inlines its fighting-pose choice into <c>SoldierAI.SequentialUpdate</c>, then
+/// supplies that choice again to <c>Soldier.StopMove</c>. The mod therefore owns a
+/// stationary combat pose at the final request boundary instead of depending on the
+/// unused <c>GetFavouriteFightingPose</c> helper.
+/// </summary>
+internal static class FinalPoseAuthorityCore
+{
+    internal static bool OwnsStationaryCombatPose(
+        bool contactResponseEnabled,
+        bool movementActive,
+        bool hasVisibleTarget,
+        bool hasRecentContact,
+        bool hasStationaryTacticalHold)
+        => contactResponseEnabled &&
+           !movementActive &&
+           (hasVisibleTarget || hasRecentContact || hasStationaryTacticalHold);
+
+    internal static TacticalStance RewriteNativeRequest(
+        bool modOwnsPose,
+        TacticalStance nativeRequest,
+        TacticalStance committedPose)
+        => modOwnsPose ? committedPose : nativeRequest;
 }
 
 /// <summary>
@@ -300,56 +334,101 @@ internal enum PoseOwner
 /// POSE ladder (<see cref="PoseOwner"/>, plan 014). Each was internally consistent but they
 /// did not talk to each other, so a soldier could be granted a bound (CommittedMove /
 /// OrderedMove) while the pose ladder independently supplied an unrelated Prone cover
-/// posture. Movement now owns the stance while the soldier is actually moving: an
-/// unsuppressed soldier stands, a suppressed soldier crouches, and an explicitly authorized
-/// suppressed crawl remains prone. Native locomotion is claimed only while it is active.
+/// posture. Movement now owns the stance only while physical locomotion is confirmed: a
+/// soldier outside combat stands, while active contact, direct incoming fire, or the
+/// bounded step out of a crowded fighting halt lowers locomotion to crouch. A settled
+/// tactical position keeps its already-evaluated posture through incidental translation;
+/// only a genuine relocation starts a new travel posture. A short evidence grace bridges
+/// path-node sampling gaps without letting an executor command pulse stand up a stationary
+/// soldier.
 ///
 /// The invariant that keeps the two ladders consistent, verified rank by rank:
-/// every pose owner ABOVE <see cref="PoseOwner.MovementPose"/> that can demand Prone has a
-/// movement owner at or above the halting ranks, so whenever pose insists on Prone for
-/// SAFETY the movement ladder is already halting -
-///   RequiredAction (ExposedReloadProneOwned) -> MovementOwner.SafetyHalt,
-///   Suppression    (pinned / on fire)        -> MovementOwner.PinnedHold / SafetyHalt,
-/// each of which <see cref="MovementArbiterCore.Halts"/> reports as halting. The single
-/// exception is <see cref="MovementOwner.HazardEscape"/>, the one GRANT above the halts: a
-/// man leaving a flame keeps running, so the pose ranks above this one carry the same
-/// "not while evading flame" carve-out the pinned rank always had, and the escape resolves
-/// here to the movement pose instead of to a prone safety pose.
+/// the one non-cover owner ABOVE <see cref="PoseOwner.MovementPose"/> that can demand Prone
+/// is ContactDive, whose FSM commitment also owns a fighting halt. Pinned, burning, reload,
+/// and bandage reactions may halt movement, but no longer create their own prone intent.
 /// </summary>
 internal static class PoseMovementContractCore
 {
+    internal const float LocomotionEvidenceGraceSeconds = 0.75f;
+
+    internal static float RefreshEvidenceUntil(
+        bool physicallyMoving,
+        float now,
+        float currentEvidenceUntil)
+        => physicallyMoving
+            ? now + LocomotionEvidenceGraceSeconds
+            : currentEvidenceUntil;
+
+    internal static bool HasConfirmedLocomotion(
+        bool physicallyMoving,
+        float now,
+        float evidenceUntil)
+        => physicallyMoving || now < evidenceUntil;
+
     /// <summary>
-    /// True when the committed movement decision is actually MOVING this soldier, so the
-    /// movement channel owns his pose. A halting owner never owns it (that is the halt
-    /// case: a stationary soldier keeps his evaluated fighting pose, prone included).
-    /// <see cref="MovementOwner.Free"/> means this mod wrote nothing this frame, so native
-    /// locomotion retains the game's own favourite pose, including a native crawl.
+    /// True when this soldier has confirmed physical locomotion, so the movement channel
+    /// owns his pose. A move grant or native executor flag is not evidence by itself. A
+    /// halting owner never owns the pose: a stationary soldier keeps his evaluated fighting
+    /// pose, prone included. Confirmed native locomotion is owned too, preventing the base
+    /// game from reintroducing a third moving posture outside the two-intent prone policy.
     /// </summary>
     internal static bool MovementOwnsPose(
         MovementOwner committed,
-        bool halted)
+        bool halted,
+        bool locomotionConfirmed)
     {
-        if (halted || MovementArbiterCore.Halts(committed))
+        if (!locomotionConfirmed || halted || MovementArbiterCore.Halts(committed))
             return false;
-        return MovementArbiterCore.Grants(committed);
+        return true;
     }
 
     /// <summary>
-    /// The pose a moving soldier takes. Standing is the normal locomotion posture; active
-    /// suppression lowers it to crouch. An ordered or committed attacker whose combat-halt
-    /// deadline explicitly forced progress may instead crawl while suppressed.
+    /// The pose a moving soldier takes. Standing is the normal route posture outside
+    /// combat. Contact, direct incoming fire, and the short correction out of a crowded
+    /// fighting halt stay crouched. That correction begins and ends at a stationary hold;
+    /// raising it to Standing in the middle visibly creates the crouch/stand/crouch loop.
     /// </summary>
     internal static TacticalStance MovementStance(
         MovementOwner committed,
-        bool suppressed,
-        bool suppressedForcedAdvance)
-        => suppressed &&
-           suppressedForcedAdvance &&
-           committed is MovementOwner.OrderedMove or MovementOwner.CommittedMove
-            ? TacticalStance.Prone
-            : suppressed
-                ? TacticalStance.Crouched
-                : TacticalStance.Standing;
+        bool movingUnderFire)
+        => movingUnderFire || committed == MovementOwner.HaltSpacing
+            ? TacticalStance.Crouched
+            : TacticalStance.Standing;
+
+    /// <summary>
+    /// Resolves physical movement that begins while a soldier already owns a settled
+    /// fighting position. Easy Red 2 can translate a defender a few centimetres while
+    /// refreshing its formation/path target; that is not a tactical departure and must
+    /// not replace Crouch (or a measured cover stance) with the ordinary standing travel
+    /// pose. An explicit relocation and a lethal-hazard escape still use the normal
+    /// movement contract. Halt spacing retains its dedicated crouched correction.
+    /// </summary>
+    internal static TacticalStance MovementStance(
+        MovementOwner committed,
+        bool movingUnderFire,
+        bool hasSettledTacticalHold,
+        bool relocating,
+        bool hasSettledPose,
+        TacticalStance settledPose)
+    {
+        if (committed == MovementOwner.HaltSpacing)
+            return TacticalStance.Crouched;
+        if (hasSettledTacticalHold && !relocating &&
+            committed != MovementOwner.HazardEscape)
+        {
+            return hasSettledPose ? settledPose : TacticalStance.Crouched;
+        }
+
+        return MovementStance(committed, movingUnderFire);
+    }
+
+    internal static bool CanPreserveAsSettledPose(PoseOwner owner)
+        => owner is PoseOwner.CoverClearance or
+                    PoseOwner.CoverEvaluation or
+                    PoseOwner.SuppressionRecovery or
+                    PoseOwner.TacticalCrouch or
+                    PoseOwner.StationaryCombat or
+                    PoseOwner.HaltFallback;
 }
 
 /// <summary>
@@ -585,6 +664,21 @@ internal static class MovementArbiterCore
 }
 
 /// <summary>
+/// Reconciles the base game's path-executor view of movement with the movement arbiter's
+/// committed output. SoldierAI.IsMoving reports route intent (path nodes / move-direct
+/// time), not physical locomotion. During an owned halt that stale intent used to send
+/// SequentialUpdate through its moving branch before the later MoveOptimized patch could
+/// stop it, producing the repeated inch-forward / lower-gun / stop / raise-gun sequence.
+/// Keep the native route intact, but report it as stationary for exactly as long as a
+/// halting owner controls locomotion. A grant or Free releases the native result unchanged.
+/// </summary>
+internal static class NativeMovementIntentCore
+{
+    internal static bool ShouldReportMoving(bool nativeMoving, MovementOwner committed)
+        => nativeMoving && !MovementArbiterCore.Halts(committed);
+}
+
+/// <summary>
 /// Halt spacing (plan 018 item 3, deferred here by plan 016). No halt path used to check
 /// the distance to an already-halted squadmate, so a squad walking one path stacked at the
 /// first LOS-opening doorway or crest. Consolidating locomotion into one write site makes
@@ -592,18 +686,34 @@ internal static class MovementArbiterCore
 /// neighbour, he takes one short lateral step off the threat axis first. Sideways, because
 /// stepping across the line of fire is what actually clears the doorway without walking
 /// him toward the enemy. If the step is unreachable the soldier halts anyway - this is one
-/// bounded correction on a throttled halt check, never a loop and never a formation manager.
+/// bounded correction once per fighting-halt episode, never a loop and never a formation manager.
 /// </summary>
 internal static class HaltSpacingCore
 {
     // Roughly two body widths plus a rifle: closer than this and two men share a doorway.
     internal const float MinimumSpacingMeters = 2.5f;
     internal const float LateralStepMeters = 2.5f;
+    internal const float RearmTravelMeters = 0.35f;
 
-    // The step is granted for a bounded window and re-checked only after a long cooldown,
-    // so a soldier can never oscillate between stepping and halting.
+    // The step is granted for a bounded window. Runtime state allows it only once per
+    // fighting-halt episode, so a soldier cannot alternate between stepping and halting.
     internal const float StepWindowSeconds = 1.25f;
-    internal const float RecheckCooldownSeconds = 6f;
+
+    internal static bool ShouldAttempt(bool attemptedThisEpisode, MovementOwner owner)
+        => !attemptedThisEpisode &&
+           owner is MovementOwner.EngagementHold or MovementOwner.CoverHold;
+
+    internal static bool EndsEpisode(MovementOwner owner)
+        => owner is MovementOwner.Free or MovementOwner.HazardEscape or
+                    MovementOwner.CommittedMove or MovementOwner.OrderedMove;
+
+    internal static bool ShouldRearm(
+        bool attemptedThisEpisode,
+        MovementOwner owner,
+        float physicalTravelMeters)
+        => attemptedThisEpisode && EndsEpisode(owner) &&
+           float.IsFinite(physicalTravelMeters) &&
+           physicalTravelMeters >= RearmTravelMeters;
 
     /// <summary>
     /// Returns the horizontal step that opens the gap, or false when the pair is already
@@ -760,36 +870,147 @@ internal static class CoverPostureOwnershipCore
 }
 
 /// <summary>
-/// Chooses the immediate pinned posture from protection that the soldier could
-/// physically recognize. A roofed position keeps a soldier crouched so the
-/// suppression reaction does not put him flat on an indoor floor and remove his
-/// firing lane.
+/// Native IsOnCover/targetDestination status can disappear for a frame while a soldier
+/// remains at the exact cover slot the director owns. A close, still-valid anchor is the
+/// stable fact in that case; a known destroyed/unsafe destination always invalidates it.
 /// </summary>
-internal static class PinnedSuppressionPoseCore
+internal static class StableCoverInteropCore
 {
-    internal static TacticalStance Resolve(
-        bool hasOverheadProtection,
-        bool onUsableCover,
-        bool hasCoverEvaluation,
-        TacticalStance evaluatedCoverPose)
+    internal const float AnchorToleranceMeters = 3f;
+
+    internal static bool CanUseAnchor(
+        bool hasStableAnchor,
+        float horizontalDistanceMeters,
+        bool destinationKnownInvalid)
+        => hasStableAnchor && !destinationKnownInvalid &&
+           float.IsFinite(horizontalDistanceMeters) &&
+           horizontalDistanceMeters <= AnchorToleranceMeters;
+}
+
+/// <summary>
+/// Keeps the last measured firing posture attached to the physical fighting position
+/// while the native targetDestination wrapper is briefly absent. A director-owned
+/// anchor must still identify the same cover; otherwise the native IsOnCover flag and
+/// proximity to the last evaluated position provide the bounded continuity check.
+/// </summary>
+internal static class StableCoverPostureCore
+{
+    internal const float EvaluatedPositionToleranceMeters = 1.5f;
+    internal const float ThreatDirectionDotTolerance = 0.9f;
+
+    internal static bool CanReuse(
+        bool nativeOnCover,
+        float distanceFromEvaluatedPosition,
+        bool hasStableAnchor,
+        float distanceFromStableAnchor,
+        IntPtr stableAnchorId,
+        IntPtr evaluatedCoverId,
+        bool hasEvaluatedThreatDirection,
+        float evaluatedThreatDirectionDot)
     {
-        if (hasOverheadProtection)
-            return TacticalStance.Crouched;
-        if (!onUsableCover)
-            return TacticalStance.Prone;
-        if (!hasCoverEvaluation || evaluatedCoverPose == TacticalStance.Standing)
-            return TacticalStance.Crouched;
-        return evaluatedCoverPose;
+        if (evaluatedCoverId == IntPtr.Zero ||
+            !hasEvaluatedThreatDirection ||
+            !float.IsFinite(evaluatedThreatDirectionDot) ||
+            evaluatedThreatDirectionDot < ThreatDirectionDotTolerance)
+        {
+            return false;
+        }
+
+        var sameOwnedAnchor = stableAnchorId == evaluatedCoverId &&
+                              StableCoverInteropCore.CanUseAnchor(
+                                  hasStableAnchor,
+                                  distanceFromStableAnchor,
+                                  destinationKnownInvalid: false);
+        var sameNativePosition = nativeOnCover &&
+                                 float.IsFinite(distanceFromEvaluatedPosition) &&
+                                 distanceFromEvaluatedPosition <=
+                                 EvaluatedPositionToleranceMeters;
+        return sameOwnedAnchor || sameNativePosition;
     }
 }
 
 /// <summary>
-/// A soldier already prone in the open under suppression must not be raised to a
-/// crouch while the suppression band stays active — rising in the open while still
-/// under fire is never the correct reaction, and it is what produced the visible
-/// prone&lt;-&gt;crouch rhythm (instant drop to prone on the next pin, forced crouch on
-/// release, repeat). Crouch remains correct on usable cover (a parapet protects while
-/// still allowing him to fire) and as the downward reaction from standing.
+/// Keeps an explicitly measured standing firing pose attached to the cover slot that
+/// produced it. Defensive building and trench slots can remain valid after the native
+/// targetDestination wrapper stops reporting them, so their stable anchor/reservation
+/// identity is allowed to carry the claim through that native status flicker. A different
+/// live destination always wins and releases the old claim.
+/// </summary>
+internal static class CoverClearanceOwnershipCore
+{
+    internal static IntPtr ResolveClaimId(
+        IntPtr currentCoverId,
+        IntPtr evaluatedCoverId,
+        bool defensiveHold,
+        bool hasDefensiveAnchor,
+        IntPtr defensiveAnchorId,
+        IntPtr reservedCoverId)
+    {
+        if (currentCoverId != IntPtr.Zero)
+            return currentCoverId;
+        if (defensiveHold && hasDefensiveAnchor && defensiveAnchorId != IntPtr.Zero)
+            return defensiveAnchorId;
+        if (defensiveHold && reservedCoverId != IntPtr.Zero)
+            return reservedCoverId;
+        return evaluatedCoverId;
+    }
+
+    internal static bool Owns(
+        IntPtr claimedCoverId,
+        IntPtr currentCoverId,
+        IntPtr evaluatedCoverId,
+        bool onUsableCover,
+        bool defensiveHold,
+        bool hasDefensiveAnchor,
+        IntPtr defensiveAnchorId,
+        IntPtr reservedCoverId)
+    {
+        if (claimedCoverId == IntPtr.Zero)
+            return false;
+
+        if (currentCoverId != IntPtr.Zero)
+        {
+            if (currentCoverId != claimedCoverId)
+                return false;
+            return onUsableCover ||
+                   defensiveHold &&
+                   ((hasDefensiveAnchor && defensiveAnchorId == claimedCoverId) ||
+                    reservedCoverId == claimedCoverId);
+        }
+
+        if (defensiveHold &&
+            ((hasDefensiveAnchor && defensiveAnchorId == claimedCoverId) ||
+             reservedCoverId == claimedCoverId))
+        {
+            return true;
+        }
+
+        return onUsableCover && evaluatedCoverId == claimedCoverId;
+    }
+}
+
+/// <summary>
+/// Chooses the immediate pinned posture without creating a third prone intent.
+/// Suppression stays crouched unless an active, usable cover evaluation already
+/// measured that this position protects the soldier only while prone.
+/// </summary>
+internal static class PinnedSuppressionPoseCore
+{
+    internal static TacticalStance Resolve(
+        bool onUsableCover,
+        bool hasCoverEvaluation,
+        TacticalStance evaluatedCoverPose)
+    {
+        return onUsableCover && hasCoverEvaluation &&
+               evaluatedCoverPose == TacticalStance.Prone
+            ? TacticalStance.Prone
+            : TacticalStance.Crouched;
+    }
+}
+
+/// <summary>
+/// Suppression recovery cannot create or preserve an unowned prone posture. It
+/// stays crouched unless an active, usable cover evaluation already owns prone.
 /// </summary>
 internal static class SuppressionRecoveryPoseCore
 {
@@ -799,15 +1020,44 @@ internal static class SuppressionRecoveryPoseCore
     // already ruled prone-only, so the suppression band must defer to it instead of
     // fighting it every frame (plan 012).
     internal static TacticalStance Resolve(
-        bool hasOverheadProtection,
         bool onUsableCover,
-        TacticalStance current,
         bool coverEvaluationOwnsProne)
-        => !hasOverheadProtection &&
-           ((!onUsableCover && current == TacticalStance.Prone) ||
-            (onUsableCover && coverEvaluationOwnsProne))
+        => onUsableCover && coverEvaluationOwnsProne
             ? TacticalStance.Prone
             : TacticalStance.Crouched;
+}
+
+/// <summary>
+/// Pure ownership policy for the one non-cover prone intent: a soldier who was actually
+/// moving and personally observes the start of a new continuous contact episode dives once.
+/// Target switching inside that episode and an already-active dive cannot retrigger it.
+/// </summary>
+internal static class ContactDivePolicyCore
+{
+    internal static bool ContactWasContinuous(
+        bool hasPreviousObservedContact,
+        float lastSeenAt,
+        float now,
+        float continuitySeconds)
+        => hasPreviousObservedContact &&
+           float.IsFinite(lastSeenAt) && float.IsFinite(now) &&
+           float.IsFinite(continuitySeconds) && continuitySeconds >= 0f &&
+           now >= lastSeenAt && now - lastSeenAt <= continuitySeconds;
+
+    internal static bool ShouldStart(
+        bool wasActuallyMoving,
+        bool hasObservedTarget,
+        bool contactWasContinuous,
+        float currentDiveUntil,
+        float now)
+        => wasActuallyMoving && hasObservedTarget && !contactWasContinuous &&
+           float.IsFinite(currentDiveUntil) && float.IsFinite(now) &&
+           now >= currentDiveUntil;
+
+    internal static float ResolveFiringDeadline(float now, float configuredSeconds)
+        => float.IsFinite(now)
+            ? now + CombatMovementPolicyCore.ResolveAttackFiringHoldSeconds(configuredSeconds)
+            : now;
 }
 
 internal enum TacticalChannel
@@ -859,7 +1109,8 @@ internal readonly record struct SoldierTacticalSnapshot(
     ContactMovementSensor ContactMovement = default,
     bool Autonomous = false,
     bool HasPlayerHoldOrder = false,
-    bool HasProtectedAssignment = false);
+    bool HasProtectedAssignment = false,
+    bool HasVehicleBoardingOrder = false);
 
 /// <summary>
 /// Identifies which system submitted a tactical proposal. Member order IS the
@@ -873,6 +1124,7 @@ internal enum ProposalSource
     PlayerHold,
     Hazard,
     ActionSafety,
+    VehicleBoarding,
     Suppression,
     ProtectedAssignment,
     DefensivePosition,
@@ -1052,6 +1304,54 @@ internal static class TacticalArbitrationCore
 
 internal static class CombatMovementPolicyCore
 {
+    // An attack advance is a bound, not permanent permission to run at a visible enemy.
+    // After this window the soldier stops for a real firing opportunity before covering
+    // fire can authorize another bound.
+    internal const float AttackBoundSeconds = 5f;
+    internal const float MinimumAttackFiringHoldSeconds = 5f;
+    internal const float DefaultAttackFiringHoldSeconds = 7f;
+    internal const float MaximumAttackFiringHoldSeconds = 15f;
+
+    internal static float ResolveAttackFiringHoldSeconds(float configuredSeconds)
+        => Math.Clamp(configuredSeconds,
+            MinimumAttackFiringHoldSeconds,
+            MaximumAttackFiringHoldSeconds);
+
+    /// <summary>
+    /// Starts the stationary half of a new contact episode exactly once. A positive expired
+    /// deadline is deliberately retained as the episode latch; only completing a later bound
+    /// replaces it with a fresh firing deadline.
+    /// </summary>
+    internal static float EnsureInitialAttackFiringCommit(
+        float currentCommitUntil,
+        bool attackBoundActive,
+        bool hasMovementOrder,
+        bool underPressure,
+        float now,
+        float configuredSeconds)
+    {
+        if (currentCommitUntil > 0f || attackBoundActive ||
+            !hasMovementOrder || !underPressure || !float.IsFinite(now))
+        {
+            return currentCommitUntil;
+        }
+
+        var duration = ResolveAttackFiringHoldSeconds(configuredSeconds);
+        return float.IsFinite(duration) ? now + duration : currentCommitUntil;
+    }
+
+    internal static bool AttackBoundComplete(bool active, float startedAt, float now)
+        => active && float.IsFinite(startedAt) && float.IsFinite(now) &&
+           now - startedAt >= AttackBoundSeconds;
+
+    internal static bool CoveringFireMayAuthorizeBound(float firingCommitUntil, float now)
+        => float.IsFinite(firingCommitUntil) && float.IsFinite(now) &&
+           now >= firingCommitUntil;
+
+    internal static bool AttackFiringPhaseActive(float firingCommitUntil, float now)
+        => float.IsFinite(firingCommitUntil) && float.IsFinite(now) &&
+           firingCommitUntil > 0f && now < firingCommitUntil;
+
     internal static bool NeedsLocalCombatControl(ContactMovementSensor sensor)
         => sensor.HasActionableContact ||
            sensor.HasRecentContact ||
@@ -1148,6 +1448,17 @@ internal static class CombatMovementPolicyCore
            candidateShotWasStationary && !candidateRelocating &&
            !candidatePinned && !candidateSuppressionMovementOwned &&
            now - candidateLastShotAt <= freshnessSeconds;
+}
+
+/// <summary>
+/// A coordinated squad order is high-level intent. Native formation/path code is allowed
+/// to move its internal destination without causing the director to issue the same order
+/// again and synchronously restart every soldier.
+/// </summary>
+internal static class SquadOrderContinuityCore
+{
+    internal static bool ShouldReissue(bool planStampMatches, bool nativeOrderMatches)
+        => !planStampMatches || !nativeOrderMatches;
 }
 
 internal static class SquadOrderMovementCore
@@ -1278,6 +1589,12 @@ internal static class ProposalGenerationCore
                 TacticalChannel.Movement, TacticalAction.Hold, CommandAuthority.RequiredSafety,
                 ProposalSource.ActionSafety, snapshot.Position, "complete medical or reload action safely"));
         }
+        else if (snapshot.HasVehicleBoardingOrder)
+        {
+            destination.Add(new TacticalProposal(
+                TacticalChannel.Movement, TacticalAction.Native, CommandAuthority.VehicleBoarding,
+                ProposalSource.VehicleBoarding, default, "complete native vehicle boarding order"));
+        }
         else if (snapshot.Suppressed)
         {
             destination.Add(new TacticalProposal(
@@ -1332,8 +1649,8 @@ internal static class ProposalGenerationCore
         if (snapshot.NeedsReloadSafety)
         {
             destination.Add(new TacticalProposal(
-                TacticalChannel.Pose, TacticalAction.Prone, CommandAuthority.RequiredSafety,
-                ProposalSource.ActionSafety, default, "protect required action"));
+                TacticalChannel.Pose, TacticalAction.Crouch, CommandAuthority.RequiredSafety,
+                ProposalSource.ActionSafety, default, "lower silhouette during required action"));
             destination.Add(new TacticalProposal(
                 TacticalChannel.FirePermission, TacticalAction.InhibitFire, CommandAuthority.RequiredSafety,
                 ProposalSource.ActionSafety, default, "do not interrupt required action"));
@@ -1367,9 +1684,13 @@ internal static class MovementProgressWatchdogCore
     internal const float StallSeconds = 2.75f;
     internal const float PathRequestStallSeconds = 5f;
     internal const float RecoveryHoldSeconds = 4f;
+    internal const int MaximumFailures = 2;
 
     internal static float RecoverySeconds(int consecutiveFailures)
-        => RecoveryHoldSeconds * Math.Clamp(consecutiveFailures, 1, 3);
+        => RecoveryHoldSeconds * Math.Clamp(consecutiveFailures, 1, MaximumFailures);
+
+    internal static bool ShouldAbandonDestination(int consecutiveFailures)
+        => consecutiveFailures >= MaximumFailures;
 
     internal static MovementProgressDecision Evaluate(MovementProgressInput input)
     {

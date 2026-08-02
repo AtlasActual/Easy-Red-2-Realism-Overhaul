@@ -1,7 +1,7 @@
 [h1]Easy Red 2 Realism Overhaul[/h1]
 
-[b]Current mod version:[/b] 1.0.9
-[b]Compatible game version:[/b] 2.0.8 Stable (Steam build 24420558)
+[b]Current mod version:[/b] 1.1.0
+[b]Compatible game version:[/b] 2.0.9 Stable (Steam build 24512933)
 [b]Download:[/b] [url=https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul/releases/]Easy Red 2 Realism Overhaul releases[/url]
 
 Easy Red 2 Realism Overhaul is a configurable BepInEx mod for more believable, tactical, and immersive combined-arms battles.
@@ -39,7 +39,7 @@ This is not a health or damage multiplier mod, and it does not turn the AI into 
 
 [*][b]Transports react before disaster.[/b] AI-led infantry can dismount from APCs when visible contact or incoming fire makes staying inside more dangerous than getting out.
 
-[*][b]Tanks behave more like armoured vehicles.[/b] AI tanks hold useful standoff distances against enemy armour, keep their frontal protection toward threats while reversing, avoid needless hull pivots, check behind themselves before backing up, continue moving against infantry when ordered, and attempt to free themselves when stuck.
+[*][b]Tanks behave more like armoured vehicles.[/b] AI tanks hold useful standoff distances, pivot only toward visible enemy armour, and stop turning once their frontal protection is within the configured facing arc. They also check behind themselves before reversing, continue moving against infantry when ordered, and attempt to free themselves when stuck.
 [/list]
 
 [h2]Weapons and battlefield realism[/h2]
@@ -63,7 +63,13 @@ This is not a health or damage multiplier mod, and it does not turn the AI into 
 [list]
 [*][b]First-person field tools.[/b] Toggle clean configurable binoculars with [b]Caps Lock[/b], hold either [b]Alt[/b] key for a configurable freelook arc, and press [b]K[/b] for a map-north-aligned compass. The compass supports NATO mils, degrees, and an always-visible mode.
 
-[*][b]Physical player-aircraft flight.[/b] Enabled by default for locally controlled human aircraft in both offline and multiplayer Realistic controls, direct input and mouse point aiming command the same aerodynamic surfaces with physical momentum and gravity, angle-of-attack stalls, drag-based energy loss, speed-dependent authority, and damage-sensitive handling. The compact instrument display remains optional and off by default. [b]EXPERIMENTAL: A disabled-by-default AI Flight Model option applies the same tuning to AI planes and may cause unforeseen issues, including planes crashing.[/b] Remote-player aircraft are never altered.
+[*][b]War Thunder-style vehicle aiming.[/b] In third person, the camera aims independently while the turret or direct-fire static weapon follows at its native speed. Separate rings show camera aim and bore direction. Vehicle freelook leaves the weapon on target and returns smoothly, while gunsights can use stabilized or unstabilized control.
+
+[*][b]Aircraft mouse aiming and freelook zoom.[/b] Optional mouse point aiming adds a third-person command circle and smooth chase camera. Hold the configurable vehicle-look action to freelook, then hold the hold-breath action for 0.5x-10x zoom in first or third person. The default is 4x.
+
+[*][b]Physical player-aircraft flight.[/b] Locally controlled Realistic aircraft use native aerodynamics with tuned power, drag, and control authority. Defaults are 0.714x speed, 1x pitch, 1.225x roll, 2x rudder, 4.87/10 engine power, and 1.423x drag. [b]EXPERIMENTAL: AI Flight Model applies the same tuning to AI planes and may cause unforeseen issues, including crashes.[/b] It is off by default and host-only in multiplayer.
+
+[*][b]Wind-driven parachutes.[/b] Parachutes drift with map wind and briefly retain momentum when the player jumps from a moving aircraft.
 
 [*][b]Less intrusive battlefield information.[/b] The optional immersive world HUD can hide floating squad and marked-unit icons in the 3D view while preserving them on the tactical map. Allied multiplayer names remain available when other markers are hidden.
 
@@ -77,7 +83,7 @@ This is not a health or damage multiplier mod, and it does not turn the AI into 
 Press [b]F10[/b], or open [b]Realism Overhaul Settings[/b] from the main or pause menu. Major systems can be adjusted or disabled individually, and the recommended defaults are designed to work as one cohesive package.
 
 [list]
-[*][b]Simple top-level AI controls:[/b] Aggressiveness, Accuracy, Reaction Speed, Awareness, and Suppression Resistance can each be adjusted from 0.5x to 1.5x, while detailed controls remain available in their normal categories.
+[*][b]Simple top-level AI controls:[/b] Aggressiveness, Accuracy, Reaction Speed, Perception, and Suppression Resistance can each be adjusted from 0.5x to 1.5x, while detailed controls remain available in their normal categories. Perception also adjusts how far away an identified enemy stops an advance without granting line of sight.
 
 [*][b]Three performance starting points:[/b] Quality restores the recommended experience, Balanced keeps every gameplay system with lighter presentation costs, and Large Battle preserves the core AI and fire-safety systems while reducing expensive supplemental effects.
 
@@ -96,17 +102,13 @@ Players using the same mod version also receive the host's settings for the sess
 
 [h2]Version 1.0.9 highlights[/h2]
 
-Version 1.0.9 strengthens the existing overhaul rather than changing its purpose:
-
 [list]
-[*]Added lightweight multi-objective coordination for attackers and defenders using native orders.
-[*]Improved close-quarters target detection, local contact callouts, danger memory, grenade use, cover occupation, spacing, and suppressed movement.
-[*]Added Quality, Balanced, and Large Battle presets plus five simple core AI tuning sliders.
-[*]Expanded automatic-weapon audio capacity, machine-gun tracer controls, immersive world-HUD options, first-person shadows, ragdoll momentum, and multiplayer redeployment flow.
-[*]Restored the large-battle stutter fix with safeguards for Unity objects and other BepInEx plugins.
-[*]Added split controls for player-operated ground turrets and direct-fire static weapons. Third-person view uses War Thunder-style point aiming: the camera moves independently while the weapon follows its center-screen direction at native traverse and elevation rates. Parallel exterior sight lines prevent the elevated camera from forcing the gun upward; thin translucent gray rings mark the commanded camera aim and visible true bore. Holding vehicle freelook moves only the camera while the large ring stays anchored to the saved aim direction—even at the screen edge—and the weapon keeps traversing toward it; releasing freelook smoothly returns the camera to that ring. In the right-click optical gunsight, the enabled-by-default Unstabilized Gunsight option instead applies relative input directly to the weapon and attaches the view to the physical gun, removing artificial vertical compensation as the vehicle moves. Players can disable that separate option to keep stabilized point aiming in the gunsight, whose native reticle remains unchanged. The horizon stays level; other vehicle seats remain native unless they are currently operating a weapon.
-[*]Added a separate Mouse Point Aiming switch for player-flown aircraft. In third-person view with mouse and keyboard Realistic controls, the same rings show the saved world-space flight command and the aircraft's actual gun or nose direction while native flight controls bank and pitch toward it. Holding the configurable vehicle-look action freezes the command and detaches the camera; also holding the configurable hold-breath action smoothly applies the separate Aircraft Free Look Zoom setting. The same chord works during native first-person vehicle look, the setting defaults to 4x, and releasing either action smoothly restores the ordinary field of view. Releasing vehicle look smoothly returns the third-person camera. First-person aircraft controls and camera movement remain native apart from this optical zoom; bomb-sight views, Simplified controls, AI, and remote aircraft remain unchanged. The new option never intercepts physical-controller input or changes the existing separate controller-freelook steering option. Ground-vehicle controllers continue to use the same point-aim behavior as mouse input.
-[*]The visible flight sliders now default to the playtested 0.714x Aircraft Speed, 1x Pitch, 1.225x Roll, 2x Rudder, 4.87/10 Engine Power, and 1.423x Aerodynamic Drag tune. Rudder's 2x default is centered in an expanded, functional 0.25x-3.75x range so players have equal adjustment room in either direction.
+[*][b]War Thunder-style vehicle aiming.[/b] Third-person cameras move independently while turrets and direct-fire static weapons follow at native speed. Separate rings show commanded aim and true bore direction, while gunsights support stabilized or unstabilized control.
+[*][b]Vehicle freelook.[/b] Holding the vehicle-look key moves only the camera. The weapon keeps its aim and the camera returns smoothly on release.
+[*][b]Aircraft mouse aiming and zoom.[/b] Optional mouse point aiming adds a third-person command circle and smooth chase camera. Hold vehicle look to freelook, then hold the configured hold-breath key for 0.5x-10x zoom in first or third person; default is 4x.
+[*][b]Tuned Realistic flight.[/b] Flight settings now use the playtested defaults. [b]EXPERIMENTAL: AI Flight Model can apply them to AI planes and may cause unforeseen issues, including crashes.[/b]
+[*][b]Parachute drift.[/b] Parachutes follow map wind and briefly retain momentum when jumping from a moving aircraft.
+[*][b]Smarter tank facing.[/b] Tanks pivot only toward a visible enemy tank and stop once their frontal armour is within the configured facing arc.
 [/list]
 
 The complete version history is included with the download and available in the [url=https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul/blob/main/CHANGELOG.md]online changelog[/url].
@@ -148,7 +150,7 @@ If an unmodded player becomes host after the original host leaves, the host-auth
 
 [h2]Compatibility and feedback[/h2]
 
-Version 1.0.9 is compatible with Easy Red 2 version 2.0.8 Stable, Steam public-branch build [b]24420558[/b] (July 27, 2026). It is not compatible with the beta branch.
+Version 1.1.0 is compatible with Easy Red 2 version 2.0.9 Stable, Steam public-branch build [b]24512933[/b] (August 1, 2026). It is not compatible with the beta branch.
 
 Game updates can sometimes break BepInEx mods. Please report loading problems, unusual AI behaviour, multiplayer issues, performance regressions, or settings that need adjustment on the [url=https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul/issues]GitHub Issues page[/url].
 

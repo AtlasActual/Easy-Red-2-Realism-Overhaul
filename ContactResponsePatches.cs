@@ -93,6 +93,7 @@ internal static class ExclusiveCoverAssignmentPatch
                     $"Cover occupancy: blocked soldier {soldierId} from an occupied position");
                 return false;
             }
+
         }
         catch (Exception ex)
         {
@@ -110,27 +111,35 @@ internal static class ExclusiveCoverAssignmentPatch
     {
         var soldierId = soldier.GetInstanceID();
         var state = AiState.GetContactState(soldierId);
-        if (!soldier.IsOnCover())
-        {
-            state.OccupiedCoverClaimId = IntPtr.Zero;
-            state.OccupiedCoverClaimRefreshAt = 0f;
-            return;
-        }
 
         try
         {
-            var cover = soldier.targetDestination;
-            if (cover == null || cover.WasCollected || cover.Pointer == IntPtr.Zero ||
-                !TryGetUsableCoverPosition(cover, out var coverPosition))
+            var coverId = IntPtr.Zero;
+            var coverPosition = default(Vector3);
+            if (ContactResponse.IsOnUsableCover(soldier))
+            {
+                var cover = soldier.targetDestination;
+                if (cover != null && !cover.WasCollected && cover.Pointer != IntPtr.Zero &&
+                    TryGetUsableCoverPosition(cover, out coverPosition))
+                {
+                    coverId = cover.Pointer;
+                }
+            }
+
+            // Building and trench destinations can briefly stop reporting IsOnCover or
+            // lose their managed wrapper after arrival. A soldier still physically at a
+            // stable mod anchor occupies that slot and must keep its reservation alive.
+            if (coverId == IntPtr.Zero &&
+                !TryGetStableOccupiedAnchor(soldier, state, out coverId, out coverPosition))
             {
                 state.OccupiedCoverClaimId = IntPtr.Zero;
                 state.OccupiedCoverClaimRefreshAt = 0f;
                 return;
             }
 
-            var coverId = cover.Pointer;
             if (state.OccupiedCoverClaimId == coverId &&
-                now < state.OccupiedCoverClaimRefreshAt)
+                now < state.OccupiedCoverClaimRefreshAt &&
+                AiState.OwnsCoverReservation(coverId, soldierId, now))
             {
                 return;
             }
@@ -167,6 +176,41 @@ internal static class ExclusiveCoverAssignmentPatch
             state.OccupiedCoverClaimId = IntPtr.Zero;
             state.OccupiedCoverClaimRefreshAt = 0f;
         }
+    }
+
+    private static bool TryGetStableOccupiedAnchor(
+        Soldier soldier,
+        ContactResponseState state,
+        out IntPtr coverId,
+        out Vector3 coverPosition)
+    {
+        coverId = IntPtr.Zero;
+        coverPosition = default;
+        if (state.HasDefensiveCoverAnchor &&
+            IsWithinOccupiedAnchor(soldier.transform.position, state.DefensiveCoverAnchorPosition))
+        {
+            coverId = state.DefensiveCoverAnchorId;
+            coverPosition = state.DefensiveCoverAnchorPosition;
+            return coverId != IntPtr.Zero;
+        }
+
+        if (state.ManeuverCoverAnchorId != IntPtr.Zero &&
+            IsWithinOccupiedAnchor(soldier.transform.position, state.ManeuverCoverAnchorPosition))
+        {
+            coverId = state.ManeuverCoverAnchorId;
+            coverPosition = state.ManeuverCoverAnchorPosition;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsWithinOccupiedAnchor(Vector3 soldierPosition, Vector3 anchorPosition)
+    {
+        var deltaX = soldierPosition.x - anchorPosition.x;
+        var deltaZ = soldierPosition.z - anchorPosition.z;
+        var leash = InfantryCoverPolicy.DefensiveAnchorLeashMeters;
+        return deltaX * deltaX + deltaZ * deltaZ <= leash * leash;
     }
 
     internal static bool TryGetUsableCoverPosition(AiDestination cover, out Vector3 position)
@@ -505,17 +549,21 @@ internal static class SoldierTacticalSprintPatch
     {
         // Moving pose write: runs on both decision frames (the prefix tail) and the
         // per-frame moving write-through, so it uses the round-robin stagger cadence for
-        // the arbiter's interop-heavy decision tail. Contact alone no longer forces the
-        // locomotion crouch: the movement contract stands normally and crouches only while
-        // suppression owns posture.
+        // the arbiter's interop-heavy decision tail. The pose arbiter receives confirmed
+        // physical locomotion, not merely the engine executor's move flag, and keeps it
+        // crouched throughout recent visual contact, direct incoming fire, suppression,
+        // or the bounded step out of a crowded fighting halt; ordinary route movement
+        // remains standing.
         var resolveDecisionTail = ContactResponse.RunsDecisionThisFrame(id);
-        var suppressed = Settings.DangerReactionsEnabled.Value &&
-                         AiState.GetContactState(id).SuppressionPoseOwned;
+        var state = AiState.GetContactState(id);
+        var suppressed = Settings.DangerReactionsEnabled.Value && state.SuppressionPoseOwned;
+        var locomotionConfirmed = ContactResponse.RefreshConfirmedLocomotion(
+            soldier, state, now);
         ContactResponse.ApplyArbitratedPose(
             ai, soldier, now, resolveDecisionTail,
             suppressed ? SoldierPose.Crouch : SoldierPose.Idle,
             suppressed ? "move-suppressed" : "move-standing",
-            movementActive: true);
+            locomotionConfirmed: locomotionConfirmed);
     }
 
 }
@@ -564,43 +612,70 @@ internal static class SoldierTacticalFpsMovePatch
     }
 }
 
-[HarmonyPatch(typeof(SoldierAI), "GetFavouriteFightingPose")]
-internal static class SoldierPinnedPosePatch
+[HarmonyPatch(typeof(SoldierAI), nameof(SoldierAI.IsMoving))]
+internal static class SoldierNativeMovementIntentPatch
 {
     [HarmonyPostfix]
-    private static void Postfix(SoldierAI __instance, ref SoldierPose __result)
+    private static void Postfix(SoldierAI __instance, ref bool __result)
     {
-        var __t = ModTimeProbe.Begin();
+        if (!__result || !MultiplayerAuthority.CanMutateGameplay())
+            return;
+
+        try
+        {
+            var soldier = __instance.GetSoldier();
+            if (!AiOwnership.IsAutonomous(soldier) || soldier.IsOnVehicle())
+                return;
+
+            // SoldierAI.IsMoving is consulted before MovementRoutine chooses its native
+            // stop/fire or move/lower-weapon branch. Filter that early decision through
+            // the same final movement owner used by our later movement boundary; otherwise
+            // a preserved path can win briefly even though the soldier is already halted.
+            __result = ContactResponse.FilterNativeMovementIntent(
+                soldier, __result, Time.time);
+        }
+        catch (Exception ex)
+        {
+            // A policy lookup must never make the native movement query fail.
+            Plugin.LogSource.LogWarning(
+                $"Native AI movement-intent arbitration failed: {ex.Message}");
+        }
+    }
+}
+
+[HarmonyPatch(typeof(Soldier), nameof(Soldier.StopMove),
+    new[] { typeof(SoldierPose), typeof(float) })]
+internal static class SoldierFinalPoseAuthorityPatch
+{
+    [HarmonyPrefix]
+    private static void Prefix(Soldier __instance, ref SoldierPose pose)
+    {
         try
         {
             if (!MultiplayerAuthority.CanMutateGameplay())
                 return;
 
-            var soldier = __instance.GetSoldier();
-            if (soldier == null)
-                return;
-
-            var id = soldier.GetInstanceID();
-            var now = Time.time;
-
-            // The native favourite pose must agree with the single arbiter, or native
-            // SetPose fights the mod's owned pose every tick (the Pose drift war). Resolve
-            // the same arbiter MaintainOwnedPose uses and, whenever a mod owner is active,
-            // return its pose so the two channels agree. The safety owners are recomputed
-            // every frame inside the arbiter; the interop-heavy decision tail follows the
-            // round-robin stagger cadence.
-            var state = AiState.GetContactState(id);
-            var pose = ContactResponse.ResolvePose(
-                soldier, state, now, ContactResponse.RunsDecisionThisFrame(id), out var owner,
-                movementActive: __instance.moveCharacter);
-            if (owner != PoseOwner.None)
+            // Keep the native SoldierAI component as the engine adapter, but replace
+            // its final stationary pose request for autonomous foot AI. In the current
+            // IL2CPP build SequentialUpdate inlines its pose selector and never calls
+            // GetFavouriteFightingPose, so StopMove is the first reliable boundary
+            // shared by both native stationary locomotion paths.
+            var ai = __instance.aiController;
+            if (ai == null ||
+                !AiOwnership.IsAutonomous(__instance) ||
+                __instance.IsOnVehicle())
             {
-                __result = ContactResponse.CommitArbitratedPose(soldier, state, owner, pose, now, null);
+                return;
             }
+
+            pose = ContactResponse.RewriteNativeStopPose(
+                ai, __instance, pose, Time.time);
         }
-        finally
+        catch (Exception ex)
         {
-            ModTimeProbe.End(ModTimeSite.FightingPose, __t);
+            // A pose policy failure must never block the native locomotion call.
+            Plugin.LogSource.LogWarning(
+                $"Final AI pose arbitration failed: {ex.Message}");
         }
     }
 }

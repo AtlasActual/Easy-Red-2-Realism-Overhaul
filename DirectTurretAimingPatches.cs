@@ -79,7 +79,7 @@ internal static class DirectTurretAiming
                TryGetSelectedPlayerTurret(controller, out _, out _);
     }
 
-    internal static bool TryHandleUnstabilizedGunsight(
+    internal static bool TryHandleDirectGunnerControl(
         Turret turret,
         float targetAngleAdjust,
         out bool rotationComplete)
@@ -89,16 +89,23 @@ internal static class DirectTurretAiming
         try
         {
             var controller = PlayerController.currentController;
-            if (!Settings.UnstabilizedGunsightEnabled.Value ||
-                turret == null ||
+            if (turret == null ||
                 controller == null ||
-                !controller.IsAiming ||
-                PlayerVehicleFreeLook.IsCameraDetached ||
                 !TryGetSelectedPlayerTurret(controller, out _, out var selectedTurret) ||
                 turret.GetInstanceID() != selectedTurret.GetInstanceID())
             {
                 return false;
             }
+
+            var directOpticalSight =
+                Settings.UnstabilizedGunsightEnabled.Value &&
+                controller.IsAiming &&
+                !PlayerVehicleFreeLook.IsCameraDetached;
+            var lockGunnerViewElevation =
+                Settings.GunnerViewElevationLockEnabled.Value &&
+                IsUnzoomedGunnerPeriscopeView(controller);
+            if (!directOpticalSight && !lockGunnerViewElevation)
+                return false;
 
             var turretId = turret.GetInstanceID();
             var frame = Time.frameCount;
@@ -118,7 +125,9 @@ internal static class DirectTurretAiming
             if (!TryGetDirectInput(out var input))
                 return false;
 
-            rotationComplete = turret.ManualRotate(input.x, input.y);
+            rotationComplete = turret.ManualRotate(
+                input.x,
+                lockGunnerViewElevation ? 0f : input.y);
             _lastDirectTurretId = turretId;
             _lastDirectHandledFrame = frame;
             _lastDirectRotationComplete = rotationComplete;
@@ -129,6 +138,21 @@ internal static class DirectTurretAiming
             ReportFailure(ex);
             return false;
         }
+    }
+
+    private static bool IsUnzoomedGunnerPeriscopeView(
+        PlayerController controller)
+    {
+        if (controller.IsAiming ||
+            PlayerController.TPSEnabled ||
+            !PlayerController.fpsCamera)
+        {
+            return false;
+        }
+
+        var soldier = controller.GetControlledCharacter();
+        var seat = soldier?.GetCurrentVehicleSeat();
+        return seat != null && seat.HasPeriscope();
     }
 
     internal static bool TryGetThirdPersonAimDirection(
@@ -344,7 +368,7 @@ internal static class ThirdPersonTurretParallelAimPatch
         float targetAngleAdjust,
         ref bool __result)
     {
-        if (DirectTurretAiming.TryHandleUnstabilizedGunsight(
+        if (DirectTurretAiming.TryHandleDirectGunnerControl(
                 __instance,
                 targetAngleAdjust,
                 out var rotationComplete))
@@ -374,7 +398,7 @@ internal static class CommanderTurretUnstabilizedGunsightPatch
         float targetAngleAdjust,
         ref bool __result)
     {
-        if (!DirectTurretAiming.TryHandleUnstabilizedGunsight(
+        if (!DirectTurretAiming.TryHandleDirectGunnerControl(
                 __instance,
                 targetAngleAdjust,
                 out var rotationComplete))

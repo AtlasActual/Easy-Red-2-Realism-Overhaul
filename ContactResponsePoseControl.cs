@@ -7,8 +7,7 @@ namespace ER2RealismOverhaul;
 internal static partial class ContactResponse
 {
     private const float CoverMuzzleClearanceDistance = 2f;
-    private const float OverheadProtectionCheckIntervalSeconds = 0.5f;
-    private const float OverheadProtectionDistanceMeters = 4f;
+    private const float ConfirmedLocomotionThreshold = 0.2f;
 
     private static void ResetTacticalPoseLatch(ContactResponseState state)
     {
@@ -17,6 +16,7 @@ internal static partial class ContactResponse
         state.LatchedPoseOwner = PoseOwner.None;
         state.TacticalPoseHoldUntil = 0f;
         state.CoverPostureDowngradeSince = 0f;
+        state.MovementPoseEvidenceUntil = 0f;
         state.HasArbiterCache = false;
         state.ArbiterCachedOwner = PoseOwner.None;
         state.ArbiterCachedPose = default;
@@ -41,25 +41,24 @@ internal static partial class ContactResponse
         float now,
         bool resolveDecisionTail,
         out PoseOwner owner,
-        bool movementActive = false)
+        bool locomotionConfirmed = false,
+        bool stationaryCombatActive = false)
     {
         var id = soldier.GetInstanceID();
 
-        // The safety ranks a-c all pin a soldier DOWN, and each corresponds to a halting
-        // movement owner (see PoseMovementContractCore for the rank-by-rank correspondence)
-        // - except while he is escaping a flame, the one movement grant that outranks the
-        // halts. A running man is not prone, so all three yield to the flame escape exactly
-        // as the pinned rank always did, and the movement rank below owns him instead.
+        // A flame escape is the lethal-hazard movement grant. No stationary posture owns
+        // a soldier while that escape is active.
         var flameEvading = AiState.IsFlameEvading(id, now);
 
-        // a. Required-action safety (exposed reload / bandage prone).
-        if (state.ExposedReloadProneOwned && !flameEvading)
+        // a. A moving soldier's first visual acquisition owns one deliberate dive and
+        // firing commitment. Cover evaluation below is the only other Prone author.
+        if (now < state.ContactDiveProneUntil && !flameEvading && !soldier.IsOnFire)
         {
-            owner = PoseOwner.RequiredAction;
+            owner = PoseOwner.ContactDive;
             return SoldierPose.Prone;
         }
 
-        // b. Pinned / on-fire / flame safety - instant.
+        // b. Pinned / on-fire safety may halt or crouch, but cannot invent Prone.
         if (IsPinned(id) && !flameEvading)
         {
             owner = PoseOwner.Suppression;
@@ -68,44 +67,68 @@ internal static partial class ContactResponse
         if (Settings.DangerReactionsEnabled.Value && soldier.IsOnFire)
         {
             owner = PoseOwner.Suppression;
-            return SoldierPose.Prone;
+            return SoldierPose.Crouch;
         }
 
         // c. The movement contract (plan 019). The committed movement decision from the
-        // single movement write site is an INPUT here. Active locomotion stands when
-        // unsuppressed and crouches while suppression owns posture; an attacker released
-        // by the maximum combat halt can keep Prone and crawl toward the objective.
-        // MovementOwner.Free is claimed only when the native locomotion path is active.
+        // single movement write site and confirmed physical locomotion are INPUTS here.
+        // A move/executor command by itself does not own the pose: the engine can pulse it
+        // while reassessing an already-reached objective, which previously alternated
+        // movement-standing with stationary-combat crouching. Active route locomotion
+        // stands outside combat and crouches throughout recent contact or direct incoming
+        // fire. Incidental physical correction inside a settled fighting position keeps
+        // that position's latched posture instead of becoming a one-frame travel stand.
         // This rank stays above the stagger cache so a cached fighting pose cannot leak
-        // into a newly committed move.
+        // into a genuinely moving soldier.
         var committedMovement = state.LastMovementOwner;
-        if (!state.MovementHalted &&
-            (movementActive ||
-             PoseMovementContractCore.MovementOwnsPose(
-                 committedMovement,
-                 halted: false)))
+        if (PoseMovementContractCore.MovementOwnsPose(
+                committedMovement,
+                state.MovementHalted,
+                locomotionConfirmed))
         {
-            var suppressed = Settings.DangerReactionsEnabled.Value &&
-                             state.SuppressionPoseOwned;
+            var movingUnderFire = Settings.ContactResponseEnabled.Value &&
+                                  ((state.HasThreatPosition && now < state.ContactUntil) ||
+                                   IncomingFireAwareness.TryGetActiveDirectCue(
+                                       id, now, out _));
+            movingUnderFire |= Settings.DangerReactionsEnabled.Value &&
+                               state.SuppressionPoseOwned;
+            var hasSettledPose = state.HasLatchedTacticalPose &&
+                                 PoseMovementContractCore.CanPreserveAsSettledPose(
+                                     state.LatchedPoseOwner);
+            var settledPose = hasSettledPose
+                ? ToTacticalStance(state.LatchedTacticalPose)
+                : TacticalStance.Crouched;
             owner = PoseOwner.MovementPose;
             return FromTacticalStance(PoseMovementContractCore.MovementStance(
                 committedMovement,
-                suppressed,
-                state.AttackProgressForced &&
-                suppressed &&
-                !state.HasOverheadProtection));
+                movingUnderFire,
+                HasStationaryTacticalHold(state, now),
+                state.Relocating,
+                hasSettledPose,
+                settledPose));
         }
 
         // Decision tail (ranks d-i): reuse the cached outcome on non-decision frames so
         // the interop-heavy cover geometry is only re-evaluated on this soldier's own
         // stagger cadence (or an authoritative update).
-        if (!resolveDecisionTail && state.HasArbiterCache)
+        // A cached native/pass-through result is invalid as soon as combat ownership
+        // begins, and a cached baseline-combat result is invalid as soon as it ends.
+        // Re-resolve those two edges immediately; all other cached tactical owners keep
+        // the normal stagger cadence.
+        var cachedContextMatches = state.ArbiterCachedOwner switch
+        {
+            PoseOwner.None => !stationaryCombatActive,
+            PoseOwner.StationaryCombat => stationaryCombatActive,
+            _ => true
+        };
+        if (!resolveDecisionTail && state.HasArbiterCache && cachedContextMatches)
         {
             owner = state.ArbiterCachedOwner;
             return state.ArbiterCachedPose;
         }
 
-        var pose = ResolveDecisionTailPose(soldier, state, now, out owner);
+        var pose = ResolveDecisionTailPose(
+            soldier, state, now, stationaryCombatActive, out owner);
         state.HasArbiterCache = true;
         state.ArbiterCachedOwner = owner;
         state.ArbiterCachedPose = pose;
@@ -116,6 +139,7 @@ internal static partial class ContactResponse
         Soldier soldier,
         ContactResponseState state,
         float now,
+        bool stationaryCombatActive,
         out PoseOwner owner)
     {
         var id = soldier.GetInstanceID();
@@ -139,12 +163,6 @@ internal static partial class ContactResponse
                 soldier, state, state.LastThreatPosition, now, out var evaluation))
         {
             var proposed = ApplyCoverDowngradeHysteresis(state, evaluation.Pose, now);
-            if (suppressionBand &&
-                proposed == SoldierPose.Prone &&
-                HasOverheadProtection(soldier, state, now))
-            {
-                proposed = SoldierPose.Crouch;
-            }
             if (proposed == SoldierPose.Idle)
             {
                 ClaimCoverClearancePose(soldier, state);
@@ -158,8 +176,7 @@ internal static partial class ContactResponse
         }
 
         // f. Suppression band / recovery. On owned cover rank e above already owns the
-        // pose; off cover this keeps an already-prone soldier down and crouches a
-        // standing/crouched one (SuppressionRecoveryPoseCore).
+        // pose; off cover suppression owns a crouch, never a new prone request.
         if (IsSuppressionPoseOwner(id) || suppressionBand)
         {
             owner = PoseOwner.SuppressionRecovery;
@@ -172,10 +189,21 @@ internal static partial class ContactResponse
         if (ShouldOwnCrouch(state, now))
         {
             owner = PoseOwner.TacticalCrouch;
-            return SoldierPose.Crouch;
+            return FallbackStationaryPose(soldier);
         }
 
-        // i. No mod owner: leave the native favourite pose untouched.
+        // h. Baseline stationary combat ownership. The live game does not call its
+        // GetFavouriteFightingPose helper; SequentialUpdate writes actualPose directly.
+        // Once a soldier is fighting or holding tactically, never hand that final choice
+        // back to the native stand/crouch/prone alternator. Specific cover geometry above
+        // still owns any measured standing-clearance case.
+        if (stationaryCombatActive)
+        {
+            owner = PoseOwner.StationaryCombat;
+            return FallbackStationaryPose(soldier);
+        }
+
+        // i. No mod owner: leave the native pose untouched.
         owner = PoseOwner.None;
         return SoldierPose.Idle;
     }
@@ -191,13 +219,14 @@ internal static partial class ContactResponse
     private static string OwnerTag(PoseOwner owner)
         => owner switch
         {
-            PoseOwner.RequiredAction => "required-action",
+            PoseOwner.ContactDive => "contact-dive",
             PoseOwner.Suppression => "pinned-fire",
             PoseOwner.MovementPose => "movement",
             PoseOwner.CoverClearance => "cover-clearance",
             PoseOwner.CoverEvaluation => "cover-eval",
             PoseOwner.SuppressionRecovery => "suppr-recovery",
             PoseOwner.TacticalCrouch => "tactical-crouch",
+            PoseOwner.StationaryCombat => "stationary-combat",
             PoseOwner.HaltFallback => "halt-fallback",
             _ => "native"
         };
@@ -219,7 +248,7 @@ internal static partial class ContactResponse
             return evaluation.Pose;
         }
 
-        return SoldierPose.Crouch;
+        return FallbackStationaryPose(soldier);
     }
 
     internal static SoldierPose SuppressionPose(Soldier soldier)
@@ -238,17 +267,13 @@ internal static partial class ContactResponse
         }
 
         return FromTacticalStance(PinnedSuppressionPoseCore.Resolve(
-            HasOverheadProtection(soldier, state, now),
             onUsableCover,
             hasEvaluation,
             evaluatedPose));
     }
 
-    // A stationary suppression-driven crouch proposal must not raise a soldier who is
-    // already prone in the open: crouch is only a sane suppression reaction on usable
-    // cover or as a downward reaction from standing. On usable cover it also must not
-    // fight an owned cover evaluation that already measured the slot as prone-only —
-    // see SuppressionRecoveryPoseCore.
+    // Suppression itself owns Crouch. It may preserve Prone only when an active cover
+    // evaluation already measured this usable position as prone-only protection.
     internal static SoldierPose SuppressionRecoveryPose(Soldier soldier)
     {
         var onUsableCover = IsOnUsableCover(soldier);
@@ -268,50 +293,9 @@ internal static partial class ContactResponse
         }
 
         return SuppressionRecoveryPoseCore.Resolve(
-                   HasOverheadProtection(soldier, state, Time.time),
                    onUsableCover,
-                   soldier.Pose == SoldierPose.Prone ? TacticalStance.Prone : TacticalStance.Crouched,
                    coverEvaluationOwnsProne)
                == TacticalStance.Prone ? SoldierPose.Prone : SoldierPose.Crouch;
-    }
-
-    private static bool HasOverheadProtection(
-        Soldier soldier,
-        ContactResponseState state,
-        float now)
-    {
-        if (now < state.NextOverheadProtectionCheckAt)
-            return state.HasOverheadProtection;
-
-        state.NextOverheadProtectionCheckAt =
-            now + OverheadProtectionCheckIntervalSeconds;
-        try
-        {
-            // Start just above eye level so the ray cannot immediately hit the
-            // soldier's own collision volume. A nearby solid ceiling is the
-            // reliable geometry signal available for a roofed fighting position.
-            var origin = soldier.LookPosition() + Vector3.up * 0.2f;
-            state.HasOverheadProtection = Physics.Raycast(
-                origin,
-                Vector3.up,
-                OverheadProtectionDistanceMeters,
-                Physics.DefaultRaycastLayers,
-                QueryTriggerInteraction.Ignore);
-        }
-        catch (NullReferenceException)
-        {
-            state.HasOverheadProtection = false;
-        }
-        catch (Il2CppException)
-        {
-            state.HasOverheadProtection = false;
-        }
-        catch (ObjectCollectedException)
-        {
-            state.HasOverheadProtection = false;
-        }
-
-        return state.HasOverheadProtection;
     }
 
     private static SoldierPose GetStationaryEngagementPose(
@@ -376,6 +360,9 @@ internal static partial class ContactResponse
             : SoldierPose.Crouch;
     }
 
+    private static SoldierPose FallbackStationaryPose(Soldier soldier)
+        => SoldierPose.Crouch;
+
     private static bool HasNearMuzzleObstruction(
         Soldier soldier,
         Vector3 origin,
@@ -435,33 +422,24 @@ internal static partial class ContactResponse
 
     private static void ClaimCoverClearancePose(Soldier soldier, ContactResponseState state)
     {
-        try
-        {
-            var cover = soldier.targetDestination;
-            if (cover == null || cover.Pointer == IntPtr.Zero)
-                return;
+        var coverId = CoverClearanceOwnershipCore.ResolveClaimId(
+            TryGetCurrentCoverId(soldier),
+            state.EvaluatedCoverPostureId,
+            state.DefensiveCoverHold,
+            state.HasDefensiveCoverAnchor,
+            state.DefensiveCoverAnchorId,
+            state.ReservedCoverId);
+        if (coverId == IntPtr.Zero)
+            return;
 
-            var newlyClaimed = !state.CoverClearancePoseOwned ||
-                               state.CoverClearanceCoverId != cover.Pointer;
-            state.CoverClearancePoseOwned = true;
-            state.CoverClearanceCoverId = cover.Pointer;
-            if (newlyClaimed)
-            {
-                AiState.Trace(
-                    $"Cover firing clearance: soldier {soldier.GetInstanceID()} stood to clear a near muzzle obstruction");
-            }
-        }
-        catch (NullReferenceException)
+        var newlyClaimed = !state.CoverClearancePoseOwned ||
+                           state.CoverClearanceCoverId != coverId;
+        state.CoverClearancePoseOwned = true;
+        state.CoverClearanceCoverId = coverId;
+        if (newlyClaimed)
         {
-            ClearCoverClearancePose(state);
-        }
-        catch (Il2CppException)
-        {
-            ClearCoverClearancePose(state);
-        }
-        catch (ObjectCollectedException)
-        {
-            ClearCoverClearancePose(state);
+            AiState.Trace(
+                $"Cover firing clearance: soldier {soldier.GetInstanceID()} stood to clear a near muzzle obstruction");
         }
     }
 
@@ -470,27 +448,40 @@ internal static partial class ContactResponse
         ContactResponseState state)
     {
         if (!Settings.ContactResponseEnabled.Value || !state.CoverClearancePoseOwned ||
-            state.CoverClearanceCoverId == IntPtr.Zero || !IsOnUsableCover(soldier))
+            state.CoverClearanceCoverId == IntPtr.Zero)
         {
             return false;
         }
 
+        return CoverClearanceOwnershipCore.Owns(
+            state.CoverClearanceCoverId,
+            TryGetCurrentCoverId(soldier),
+            state.EvaluatedCoverPostureId,
+            IsOnUsableCover(soldier),
+            state.DefensiveCoverHold,
+            state.HasDefensiveCoverAnchor,
+            state.DefensiveCoverAnchorId,
+            state.ReservedCoverId);
+    }
+
+    private static IntPtr TryGetCurrentCoverId(Soldier soldier)
+    {
         try
         {
             var cover = soldier.targetDestination;
-            return cover != null && cover.Pointer == state.CoverClearanceCoverId;
+            return cover == null || cover.WasCollected ? IntPtr.Zero : cover.Pointer;
         }
         catch (NullReferenceException)
         {
-            return false;
+            return IntPtr.Zero;
         }
         catch (Il2CppException)
         {
-            return false;
+            return IntPtr.Zero;
         }
         catch (ObjectCollectedException)
         {
-            return false;
+            return IntPtr.Zero;
         }
     }
 
@@ -537,7 +528,7 @@ internal static partial class ContactResponse
     /// writes it to the soldier. The caller has already set the ownership flags the
     /// arbiter reads. <paramref name="fallbackPose"/> is used only when no tactical owner
     /// is active (an ownerless movement halt), committed under PoseOwner.HaltFallback so
-    /// locomotion still stops at a sane stance without overriding the native favourite
+    /// locomotion still stops at a sane stance without overriding an ownerless native
     /// pose. Returns the committed pose so a caller can StopMove into the same stance.
     /// </summary>
     internal static SoldierPose ApplyArbitratedPose(
@@ -547,11 +538,14 @@ internal static partial class ContactResponse
         bool resolveDecisionTail,
         SoldierPose fallbackPose,
         string? traceSource = null,
-        bool movementActive = false)
+        bool locomotionConfirmed = false)
     {
         var state = AiState.GetContactState(soldier.GetInstanceID());
+        var stationaryCombatActive = OwnsStationaryCombatPose(
+            ai, soldier, state, now, locomotionConfirmed);
         var pose = ResolvePose(
-            soldier, state, now, resolveDecisionTail, out var owner, movementActive);
+            soldier, state, now, resolveDecisionTail, out var owner, locomotionConfirmed,
+            stationaryCombatActive);
         if (owner == PoseOwner.None)
         {
             owner = PoseOwner.HaltFallback;
@@ -774,14 +768,15 @@ internal static partial class ContactResponse
         => MaintainOwnedPose(ai, soldier, now, resolvePose: true);
 
     /// <summary>
-    /// The authoritative per-frame pose write. It runs the single arbiter and applies
-    /// its result through the owner-aware latch - the last word on a soldier's pose each
-    /// time it runs (last in the SequentialUpdate tail, and in both movement postfixes).
+    /// The authoritative scheduled pose write. It runs the single arbiter and applies
+    /// its result through the owner-aware latch after SequentialUpdate and both movement
+    /// paths. The Soldier.StopMove boundary separately enforces the committed result
+    /// against later native stationary-pose writes.
     /// <paramref name="resolvePose"/> is false on the non-decision frames of the
     /// round-robin stagger (the per-frame TacticalMove postfix): the safety owners are
     /// always recomputed inside the arbiter, only the interop-heavy DECISION tail is
     /// reused from the stagger cache. The authoritative SequentialUpdate call always
-    /// passes true. When no owner is active the native favourite pose is left untouched.
+    /// passes true. When no owner is active the native pose is left untouched.
     /// </summary>
     internal static void MaintainOwnedPose(
         SoldierAI ai,
@@ -792,9 +787,8 @@ internal static partial class ContactResponse
         var id = soldier.GetInstanceID();
         var state = AiState.GetContactState(id);
 
-        // Exposed reload owns posture, fire, and movement until the magazine seats; keep
-        // its lifecycle (the release path lives here). When it owns, it applies its own
-        // required-action halt (which routes prone through the arbiter).
+        // Exposed reload owns its safety halt and fire inhibition until the magazine
+        // seats; keep its lifecycle (the release path lives here). It does not author Prone.
         if (ExposedReloadPosture.TryMaintain(soldier, now))
             return;
 
@@ -803,15 +797,130 @@ internal static partial class ContactResponse
         if (state.ContactCrouchOwned && now >= state.ContactUntil)
             state.ContactCrouchOwned = false;
 
+        var movementActive = RefreshConfirmedLocomotion(soldier, state, now);
+        var stationaryCombatActive = OwnsStationaryCombatPose(
+            ai, soldier, state, now, movementActive);
         var pose = ResolvePose(
             soldier, state, now, resolvePose, out var owner,
-            movementActive: ai.moveCharacter);
+            movementActive,
+            stationaryCombatActive);
         if (owner == PoseOwner.None)
-            return; // No mod owner: leave the native favourite pose untouched.
+            return; // No mod owner: leave the native pose untouched.
 
         var accepted = CommitArbitratedPose(soldier, state, owner, pose, now, null);
         WriteAcceptedPose(ai, soldier, accepted, owner, null);
     }
+
+    /// <summary>
+    /// Samples translation rather than SoldierAI.moveCharacter. The latter is reset and
+    /// reasserted by the base decision/executor loops and can pulse at a reached objective.
+    /// A short lease keeps locomotion continuous across path-node and fixed-update sampling
+    /// gaps, but only real movement can start or refresh that lease.
+    /// </summary>
+    internal static bool RefreshConfirmedLocomotion(
+        Soldier soldier,
+        ContactResponseState state,
+        float now)
+    {
+        if (state.MovementHalted || MovementArbiterCore.Halts(state.LastMovementOwner))
+        {
+            state.MovementPoseEvidenceUntil = 0f;
+            return false;
+        }
+
+        var physicallyMoving = soldier.IsMoving(ConfirmedLocomotionThreshold);
+        state.MovementPoseEvidenceUntil = PoseMovementContractCore.RefreshEvidenceUntil(
+            physicallyMoving,
+            now,
+            state.MovementPoseEvidenceUntil);
+        return PoseMovementContractCore.HasConfirmedLocomotion(
+            physicallyMoving,
+            now,
+            state.MovementPoseEvidenceUntil);
+    }
+
+    /// <summary>
+    /// Rewrites the pose argument at Soldier.StopMove, the final native stationary
+    /// locomotion boundary. Native SequentialUpdate may have just replaced actualPose;
+    /// this method restores the one arbitrated result before Soldier.SetPose sees it.
+    /// It deliberately does not call SetPose itself because StopMove will do so with the
+    /// rewritten argument immediately after the prefix returns.
+    /// </summary>
+    internal static SoldierPose RewriteNativeStopPose(
+        SoldierAI ai,
+        Soldier soldier,
+        SoldierPose nativeRequest,
+        float now)
+    {
+        var state = AiState.GetContactState(soldier.GetInstanceID());
+        var stationaryCombatActive = OwnsStationaryCombatPose(
+            ai, soldier, state, now, movementActive: false);
+        var pose = ResolvePose(
+            soldier,
+            state,
+            now,
+            resolveDecisionTail: false,
+            out var owner,
+            locomotionConfirmed: false,
+            stationaryCombatActive: stationaryCombatActive);
+        if (owner == PoseOwner.None)
+            return nativeRequest;
+
+        var accepted = CommitArbitratedPose(
+            soldier, state, owner, pose, now, "stop-boundary");
+        ai.pose = accepted;
+        ai.actualPose = accepted;
+        return FromTacticalStance(FinalPoseAuthorityCore.RewriteNativeRequest(
+            modOwnsPose: true,
+            nativeRequest: ToTacticalStance(nativeRequest),
+            committedPose: ToTacticalStance(accepted)));
+    }
+
+    private static bool OwnsStationaryCombatPose(
+        SoldierAI ai,
+        Soldier soldier,
+        ContactResponseState state,
+        float now,
+        bool movementActive)
+    {
+        var hasVisibleTarget = false;
+        try
+        {
+            hasVisibleTarget = ai.visibleTarget != null || soldier.CurrentVisibleTarget != null;
+        }
+        catch (NullReferenceException)
+        {
+            // A disappearing target during teardown is not evidence of active combat.
+        }
+        catch (Il2CppException)
+        {
+            // A disappearing target during teardown is not evidence of active combat.
+        }
+        catch (ObjectCollectedException)
+        {
+            // A disappearing target during teardown is not evidence of active combat.
+        }
+
+        var hasRecentContact = state.HasThreatPosition && now < state.ContactUntil;
+        var hasStationaryTacticalHold = HasStationaryTacticalHold(state, now);
+        return FinalPoseAuthorityCore.OwnsStationaryCombatPose(
+            Settings.ContactResponseEnabled.Value,
+            movementActive,
+            hasVisibleTarget,
+            hasRecentContact,
+            hasStationaryTacticalHold);
+    }
+
+    private static bool HasStationaryTacticalHold(
+        ContactResponseState state,
+        float now)
+        =>
+            state.DefensiveCoverHold ||
+            state.DefensivePositionOwned ||
+            state.PlayerHoldPositionOwned ||
+            state.MovementInhibitedByContactResponse ||
+            now < state.EngagementHoldUntil ||
+            now < state.HoldCoverUntil;
 
     private static SoldierPose ApplyCoverDowngradeHysteresis(
         ContactResponseState state,

@@ -447,7 +447,7 @@ internal static class HandheldWeaponClassifier
         return false;
     }
 
-    private static bool IsAntiTankLauncher(GenericGun gun)
+    internal static bool IsAntiTankLauncher(GenericGun gun)
     {
         // The game exposes AP capability but does not distinguish launchers from
         // anti-tank rifles. Muzzle velocity supplies that missing distinction:

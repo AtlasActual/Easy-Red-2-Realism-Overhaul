@@ -20,6 +20,24 @@ internal static class TargetConfirmationCore
     // more than this per sample would count unobserved time as observation.
     internal const float MaxSampleCreditSeconds = 1.5f;
 
+    internal static bool CanReuseConfirmedTarget(
+        bool hasConfirmedTarget,
+        bool isSameTarget,
+        bool requiresReacquisition,
+        bool hasIndependentVisualProof)
+        => hasConfirmedTarget &&
+           isSameTarget &&
+           (!requiresReacquisition || hasIndependentVisualProof);
+
+    internal static bool HasRecentIndependentVisualProof(
+        bool isSameTarget,
+        float proofAt,
+        float now)
+        => isSameTarget &&
+           proofAt >= 0f &&
+           now >= proofAt &&
+           now - proofAt <= RecentPositiveObservationGraceSeconds;
+
     internal static float AccrueObservation(float observedSeconds, float lastSeenAt, float now)
     {
         var gap = Math.Max(0f, now - lastSeenAt);
@@ -27,6 +45,29 @@ internal static class TargetConfirmationCore
             return 0f;
         return observedSeconds + Math.Min(gap, MaxSampleCreditSeconds);
     }
+}
+
+/// <summary>
+/// Defines the deliberately narrow exception to normal target-priority switching:
+/// a soldier finishes an already-confirmed close infantry engagement while that
+/// target remains alive and visible.
+/// </summary>
+internal static class CloseTargetCommitmentCore
+{
+    internal static bool ShouldRetain(
+        bool closeQuartersEnabled,
+        bool hasConfirmedTarget,
+        bool isSameTarget,
+        bool isLivingInfantry,
+        bool isVisible,
+        float distance,
+        float closeRange)
+        => closeQuartersEnabled &&
+           hasConfirmedTarget &&
+           isSameTarget &&
+           isLivingInfantry &&
+           isVisible &&
+           distance <= Math.Max(0f, closeRange);
 }
 
 /// <summary>

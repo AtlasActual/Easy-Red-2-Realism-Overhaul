@@ -28,7 +28,7 @@ internal static partial class ContactResponse
         var watchdogMayOwnMovement =
             movementAction is TacticalAction.Move or TacticalAction.Native &&
             movementSource is not (ProposalSource.External or ProposalSource.Hazard or
-                ProposalSource.ActionSafety);
+                ProposalSource.ActionSafety or ProposalSource.VehicleBoarding);
         if (!watchdogMayOwnMovement)
         {
             ResetMovementWatch(state);
@@ -48,6 +48,15 @@ internal static partial class ContactResponse
         {
             state.MovementStallHoldUntil = 0f;
             ResetMovementWatch(state, preserveFailures: true);
+            if (eligible &&
+                MovementProgressWatchdogCore.ShouldAbandonDestination(
+                    state.MovementStallFailures) &&
+                IsSameStalledDestination(ai, state))
+            {
+                AbandonStalledDestination(soldier, state);
+                return;
+            }
+
             // Only resume the progress watch if the arbiter actually released him: a
             // soldier still owned by a higher hold would otherwise be monitored while
             // legitimately stationary and re-arm the stall he just served.
@@ -176,8 +185,12 @@ internal static partial class ContactResponse
             state.MovementStallDestination = default;
         }
 
-        state.MovementStallFailures = Math.Min(3, state.MovementStallFailures + 1);
+        state.MovementStallFailures = Math.Min(
+            MovementProgressWatchdogCore.MaximumFailures,
+            state.MovementStallFailures + 1);
         var holdSeconds = MovementProgressWatchdogCore.RecoverySeconds(
+            state.MovementStallFailures);
+        var abandonDestination = MovementProgressWatchdogCore.ShouldAbandonDestination(
             state.MovementStallFailures);
         state.MovementStallHoldUntil = now + holdSeconds;
         state.NextRelocationAllowedAt = Mathf.Max(
@@ -186,10 +199,48 @@ internal static partial class ContactResponse
             state.NextDecisionAt, state.MovementStallHoldUntil);
         ResetMovementWatch(state, preserveFailures: true);
         StopDangerMovement(ai, soldier, Time.deltaTime);
-        if (refreshPath)
+        if (abandonDestination)
+            AbandonStalledDestination(soldier, state);
+        else if (refreshPath)
             RefreshPath(ai, "Stalled locomotion path refresh failed");
         AiState.Trace(
-            $"Movement watchdog: soldier {soldier.GetInstanceID()} stopped for {holdSeconds:0.0}s; {reason}");
+            abandonDestination
+                ? $"Movement watchdog: soldier {soldier.GetInstanceID()} abandoned a repeatedly blocked destination; {reason}"
+                : $"Movement watchdog: soldier {soldier.GetInstanceID()} stopped for {holdSeconds:0.0}s; {reason}");
+    }
+
+    private static bool IsSameStalledDestination(
+        SoldierAI ai,
+        ContactResponseState state)
+    {
+        if (!state.HasMovementStallDestination)
+            return false;
+
+        try
+        {
+            return HorizontalDistance(ai.MoveDestination, state.MovementStallDestination) <
+                   MovementProgressWatchdogCore.DestinationChangeMeters;
+        }
+        catch (NullReferenceException)
+        {
+            return false;
+        }
+        catch (Il2CppException)
+        {
+            return false;
+        }
+        catch (ObjectCollectedException)
+        {
+            return false;
+        }
+    }
+
+    private static void AbandonStalledDestination(
+        Soldier soldier,
+        ContactResponseState state)
+    {
+        ExecuteOwnedCoverWrite(soldier, () => soldier.CoverPosition(null!));
+        state.MovementInhibitedByContactResponse = false;
     }
 
     private static void ResetMovementWatch(

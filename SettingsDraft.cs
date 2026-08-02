@@ -282,6 +282,12 @@ internal sealed class SettingsDraft
             return false;
         }
 
+        if (!Less(parsed, "AI - Infantry tactics - Danger", "CrouchSuppressionReleaseThreshold", "CrouchSuppressionThreshold"))
+        {
+            error = "Crouch release suppression must be lower than crouch suppression.";
+            return false;
+        }
+
         if (!Less(parsed, "AI - Infantry tactics - Danger", "MountedGunnerRiseSuppressionThreshold", "MountedGunnerDuckSuppressionThreshold"))
         {
             error = "Mounted-gunner rise suppression must be lower than duck suppression.";

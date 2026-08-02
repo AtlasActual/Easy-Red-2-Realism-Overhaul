@@ -55,6 +55,12 @@ internal readonly record struct CoverScoreInput(
     // equivalently protective firing positions.
     int NearbyReservationCount = 0);
 
+internal readonly record struct CoverPositionQuality(
+    bool IsProtective,
+    bool IsMeasured,
+    float ProtectionFraction,
+    bool HasFiringLane);
+
 internal readonly record struct CoverPostureInput(
     int ProtectedSamples,
     int TotalSamples,
@@ -111,6 +117,12 @@ internal static class InfantryCoverDecisionCore
         bool stableAnchor)
         => !relocating && !nativeCoverReported && !stableAnchor;
 
+    internal static bool HasStableReservationAnchor(
+        bool defensiveHold,
+        bool defensiveAnchor,
+        bool maneuverAnchor)
+        => defensiveHold || defensiveAnchor || maneuverAnchor;
+
     internal static bool ShouldSeekInitialDefensiveCover(
         bool positionOwned,
         bool hasStableAnchor,
@@ -166,9 +178,15 @@ internal static class InfantryCoverDecisionCore
             if (crouched.CanFire)
                 return CoverPostureChoice.Crouched;
 
-            // A soldier may rise behind genuinely protective low cover to clear
-            // the weapon. A narrow object that does not protect a crouched body
-            // cannot justify standing in the open merely because the muzzle clears.
+            // Keep the smallest firing silhouette. Standing is a last-resort
+            // clearance posture only when neither crouch nor prone can use the lane.
+            if (HasMeaningfulProtection(prone) && prone.CanFire)
+                return CoverPostureChoice.Prone;
+
+            // A soldier may rise behind genuinely protective low cover to clear the
+            // weapon only after both lower firing postures have failed. A narrow
+            // object that does not protect a crouched body cannot justify standing in
+            // the open merely because the muzzle clears.
             if (standing.CanFire)
                 return CoverPostureChoice.Standing;
 
@@ -179,15 +197,29 @@ internal static class InfantryCoverDecisionCore
         }
 
         if (HasMeaningfulProtection(prone))
+        {
+            if (prone.CanFire)
+                return CoverPostureChoice.Prone;
+
+            // This cover only protects the prone silhouette, but the weapon cannot
+            // use that lane. Standing remains legal solely as the measured firing-
+            // clearance fallback after both lower poses have failed.
+            if (standing.CanFire)
+                return CoverPostureChoice.Standing;
+
             return CoverPostureChoice.Prone;
+        }
 
         if (HasMeaningfulProtection(standing) && standing.CanFire)
             return CoverPostureChoice.Standing;
 
-        // Nothing is genuine cover. Minimize the exposed silhouette instead of
-        // treating a tree-sized obstruction as permission to kneel in the open.
-        return CoverPostureChoice.Prone;
+        // Nothing here is genuine cover, so this evaluation cannot author a prone
+        // cover posture. The ordinary stationary fighting fallback is crouched.
+        return CoverPostureChoice.Crouched;
     }
+
+    internal static CoverPostureChoice FallbackStationaryPosture(bool hasUsableCover)
+        => CoverPostureChoice.Crouched;
 
     internal static CoverPostureInput SelectCoverPostureInput(
         CoverPostureChoice choice,
@@ -198,7 +230,8 @@ internal static class InfantryCoverDecisionCore
         {
             CoverPostureChoice.Standing => standing,
             CoverPostureChoice.Crouched => crouched,
-            _ => prone
+            CoverPostureChoice.Prone => prone,
+            _ => crouched
         };
 
     internal static bool ShouldForceAttackProgress(
@@ -218,6 +251,53 @@ internal static class InfantryCoverDecisionCore
 
         return now - haltStartedAt >= Math.Max(0f, maximumHaltSeconds);
     }
+
+    internal static bool ShouldLeaveCurrentCoverForAttackBound(
+        CoverPositionQuality current,
+        CoverPositionQuality candidate,
+        bool forcedByDeadline)
+    {
+        // The halt deadline remains the hard liveness guarantee. Before that deadline,
+        // coordinated fire authorizes a bound only when the selected destination does
+        // not trade a known protective firing position for materially worse ground.
+        if (forcedByDeadline)
+            return true;
+        if (!current.IsProtective)
+            return true;
+        if (!candidate.IsProtective)
+            return false;
+
+        // Do not churn from measured protection into an authored slot whose material
+        // could not be classified, or between two equally uncertain authored slots.
+        if (!candidate.IsMeasured)
+            return false;
+
+        const float MaterialProtectionLoss = 0.12f;
+        if (current.IsMeasured &&
+            candidate.ProtectionFraction + MaterialProtectionLoss <
+            current.ProtectionFraction)
+        {
+            return false;
+        }
+
+        // A blind destination is not an improvement for a soldier already able to
+        // engage from protection. The maximum halt can still move him through it.
+        return !current.HasFiringLane || candidate.HasFiringLane;
+    }
+
+    internal static bool ShouldKeepMovingDuringDeferredCoverSearch(
+        bool searchDeferred,
+        bool hasUsableCover,
+        bool closeThreat,
+        bool hasMovementOrder,
+        bool hasDestination,
+        bool firingCommitActive = false)
+        => searchDeferred &&
+           !hasUsableCover &&
+           !closeThreat &&
+           hasMovementOrder &&
+           hasDestination &&
+           !firingCommitActive;
 
     internal static CoverNeedDecision EvaluateNeed(CoverNeedInput input)
     {

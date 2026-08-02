@@ -16,9 +16,10 @@ public sealed class Plugin : BasePlugin
 {
     public const string PluginGuid = "ca.antoi.er2.tacticalai";
     public const string PluginName = "Easy Red 2 Realism Overhaul";
-    public const string PluginVersion = "1.0.9";
+    public const string PluginVersion = "1.1.0";
 
     internal static ManualLogSource LogSource { get; private set; } = null!;
+    private bool _modEnabled;
     private Harmony? _harmony;
     private AtmosphericParticlePersistenceController? _atmosphericParticlePersistenceController;
     private SettingsSyncController? _settingsSyncController;
@@ -39,6 +40,15 @@ public sealed class Plugin : BasePlugin
     public override void Load()
     {
         LogSource = Log;
+        EnableMod();
+    }
+
+    internal void EnableMod()
+    {
+        if (_modEnabled)
+            return;
+
+        _modEnabled = true;
         // The mod's interop wrapper churn (per-soldier per-frame patch calls) feeds
         // the managed GC; its blocking full collections pause the game thread for
         // 100-300ms. SustainedLowLatency defers blocking gen2 collections to
@@ -96,7 +106,7 @@ public sealed class Plugin : BasePlugin
                     $"largeCraters={Settings.HeavyOrdnanceCratersEnabled.Value}, " +
                     $"layeredBlast={Settings.LayeredBlastEffectsEnabled.Value}, " +
                     $"fragmentation={Settings.EnhancedFragmentationEnabled.Value}, " +
-                    $"aircraftPhysics={Settings.AircraftFlightPhysicsEnabled.Value}, aircraftAiFlightExperimental={Settings.AircraftAiFlightModelExperimentalEnabled.Value}, aircraftMousePointAim={Settings.AircraftMousePointAimingEnabled.Value}, " +
+                    $"aircraftPhysics={Settings.AircraftFlightPhysicsEnabled.Value}, aircraftAiFlightExperimental={Settings.AircraftAiFlightModelExperimentalEnabled.Value}, aircraftMousePointAim={Settings.AircraftMousePointAimingEnabled.Value}, aircraftSimplifiedManualRoll={Settings.AircraftSimplifiedManualRollEnabled.Value}, " +
                     $"bulletPenetration={Settings.BulletPenetrationEnabled.Value}, " +
                     $"addedRicochets={Settings.AddedSmallArmsRicochetsEnabled.Value}, " +
                     $"tracers={Settings.TracerReductionEnabled.Value}, tracerRetention={Settings.MachineGunTracerRetention.Value:F2}, tracerBrightness={Settings.TracerBrightness.Value:F2}x, tracerSize={Settings.TracerSizeMultiplier.Value:F2}x, tracerLength={Settings.TracerLengthMultiplier.Value:F2}x, chatter={Settings.BattleChatterEnabled.Value}, " +
@@ -111,6 +121,8 @@ public sealed class Plugin : BasePlugin
                     $"firstPersonPlayerShadow={Settings.FirstPersonPlayerShadowEnabled.Value}, " +
                     $"aimFatigue={Settings.RealisticAimFatigueEnabled.Value}, " +
                     $"directTurretAiming={Settings.DirectTurretAimingEnabled.Value}, " +
+                    $"groundVehicleAimRings={Settings.GroundVehicleAimRingsEnabled.Value}, " +
+                    $"gunnerViewElevationLock={Settings.GunnerViewElevationLockEnabled.Value}, " +
                     $"unstabilizedGunsight={Settings.UnstabilizedGunsightEnabled.Value}, " +
                     $"vehicleOpticsZoom={Settings.OpticsZoom.Value:F3}x, " +
                     $"infantryThirdPersonZoom={Settings.ThirdPersonZoom.Value:F3}x, " +

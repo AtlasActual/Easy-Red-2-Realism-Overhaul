@@ -7,6 +7,8 @@ internal static class Program
         var tests = new (string Name, Action Run)[]
         {
             (nameof(CoreAiTuningKeepsBaselineCenteredAndDirectional), CoreAiTuningKeepsBaselineCenteredAndDirectional),
+            (nameof(SuppressionPenaltyLadderStartsGentleAndPinsOnlyUnderHeavyFire), SuppressionPenaltyLadderStartsGentleAndPinsOnlyUnderHeavyFire),
+            (nameof(SuppressionCrouchBandUsesFifteenPointReleaseHysteresis), SuppressionCrouchBandUsesFifteenPointReleaseHysteresis),
             (nameof(PerformancePresetsOnlyTouchKnownCostDrivers), PerformancePresetsOnlyTouchKnownCostDrivers),
             (nameof(LargeBattlePresetIsStricterThanBalanced), LargeBattlePresetIsStricterThanBalanced),
             (nameof(RememberedGrenadesRequireFreshSafeUnseenContacts), RememberedGrenadesRequireFreshSafeUnseenContacts),
@@ -15,6 +17,8 @@ internal static class Program
             (nameof(CoverFsmSuppressionOverridesUrgency), CoverFsmSuppressionOverridesUrgency),
             (nameof(CoverFsmUrgencyBypassesDeliberateWait), CoverFsmUrgencyBypassesDeliberateWait),
             (nameof(DistantContactMovesExposedInfantryTowardCover), DistantContactMovesExposedInfantryTowardCover),
+            (nameof(EarlyAttackBoundsKeepBetterFiringCover), EarlyAttackBoundsKeepBetterFiringCover),
+            (nameof(DeferredCoverSearchDoesNotStopExposedMovement), DeferredCoverSearchDoesNotStopExposedMovement),
             (nameof(CoverSelectionRequiresProtectionAndSafeNormalRoute), CoverSelectionRequiresProtectionAndSafeNormalRoute),
             (nameof(DefensiveOccupationAllowsOneMoveFromOpenGround), DefensiveOccupationAllowsOneMoveFromOpenGround),
             (nameof(DeliberateCoverValuesFiringQualityMoreThanUrgency), DeliberateCoverValuesFiringQualityMoreThanUrgency),
@@ -29,7 +33,9 @@ internal static class Program
             (nameof(CoverScoringSpreadsSoldiersWithoutOverridingProtection), CoverScoringSpreadsSoldiersWithoutOverridingProtection),
             (nameof(DispersionDegradesInsteadOfBlockingNearbyCover), DispersionDegradesInsteadOfBlockingNearbyCover),
             (nameof(AttackProgressHasMaximumCombatHalt), AttackProgressHasMaximumCombatHalt),
+            (nameof(AttackAdvanceAlternatesBoundAndFiringPhases), AttackAdvanceAlternatesBoundAndFiringPhases),
             (nameof(DefendingReinforcementsKeepTheirMovementOrderUntilArrival), DefendingReinforcementsKeepTheirMovementOrderUntilArrival),
+            (nameof(UnchangedSquadIntentDoesNotRestartNativeMovement), UnchangedSquadIntentDoesNotRestartNativeMovement),
             (nameof(IdleSoldiersRemainUnderNativeControl), IdleSoldiersRemainUnderNativeControl),
             (nameof(ArrivedDefendersStayUnderPositionControl), ArrivedDefendersStayUnderPositionControl),
             (nameof(AutonomousDefendersSeekCoverEvenWithVisibleContact), AutonomousDefendersSeekCoverEvenWithVisibleContact),
@@ -48,6 +54,7 @@ internal static class Program
             (nameof(NativeCoverClearRespectsProtectedOwnership), NativeCoverClearRespectsProtectedOwnership),
             (nameof(PlayerHoldArrivalClaimsStableProtectedPositions), PlayerHoldArrivalClaimsStableProtectedPositions),
             (nameof(StableAnchorsKeepTheirSpatialReservations), StableAnchorsKeepTheirSpatialReservations),
+            (nameof(ManeuverAnchorsKeepTheirSpatialReservations), ManeuverAnchorsKeepTheirSpatialReservations),
             (nameof(PlayerHoldCoverDoesNotTakeOverOtherExternalOrders), PlayerHoldCoverDoesNotTakeOverOtherExternalOrders),
             (nameof(WalkingInPlaceTriggersAQuietRecoveryHold), WalkingInPlaceTriggersAQuietRecoveryHold),
             (nameof(RealMovementAndPathChangesResetTheStallWatch), RealMovementAndPathChangesResetTheStallWatch),
@@ -58,6 +65,7 @@ internal static class Program
             (nameof(PoseArbiterLatchShapesTransitions), PoseArbiterLatchShapesTransitions),
             (nameof(DisagreeingStationaryOwnersConvergeToOneStance), DisagreeingStationaryOwnersConvergeToOneStance),
             (nameof(ClearanceStandIsGrantedWhileADefensiveHoldIsActive), ClearanceStandIsGrantedWhileADefensiveHoldIsActive),
+            (nameof(DefensiveClearanceClaimSurvivesNativeCoverStatusFlicker), DefensiveClearanceClaimSurvivesNativeCoverStatusFlicker),
             (nameof(OwnerHandoffHonorsTheAntiFlickerWindow), OwnerHandoffHonorsTheAntiFlickerWindow),
             (nameof(FireArbiterDefaultsToMayFire), FireArbiterDefaultsToMayFire),
             (nameof(StopFireIsIssuedOncePerModFireHold), StopFireIsIssuedOncePerModFireHold),
@@ -68,8 +76,13 @@ internal static class Program
             (nameof(CommittedCoverMoveSurvivesATransientContact), CommittedCoverMoveSurvivesATransientContact),
             (nameof(LapsedHoldsReturnTheSoldierToNativeMovement), LapsedHoldsReturnTheSoldierToNativeMovement),
             (nameof(HaltSpacingStepsOffTheThreatAxisOnlyWhenStacked), HaltSpacingStepsOffTheThreatAxisOnlyWhenStacked),
-            (nameof(MovingPostureTracksSuppression), MovingPostureTracksSuppression),
-            (nameof(SafetyPosesOutrankTheMovementContract), SafetyPosesOutrankTheMovementContract),
+            (nameof(MovingPostureTracksContactFire), MovingPostureTracksContactFire),
+            (nameof(HaltSpacingMicroMovementNeverRaisesFightingPose), HaltSpacingMicroMovementNeverRaisesFightingPose),
+            (nameof(SettledPositionCorrectionsPreserveFightingPosture), SettledPositionCorrectionsPreserveFightingPosture),
+            (nameof(StationaryOwnershipMasksNativeRouteIntentUntilMovementIsReleased), StationaryOwnershipMasksNativeRouteIntentUntilMovementIsReleased),
+            (nameof(ExecutorCommandPulsesCannotStealStationaryPose), ExecutorCommandPulsesCannotStealStationaryPose),
+            (nameof(MovingVisualContactDivesOnceAndCommitsToFire), MovingVisualContactDivesOnceAndCommitsToFire),
+            (nameof(ContactDiveOutranksMovementWhileOtherSafetyPosesCrouch), ContactDiveOutranksMovementWhileOtherSafetyPosesCrouch),
             (nameof(AHaltedSoldierKeepsHisProneCoverSlot), AHaltedSoldierKeepsHisProneCoverSlot),
             (nameof(CommandLeasesAreStableAndRejectStaleWork), CommandLeasesAreStableAndRejectStaleWork),
             (nameof(CommandLeaseDebugSnapshotIsOrderedAndPrunesExpiredWork), CommandLeaseDebugSnapshotIsOrderedAndPrunesExpiredWork),
@@ -79,9 +92,10 @@ internal static class Program
             (nameof(ExternalSquadWithoutPlayerHoldCoverEmitsOnlyNativeAndExternal), ExternalSquadWithoutPlayerHoldCoverEmitsOnlyNativeAndExternal),
             (nameof(PlayerHoldCoverFollowsCommittedCoverMove), PlayerHoldCoverFollowsCommittedCoverMove),
             (nameof(MovementSafetyLadderPicksHazardThenSafetyThenSuppression), MovementSafetyLadderPicksHazardThenSafetyThenSuppression),
+            (nameof(VehicleBoardingOrderDefersCoverControlUntilReentry), VehicleBoardingOrderDefersCoverControlUntilReentry),
             (nameof(ProtectedAssignmentSkipsDefensivePositionBranch), ProtectedAssignmentSkipsDefensivePositionBranch),
             (nameof(ContactResponseRequiresPolicyEnabled), ContactResponseRequiresPolicyEnabled),
-            (nameof(ReloadSafetyAddsProneAndFireInhibitionAlongsideTheHold), ReloadSafetyAddsProneAndFireInhibitionAlongsideTheHold),
+            (nameof(ReloadSafetyAddsCrouchAndFireInhibitionAlongsideTheHold), ReloadSafetyAddsCrouchAndFireInhibitionAlongsideTheHold),
             (nameof(MovementDebugProjectionUsesOnlyExecutorDestination), MovementDebugProjectionUsesOnlyExecutorDestination),
             (nameof(AiDebugAllegianceScopeIsExplicitAndFailClosed), AiDebugAllegianceScopeIsExplicitAndFailClosed),
             (nameof(GameplayMutationIsHostAuthoritative), GameplayMutationIsHostAuthoritative),
@@ -103,14 +117,21 @@ internal static class Program
             (nameof(CoverDowngradeToProneRequiresPersistence), CoverDowngradeToProneRequiresPersistence),
             (nameof(AuthoredPoseIsKeptOnlyWhenBallisticsCannotClassify), AuthoredPoseIsKeptOnlyWhenBallisticsCannotClassify),
             (nameof(CoverPostureOwnershipSurvivesBriefContactLoss), CoverPostureOwnershipSurvivesBriefContactLoss),
+            (nameof(CachedCoverPostureSurvivesNativeWrapperGaps), CachedCoverPostureSurvivesNativeWrapperGaps),
             (nameof(EngagedCoverPoseConvergesInsteadOfLooping), EngagedCoverPoseConvergesInsteadOfLooping),
-            (nameof(SuppressionRecoveryKeepsAnAlreadyProneSoldierDownInTheOpen), SuppressionRecoveryKeepsAnAlreadyProneSoldierDownInTheOpen),
-            (nameof(SuppressionRecoveryPreventsProneCrouchLoopOnRelease), SuppressionRecoveryPreventsProneCrouchLoopOnRelease),
+            (nameof(SuppressionRecoveryDoesNotOwnProneInTheOpen), SuppressionRecoveryDoesNotOwnProneInTheOpen),
+            (nameof(SuppressionPinStaysCrouchedWithoutAValidProneOwner), SuppressionPinStaysCrouchedWithoutAValidProneOwner),
             (nameof(SuppressionRecoveryDefersToAnOwnedProneCoverEvaluation), SuppressionRecoveryDefersToAnOwnedProneCoverEvaluation),
-            (nameof(IndoorSuppressionKeepsAFiringCrouch), IndoorSuppressionKeepsAFiringCrouch),
+            (nameof(SuppressionOnlyPreservesAnOwnedProneCoverPose), SuppressionOnlyPreservesAnOwnedProneCoverPose),
             (nameof(WrongSideAnchorReleasesForALiveEngagedThreat), WrongSideAnchorReleasesForALiveEngagedThreat),
             (nameof(TargetObservationAccruesOnlyDuringContinuousWatching), TargetObservationAccruesOnlyDuringContinuousWatching),
+            (nameof(ConfirmedTargetMemoryDoesNotBecomeAVisualLock), ConfirmedTargetMemoryDoesNotBecomeAVisualLock),
+            (nameof(StationaryFightingPostureFollowsCoverAndClearance), StationaryFightingPostureFollowsCoverAndClearance),
+            (nameof(FinalPoseBoundaryOverridesVanillaOnlyDuringStationaryCombat), FinalPoseBoundaryOverridesVanillaOnlyDuringStationaryCombat),
+            (nameof(SoldierPostureSimulationStaysContinuousAcrossSystems), SoldierPostureSimulationStaysContinuousAcrossSystems),
+            (nameof(CloseCombatCommitsToOneLivingVisibleTarget), CloseCombatCommitsToOneLivingVisibleTarget),
             (nameof(DirectThreatMemoryOutlastsPreciseContactMemory), DirectThreatMemoryOutlastsPreciseContactMemory),
+            (nameof(RecentGunfireChecksOnlyTheExactVisibleShooter), RecentGunfireChecksOnlyTheExactVisibleShooter),
             (nameof(LocalTargetReportsRespectRangeAndPreferTheNearestContact), LocalTargetReportsRespectRangeAndPreferTheNearestContact),
             (nameof(TankEngagementEntersAndReleasesHoldWithHysteresis), TankEngagementEntersAndReleasesHoldWithHysteresis),
             (nameof(TankEngagementLosFlickerGrantsGraceBeforeReleasingHold), TankEngagementLosFlickerGrantsGraceBeforeReleasingHold),
@@ -186,6 +207,65 @@ internal static class Program
             "Core tuning did not clamp values below the visible slider range.");
         Equal(128, AiBehaviorTuningCore.ScaleThreshold(85, 1.5f, 2, 255),
             "Suppression resistance did not raise the prone threshold predictably.");
+    }
+
+    private static void SuppressionPenaltyLadderStartsGentleAndPinsOnlyUnderHeavyFire()
+    {
+        var crouch = AiBehaviorTuningCore.DefaultCrouchSuppressionThreshold;
+        var pin = AiBehaviorTuningCore.DefaultPinSuppressionThreshold;
+        var impact = AiBehaviorTuningCore.CapProjectileImpactSuppression(
+            AiBehaviorTuningCore.NativeProjectileImpactSuppression,
+            AiBehaviorTuningCore.DefaultProjectileImpactSuppression);
+        var woundPenalty = AiBehaviorTuningCore.SuppressionPenaltyStrength(18, crouch, pin);
+        var deathPenalty = AiBehaviorTuningCore.SuppressionPenaltyStrength(45, crouch, pin);
+        var singleImpactPenalty = AiBehaviorTuningCore.SuppressionPenaltyStrength(impact, crouch, pin);
+        var nearPinPenalty = AiBehaviorTuningCore.SuppressionPenaltyStrength(75, crouch, pin);
+
+        Equal(12, impact,
+            "The native 65-point projectile event was not capped for automatic-fire accumulation.");
+        True(singleImpactPenalty < 0.03f && woundPenalty < 0.05f && deathPenalty < 0.25f,
+            "Low and single-impact suppression no longer starts with slight awareness penalties.");
+        True(singleImpactPenalty < woundPenalty && woundPenalty < deathPenalty && nearPinPenalty > 0.80f,
+            "Suppression penalties do not steepen as the pin threshold approaches.");
+        Near(1f, AiBehaviorTuningCore.SuppressionPenaltyStrength(pin, crouch, pin), 0.0001f,
+            "The suppression ladder did not reach its full penalty at the pin threshold.");
+
+        True(impact * 2 < crouch && impact * 3 >= crouch,
+            "Isolated impacts crouch infantry too quickly or repeated impacts never reach the fighting band.");
+        True(impact * 6 < pin && impact * 7 >= pin,
+            "A short automatic burst pins too quickly or sustained automatic fire cannot pin.");
+        True(impact + 45 < pin,
+            "One lethal rifle event can pin nearby survivors before they return fire.");
+        True(AiBehaviorTuningCore.NativeMaximumSuppression >= pin,
+            "The configured pin point is unreachable inside the native suppression range.");
+        Equal(pin, AiBehaviorTuningCore.DefaultMountedGunnerDuckSuppressionThreshold,
+            "Exposed mounted gunners no longer enter their ducking band at the common pin point.");
+        Equal(AiBehaviorTuningCore.DefaultPinReleaseSuppressionThreshold,
+            AiBehaviorTuningCore.DefaultMountedGunnerRiseSuppressionThreshold,
+            "Infantry and mounted gunners no longer share a coherent recovery point.");
+    }
+
+    private static void SuppressionCrouchBandUsesFifteenPointReleaseHysteresis()
+    {
+        var enter = AiBehaviorTuningCore.DefaultCrouchSuppressionThreshold;
+        var release = AiBehaviorTuningCore.DefaultCrouchSuppressionReleaseThreshold;
+
+        Equal(15, release, "The crouched-fighting release point changed from the requested value.");
+        False(AiBehaviorTuningCore.ShouldOwnCrouchedFightingPose(
+                false, enter - 1, enter, release, minimumHoldElapsed: true),
+            "Suppression below the entry threshold started a new crouched-fighting response.");
+        True(AiBehaviorTuningCore.ShouldOwnCrouchedFightingPose(
+                false, enter, enter, release, minimumHoldElapsed: true),
+            "Suppression at the entry threshold did not start crouched fighting.");
+        True(AiBehaviorTuningCore.ShouldOwnCrouchedFightingPose(
+                true, release + 1, enter, release, minimumHoldElapsed: true),
+            "A decaying moderate suppression value released crouch too early.");
+        True(AiBehaviorTuningCore.ShouldOwnCrouchedFightingPose(
+                true, release, enter, release, minimumHoldElapsed: false),
+            "The crouched-fighting posture ignored its minimum commitment.");
+        False(AiBehaviorTuningCore.ShouldOwnCrouchedFightingPose(
+                true, release, enter, release, minimumHoldElapsed: true),
+            "The soldier did not regain standing permission at 15 suppression.");
     }
 
     private static void RememberedGrenadesRequireFreshSafeUnseenContacts()
@@ -468,11 +548,14 @@ internal static class Program
         // frames (Crouch via the StationaryHoldPose fallback, Prone via the defensive-
         // occupation waiting branch), and the asymmetric latch amplified that into a
         // sustained ~3.5s Prone<->Crouch rhythm. The single arbiter now resolves ONE
-        // (owner, pose) per frame from the ownership flags: with a contact/tactical
-        // crouch owner active and no usable cover, every writer resolves to
-        // (TacticalCrouch, Crouched) - the ownerless Prone fallback is never selected
-        // because an owner is active. Drive the latch with that deterministic proposal
-        // across a long hold and assert it converges once and never oscillates.
+        // (owner, pose) per frame from the ownership flags. Off usable cover, every
+        // stationary writer now resolves the same exposed-ground Crouch fallback. Drive
+        // the latch with that deterministic proposal across a long hold and assert it
+        // converges once and never oscillates.
+        var fallback = InfantryCoverDecisionCore.FallbackStationaryPosture(false);
+        var proposedStance = fallback == CoverPostureChoice.Prone
+            ? TacticalStance.Prone
+            : TacticalStance.Crouched;
         var owner = PoseOwner.None;
         var stance = TacticalStance.Standing;
         var holdUntil = 0f;
@@ -480,7 +563,7 @@ internal static class Program
         for (var t = 0f; t <= 30f; t += 0.5f)
         {
             if (StepLatch(ref owner, ref stance, ref holdUntil,
-                    PoseOwner.TacticalCrouch, TacticalStance.Crouched, measuredStand: false, t))
+                    PoseOwner.TacticalCrouch, proposedStance, measuredStand: false, t))
             {
                 poseChanges++;
             }
@@ -523,6 +606,31 @@ internal static class Program
                 PoseOwner.CoverEvaluation, TacticalStance.Standing,
                 proposedMeasuredStand: false, now: 1f, holdUntil: 100f),
             "An unmeasured crouch->stand skipped the anti-flicker hold.");
+    }
+
+    private static void DefensiveClearanceClaimSurvivesNativeCoverStatusFlicker()
+    {
+        var cover = new IntPtr(101);
+        var otherCover = new IntPtr(202);
+        Equal(cover, CoverClearanceOwnershipCore.ResolveClaimId(
+                IntPtr.Zero, cover, defensiveHold: true, hasDefensiveAnchor: true,
+                defensiveAnchorId: cover, reservedCoverId: cover),
+            "A defender could not attach a measured standing pose to its stable cover anchor.");
+        True(CoverClearanceOwnershipCore.Owns(
+                cover, IntPtr.Zero, cover, onUsableCover: false,
+                defensiveHold: true, hasDefensiveAnchor: true,
+                defensiveAnchorId: cover, reservedCoverId: cover),
+            "A transient native cover-status loss released the defender's measured standing pose.");
+        False(CoverClearanceOwnershipCore.Owns(
+                cover, otherCover, cover, onUsableCover: true,
+                defensiveHold: true, hasDefensiveAnchor: true,
+                defensiveAnchorId: cover, reservedCoverId: cover),
+            "A stale standing-pose claim survived assignment to a different live cover slot.");
+        False(CoverClearanceOwnershipCore.Owns(
+                cover, IntPtr.Zero, cover, onUsableCover: false,
+                defensiveHold: false, hasDefensiveAnchor: false,
+                defensiveAnchorId: IntPtr.Zero, reservedCoverId: IntPtr.Zero),
+            "An unanchored soldier retained a standing-pose claim after leaving cover.");
     }
 
     private static void OwnerHandoffHonorsTheAntiFlickerWindow()
@@ -801,49 +909,58 @@ internal static class Program
     }
 
     // Mirrors the ordering of ContactResponse.ResolvePose across the ranks the pose/movement
-    // contract touches (plan 019): the three SAFETY poses, then the movement rank, then
-    // whatever fighting pose the cover/suppression evaluation would have produced.
+    // contract touches: the single non-cover prone intent, then suppression crouch, the
+    // movement rank, and finally the evaluated fighting pose.
     private static TacticalStance ResolvePoseWithMovementContract(
         MovementOwner committedMovement,
         bool movementHalted,
         TacticalStance fightingStance,
         out PoseOwner owner,
-        bool requiredAction = false,
+        bool contactDive = false,
         bool pinnedOrBurning = false,
         bool flameEvading = false,
-        bool suppressed = false,
-        bool suppressedForcedAdvance = false)
+        bool movingUnderFire = false,
+        bool locomotionConfirmed = true,
+        bool hasSettledTacticalHold = false,
+        bool relocating = false,
+        bool hasSettledPose = false,
+        TacticalStance settledPose = TacticalStance.Crouched)
     {
-        if (requiredAction && !flameEvading)
+        if (contactDive && !flameEvading)
         {
-            owner = PoseOwner.RequiredAction;
+            owner = PoseOwner.ContactDive;
             return TacticalStance.Prone;
         }
         if (pinnedOrBurning && !flameEvading)
         {
             owner = PoseOwner.Suppression;
-            return TacticalStance.Prone;
+            return TacticalStance.Crouched;
         }
         if (PoseMovementContractCore.MovementOwnsPose(
-                committedMovement, movementHalted))
+                committedMovement, movementHalted, locomotionConfirmed))
         {
             owner = PoseOwner.MovementPose;
             return PoseMovementContractCore.MovementStance(
-                committedMovement, suppressed, suppressedForcedAdvance);
+                committedMovement,
+                movingUnderFire,
+                hasSettledTacticalHold,
+                relocating,
+                hasSettledPose,
+                settledPose);
         }
 
         owner = PoseOwner.CoverEvaluation;
         return fightingStance;
     }
 
-    private static void MovingPostureTracksSuppression()
+    private static void MovingPostureTracksContactFire()
     {
-        // Ordinary movement stands until suppression owns the locomotion pose, then
-        // lowers to a crouch without stopping.
+        // Ordinary movement stands outside combat, but recent contact or direct incoming
+        // fire lowers every granted move to a crouch without stopping it.
         foreach (var granting in new[]
                  {
                      MovementOwner.OrderedMove, MovementOwner.CommittedMove,
-                     MovementOwner.HaltSpacing, MovementOwner.HazardEscape
+                     MovementOwner.HazardEscape
                  })
         {
             True(MovementArbiterCore.Grants(granting),
@@ -856,31 +973,40 @@ internal static class Program
             Equal(TacticalStance.Crouched,
                 ResolvePoseWithMovementContract(
                     granting, movementHalted: false, TacticalStance.Standing,
-                    out _, suppressed: true),
-                "Suppressed movement did not lower to a crouch.");
+                    out _, movingUnderFire: true),
+                "Movement under contact or direct incoming fire did not crouch.");
             Equal(TacticalStance.Standing,
                 PoseMovementContractCore.MovementStance(
-                    granting, suppressed: false, suppressedForcedAdvance: true),
-                "A forced-advance flag lowered an unsuppressed moving soldier.");
+                    granting,
+                    movingUnderFire: false),
+                "Movement outside contact did not retain its standing posture.");
         }
 
-        // The deadline-forced attacker is the intentional crawl: both the objective route
-        // and an already selected cover route use OrderedMove / CommittedMove.
+        Equal(TacticalStance.Crouched,
+            ResolvePoseWithMovementContract(
+                MovementOwner.HaltSpacing, movementHalted: false, TacticalStance.Crouched,
+                out var spacingOwner, movingUnderFire: false),
+            "A short correction out of a fighting halt raised the soldier to standing.");
+        Equal(PoseOwner.MovementPose, spacingOwner,
+            "Physical movement during a halt-spacing correction did not own the pose.");
+
+        // All mod-owned movement under contact stays crouched. A contact dive is a halt,
+        // never permission to crawl through an attack bound.
         foreach (var advancing in new[]
                  {
                      MovementOwner.OrderedMove, MovementOwner.CommittedMove
                  })
         {
-            Equal(TacticalStance.Prone,
+            Equal(TacticalStance.Crouched,
                 ResolvePoseWithMovementContract(
-                    advancing, movementHalted: false, TacticalStance.Crouched,
-                    out var crawlOwner, suppressed: true, suppressedForcedAdvance: true),
-                "A forced suppressed advance was raised out of its crawl.");
-            Equal(PoseOwner.MovementPose, crawlOwner,
-                "The crawl did not remain owned by the movement contract.");
+                    advancing, movementHalted: false, TacticalStance.Prone,
+                    out var advanceOwner, movingUnderFire: true),
+                "Ordinary contact movement stopped using the crouched posture.");
+            Equal(PoseOwner.MovementPose, advanceOwner,
+                "Contact movement did not remain owned by the movement contract.");
         }
 
-        // Safety movement cannot accidentally inherit the crawl authorization.
+        // Safety and spacing movement follows the same contact movement posture.
         foreach (var safetyMove in new[]
                  {
                      MovementOwner.HaltSpacing, MovementOwner.HazardEscape
@@ -889,19 +1015,27 @@ internal static class Program
             Equal(TacticalStance.Crouched,
                 ResolvePoseWithMovementContract(
                     safetyMove, movementHalted: false, TacticalStance.Prone,
-                    out _, suppressed: true, suppressedForcedAdvance: true),
-                "A safety move incorrectly became a crawl.");
+                    out _, movingUnderFire: true),
+                "A safety move under fire did not remain crouched.");
         }
 
-        // Free means the mod did not write locomotion. Leave the game's native favourite
-        // pose alone so a native prone move can remain a crawl.
-        Equal(TacticalStance.Prone,
+        // Confirmed native movement is owned too: ordinary movement must not resurrect a
+        // native crawl outside the two explicit prone intents. Without physical evidence,
+        // however, a Free/executor command cannot steal the stationary cover pose.
+        Equal(TacticalStance.Standing,
             ResolvePoseWithMovementContract(
                 MovementOwner.Free, movementHalted: false, TacticalStance.Prone,
                 out var nativeOwner),
-            "Native prone movement was raised into a crouch.");
-        Equal(PoseOwner.CoverEvaluation, nativeOwner,
-            "The movement contract claimed native locomotion.");
+            "Confirmed native movement kept an unrelated prone fighting posture.");
+        Equal(PoseOwner.MovementPose, nativeOwner,
+            "Confirmed native locomotion was not owned by the movement contract.");
+        Equal(TacticalStance.Prone,
+            ResolvePoseWithMovementContract(
+                MovementOwner.Free, movementHalted: false, TacticalStance.Prone,
+                out var stationaryNativeOwner, locomotionConfirmed: false),
+            "An executor command without translation stole the stationary cover pose.");
+        Equal(PoseOwner.CoverEvaluation, stationaryNativeOwner,
+            "Unconfirmed native locomotion claimed the movement pose.");
 
         // The rank placement itself: the movement pose outranks every FIGHTING pose, which
         // is what stops rank e/f from putting a bounding soldier back on his belly.
@@ -916,36 +1050,353 @@ internal static class Program
         }
     }
 
-    private static void SafetyPosesOutrankTheMovementContract()
+    private static void HaltSpacingMicroMovementNeverRaisesFightingPose()
     {
-        // The invariant that keeps the two ladders consistent: wherever the pose ladder
-        // insists on Prone for SAFETY, the movement ladder is already halting.
-        True(MovementArbiterCore.Halts(ResolveMovement(safetyHalt: true)),
-            "A required-action prone pose was not matched by a movement halt.");
-        True(MovementArbiterCore.Halts(ResolveMovement(pinnedHold: true)),
-            "A pinned prone pose was not matched by a movement halt.");
+        // Reproduce the reported lifecycle: a stationary defender is crouched, detects a
+        // stacked squadmate, physically translates during its one bounded spacing step,
+        // then returns to the same fighting halt. Movement owns the middle frames, but a
+        // tactical correction that begins and ends crouched must never expose Standing.
+        var owner = PoseOwner.TacticalCrouch;
+        var stance = TacticalStance.Crouched;
+        var holdUntil = 0f;
+        var poseChanges = 0;
 
-        foreach (var safety in new[]
-                 {
-                     PoseOwner.Suppression, PoseOwner.RequiredAction
-                 })
+        for (var tick = 0; tick < 12; tick++)
         {
-            True((int)safety > (int)PoseOwner.MovementPose,
-                "The movement contract outranked a safety pose.");
+            var now = tick * 0.25f;
+            var physicallySpacing = tick >= 3 && tick <= 7;
+            PoseOwner proposedOwner;
+            TacticalStance proposedStance;
+            if (physicallySpacing)
+            {
+                proposedStance = ResolvePoseWithMovementContract(
+                    MovementOwner.HaltSpacing,
+                    movementHalted: false,
+                    fightingStance: TacticalStance.Crouched,
+                    out proposedOwner,
+                    movingUnderFire: false,
+                    locomotionConfirmed: true);
+            }
+            else
+            {
+                proposedOwner = PoseOwner.TacticalCrouch;
+                proposedStance = TacticalStance.Crouched;
+            }
+
+            if (StepLatch(
+                    ref owner,
+                    ref stance,
+                    ref holdUntil,
+                    proposedOwner,
+                    proposedStance,
+                    measuredStand: false,
+                    now))
+            {
+                poseChanges++;
+            }
+
+            Equal(TacticalStance.Crouched, stance,
+                "The simulated spacing lifecycle exposed a standing frame.");
         }
 
-        // Even with a move declared, each safety owner keeps the soldier down.
+        Equal(0, poseChanges,
+            "The simulated crouch/spacing/crouch lifecycle still changed posture.");
+    }
+
+    private static void SettledPositionCorrectionsPreserveFightingPosture()
+    {
+        // A real route move is allowed to select its travel stance. A few centimetres of
+        // native formation/path correction after arrival is not a new route: it must keep
+        // the posture already selected for that fighting position.
+        var settledPoses = new[]
+        {
+            (PoseOwner.TacticalCrouch, TacticalStance.Crouched),
+            (PoseOwner.CoverEvaluation, TacticalStance.Prone),
+            (PoseOwner.CoverClearance, TacticalStance.Standing)
+        };
+        foreach (var (settledOwner, settledPose) in settledPoses)
+        {
+            True(PoseMovementContractCore.CanPreserveAsSettledPose(settledOwner),
+                $"{settledOwner} was not recognized as a settled fighting-pose owner.");
+            Equal(settledPose,
+                ResolvePoseWithMovementContract(
+                    MovementOwner.OrderedMove,
+                    movementHalted: false,
+                    fightingStance: settledPose,
+                    out var movementOwner,
+                    movingUnderFire: false,
+                    locomotionConfirmed: true,
+                    hasSettledTacticalHold: true,
+                    relocating: false,
+                    hasSettledPose: true,
+                    settledPose: settledPose),
+                $"An incidental correction replaced the settled {settledPose} posture.");
+            Equal(PoseOwner.MovementPose, movementOwner,
+                "Physical correction did not pass through the movement/pose contract.");
+        }
+
+        // Reproduce the reported loop with actual translation on alternating ticks. The
+        // movement owner may change, but the visible posture must never do so.
+        var owner = PoseOwner.StationaryCombat;
+        var stance = TacticalStance.Crouched;
+        var holdUntil = 0f;
+        var poseChanges = 0;
+        for (var tick = 0; tick < 40; tick++)
+        {
+            var now = tick * 0.25f;
+            PoseOwner proposedOwner;
+            TacticalStance proposedStance;
+            if (tick % 2 == 0)
+            {
+                proposedStance = ResolvePoseWithMovementContract(
+                    tick % 4 == 0 ? MovementOwner.Free : MovementOwner.OrderedMove,
+                    movementHalted: false,
+                    fightingStance: TacticalStance.Crouched,
+                    out proposedOwner,
+                    locomotionConfirmed: true,
+                    hasSettledTacticalHold: true,
+                    relocating: false,
+                    hasSettledPose: true,
+                    settledPose: TacticalStance.Crouched);
+            }
+            else
+            {
+                proposedOwner = PoseOwner.StationaryCombat;
+                proposedStance = TacticalStance.Crouched;
+            }
+
+            if (StepLatch(
+                    ref owner, ref stance, ref holdUntil,
+                    proposedOwner, proposedStance,
+                    measuredStand: false, now))
+            {
+                poseChanges++;
+            }
+            Equal(TacticalStance.Crouched, stance,
+                "A tiny settled-position correction exposed a standing frame.");
+        }
+        Equal(0, poseChanges,
+            "Alternating settled movement ownership still produced a crouch/stand loop.");
+
+        // A stale movement latch is not accepted as the posture of a newly settled
+        // position; crouch is the safe first fighting posture until cover is evaluated.
+        False(PoseMovementContractCore.CanPreserveAsSettledPose(PoseOwner.MovementPose),
+            "A stale travel pose was treated as an evaluated settled posture.");
+        Equal(TacticalStance.Crouched,
+            PoseMovementContractCore.MovementStance(
+                MovementOwner.OrderedMove,
+                movingUnderFire: false,
+                hasSettledTacticalHold: true,
+                relocating: false,
+                hasSettledPose: false,
+                settledPose: TacticalStance.Standing),
+            "A newly settled defender inherited the stale standing travel pose.");
+
+        Equal(TacticalStance.Standing,
+            PoseMovementContractCore.MovementStance(
+                MovementOwner.CommittedMove,
+                movingUnderFire: false,
+                hasSettledTacticalHold: true,
+                relocating: true,
+                hasSettledPose: true,
+                settledPose: TacticalStance.Crouched),
+            "A genuine relocation was incorrectly pinned to the old fighting posture.");
+        Equal(TacticalStance.Standing,
+            PoseMovementContractCore.MovementStance(
+                MovementOwner.HazardEscape,
+                movingUnderFire: false,
+                hasSettledTacticalHold: true,
+                relocating: false,
+                hasSettledPose: true,
+                settledPose: TacticalStance.Prone),
+            "A lethal-hazard escape retained the old settled posture.");
+    }
+
+    private static void StationaryOwnershipMasksNativeRouteIntentUntilMovementIsReleased()
+    {
+        // Reproduce the whole reported cycle, not just its posture: the base game retains
+        // path nodes at a reached objective, so native IsMoving stays true on every update.
+        // While our engagement halt owns locomotion, that executor intent must never reopen
+        // the moving branch that inches forward, lowers the rifle, and then gets stopped.
+        var enteredNativeMovingBranch = 0;
+        for (var tick = 0; tick < 60; tick++)
+        {
+            var reportedMoving = NativeMovementIntentCore.ShouldReportMoving(
+                nativeMoving: true,
+                MovementOwner.EngagementHold);
+            if (reportedMoving)
+                enteredNativeMovingBranch++;
+
+            False(reportedMoving,
+                "A preserved native route reopened locomotion during an engagement halt.");
+        }
+
+        Equal(0, enteredNativeMovingBranch,
+            "The simulated stationary soldier still alternated native move and stop branches.");
+
+        // The filter does not destroy or consume the route. Every real movement owner and
+        // the unowned native case exposes the unchanged native result immediately, so a
+        // hold expiry cannot strand the soldier at the objective.
+        foreach (var movingOwner in new[]
+                 {
+                     MovementOwner.Free,
+                     MovementOwner.OrderedMove,
+                     MovementOwner.CommittedMove,
+                     MovementOwner.HaltSpacing,
+                     MovementOwner.HazardEscape
+                 })
+        {
+            True(NativeMovementIntentCore.ShouldReportMoving(true, movingOwner),
+                $"{movingOwner} did not release the preserved native route.");
+        }
+
+        foreach (var haltOwner in new[]
+                 {
+                     MovementOwner.CoverHold,
+                     MovementOwner.EngagementHold,
+                     MovementOwner.PinnedHold,
+                     MovementOwner.SafetyHalt
+                 })
+        {
+            False(NativeMovementIntentCore.ShouldReportMoving(true, haltOwner),
+                $"{haltOwner} leaked native route intent into the movement branch.");
+        }
+
+        False(NativeMovementIntentCore.ShouldReportMoving(false, MovementOwner.Free),
+            "The filter manufactured movement when the base game had no route intent.");
+    }
+
+    private static void ExecutorCommandPulsesCannotStealStationaryPose()
+    {
+        // Reproduce the reached-objective failure: the base executor can alternate its
+        // moveCharacter flag during reassessment even though the character never translates.
+        // The old live predicate treated every true pulse as movement-standing, then the
+        // stationary-combat owner immediately crouched the soldier on the next frame.
+        var owner = PoseOwner.StationaryCombat;
+        var stance = TacticalStance.Crouched;
+        var holdUntil = 0f;
+        var evidenceUntil = 0f;
+        var poseChanges = 0;
+
+        for (var tick = 0; tick < 40; tick++)
+        {
+            var now = tick * 0.25f;
+            var executorCommand = tick % 2 == 0;
+            var physicallyMoving = false;
+            evidenceUntil = PoseMovementContractCore.RefreshEvidenceUntil(
+                physicallyMoving, now, evidenceUntil);
+            var confirmed = PoseMovementContractCore.HasConfirmedLocomotion(
+                physicallyMoving, now, evidenceUntil);
+
+            False(confirmed,
+                "A move-command pulse became physical locomotion without translation.");
+            False(PoseMovementContractCore.MovementOwnsPose(
+                    executorCommand ? MovementOwner.OrderedMove : MovementOwner.Free,
+                    halted: false,
+                    locomotionConfirmed: confirmed),
+                "A stationary objective refresh stole the movement pose.");
+
+            if (StepLatch(
+                    ref owner, ref stance, ref holdUntil,
+                    PoseOwner.StationaryCombat, TacticalStance.Crouched,
+                    measuredStand: false, now))
+            {
+                poseChanges++;
+            }
+        }
+
+        Equal(0, poseChanges,
+            "Executor command pulses still produced crouch/stand pose changes at rest.");
+        Equal(TacticalStance.Crouched, stance,
+            "The stationary soldier did not retain his crouched fighting posture.");
+
+        // Real translation starts the movement pose and refreshes a short lease. A brief
+        // zero-magnitude path-node sample stays in the same movement posture, then the
+        // lease expires once after a genuine stop instead of oscillating.
+        const float movementStartedAt = 20f;
+        evidenceUntil = PoseMovementContractCore.RefreshEvidenceUntil(
+            physicallyMoving: true,
+            now: movementStartedAt,
+            currentEvidenceUntil: evidenceUntil);
+        True(PoseMovementContractCore.HasConfirmedLocomotion(
+                physicallyMoving: false,
+                now: movementStartedAt + 0.5f,
+                evidenceUntil: evidenceUntil),
+            "A brief path-node sampling gap dropped the confirmed movement pose.");
+        False(PoseMovementContractCore.HasConfirmedLocomotion(
+                physicallyMoving: false,
+                now: movementStartedAt + PoseMovementContractCore.LocomotionEvidenceGraceSeconds,
+                evidenceUntil: evidenceUntil),
+            "A stopped soldier retained movement-pose ownership after the evidence lease expired.");
+    }
+
+    private static void MovingVisualContactDivesOnceAndCommitsToFire()
+    {
+        False(ContactDivePolicyCore.ContactWasContinuous(
+                hasPreviousObservedContact: false, lastSeenAt: 10f, now: 10.1f,
+                continuitySeconds: 5f),
+            "A soldier with no prior personal observation inherited a continuous contact.");
+        True(ContactDivePolicyCore.ShouldStart(
+                wasActuallyMoving: true, hasObservedTarget: true,
+                contactWasContinuous: false, currentDiveUntil: 0f, now: 10f),
+            "A moving soldier did not dive on his first personal visual contact.");
+        var firingDeadline = ContactDivePolicyCore.ResolveFiringDeadline(
+            now: 10f, configuredSeconds: 7f);
+        Equal(17f, firingDeadline,
+            "The contact dive did not inherit the configured seven-second firing hold.");
+        True(CombatMovementPolicyCore.AttackFiringPhaseActive(firingDeadline, 16.99f),
+            "The contact dive released before its firing opportunity elapsed.");
+        False(CombatMovementPolicyCore.AttackFiringPhaseActive(firingDeadline, 17f),
+            "The contact dive remained active after its firing deadline.");
+        False(ContactDivePolicyCore.ShouldStart(
+                wasActuallyMoving: false, hasObservedTarget: true,
+                contactWasContinuous: false, currentDiveUntil: 0f, now: 10f),
+            "A stationary observer invented a contact dive.");
+        False(ContactDivePolicyCore.ShouldStart(
+                wasActuallyMoving: true, hasObservedTarget: false,
+                contactWasContinuous: false, currentDiveUntil: 0f, now: 10f),
+            "Shared or remembered contact created a personal visual dive.");
+
+        var continuous = ContactDivePolicyCore.ContactWasContinuous(
+            hasPreviousObservedContact: true, lastSeenAt: 10f, now: 14.9f,
+            continuitySeconds: 5f);
+        True(continuous, "Target switching inside one visual-contact episode broke continuity.");
+        False(ContactDivePolicyCore.ShouldStart(
+                wasActuallyMoving: true, hasObservedTarget: true,
+                contactWasContinuous: continuous, currentDiveUntil: 0f, now: 14.9f),
+            "Continuous visual contact repeatedly retriggered the dive.");
+        False(ContactDivePolicyCore.ShouldStart(
+                wasActuallyMoving: true, hasObservedTarget: true,
+                contactWasContinuous: false, currentDiveUntil: 17f, now: 15f),
+            "An active firing commitment retriggered its own dive.");
+        var lapsed = ContactDivePolicyCore.ContactWasContinuous(
+            hasPreviousObservedContact: true, lastSeenAt: 10f, now: 15.1f,
+            continuitySeconds: 5f);
+        False(lapsed,
+            "A genuinely lapsed observation remained one endless contact episode.");
+        True(ContactDivePolicyCore.ShouldStart(
+                wasActuallyMoving: true, hasObservedTarget: true,
+                contactWasContinuous: lapsed, currentDiveUntil: 15f, now: 15.1f),
+            "A later contact episode could not trigger a new moving-contact dive.");
+    }
+
+    private static void ContactDiveOutranksMovementWhileOtherSafetyPosesCrouch()
+    {
+        True((int)PoseOwner.ContactDive > (int)PoseOwner.MovementPose,
+            "The moving-contact dive did not outrank the movement pose.");
+
+        // Even with movement declared, only the active contact dive keeps him prone.
         Equal(TacticalStance.Prone,
             ResolvePoseWithMovementContract(
                 MovementOwner.OrderedMove, movementHalted: false, TacticalStance.Crouched,
-                out var reloadOwner, requiredAction: true),
-            "A reloading soldier stood up for a move.");
-        Equal(PoseOwner.RequiredAction, reloadOwner, "The required action lost the pose.");
-        Equal(TacticalStance.Prone,
+                out var diveOwner, contactDive: true),
+            "An active contact dive was raised for a movement request.");
+        Equal(PoseOwner.ContactDive, diveOwner, "The contact dive lost pose ownership.");
+        Equal(TacticalStance.Crouched,
             ResolvePoseWithMovementContract(
                 MovementOwner.CommittedMove, movementHalted: false, TacticalStance.Crouched,
                 out var pinnedOwner, pinnedOrBurning: true),
-            "A pinned or burning soldier stood up for a move.");
+            "A pinned or burning soldier invented a prone pose.");
         Equal(PoseOwner.Suppression, pinnedOwner, "Pinning lost the pose.");
 
         // Flame escape is the one movement GRANT above the halts, so the safety poses carry
@@ -956,7 +1407,7 @@ internal static class Program
         Equal(TacticalStance.Standing,
             ResolvePoseWithMovementContract(
                 MovementOwner.HazardEscape, movementHalted: false, TacticalStance.Prone,
-                out var hazardOwner, requiredAction: true, pinnedOrBurning: true,
+                out var hazardOwner, contactDive: true, pinnedOrBurning: true,
                 flameEvading: true),
             "An unsuppressed soldier escaping a flame did not run standing.");
         Equal(PoseOwner.MovementPose, hazardOwner, "The flame escape did not own the pose.");
@@ -972,7 +1423,7 @@ internal static class Program
                      MovementOwner.EngagementHold, MovementOwner.CoverHold
                  })
         {
-            False(PoseMovementContractCore.MovementOwnsPose(halting, true),
+            False(PoseMovementContractCore.MovementOwnsPose(halting, true, true),
                 "A halting owner claimed the pose.");
             Equal(TacticalStance.Prone,
                 ResolvePoseWithMovementContract(
@@ -984,13 +1435,14 @@ internal static class Program
 
         // A stale grant cannot survive an actual halt, and Free without movement is not a
         // move: a stationary soldier the mod is not touching keeps his evaluated pose.
-        False(PoseMovementContractCore.MovementOwnsPose(MovementOwner.CommittedMove, true),
+        False(PoseMovementContractCore.MovementOwnsPose(MovementOwner.CommittedMove, true, true),
             "A halted soldier was still treated as moving.");
-        False(PoseMovementContractCore.MovementOwnsPose(MovementOwner.Free, false),
+        False(PoseMovementContractCore.MovementOwnsPose(MovementOwner.Free, false, false),
             "A stationary soldier under native control was treated as moving.");
         Equal(TacticalStance.Prone,
             ResolvePoseWithMovementContract(
-                MovementOwner.Free, movementHalted: false, TacticalStance.Prone, out _),
+                MovementOwner.Free, movementHalted: false, TacticalStance.Prone, out _,
+                locomotionConfirmed: false),
             "A stationary defender popped up out of his prone cover slot.");
     }
 
@@ -1079,6 +1531,27 @@ internal static class Program
         Equal(MovementOwner.SafetyHalt,
             ResolveMovement(haltSpacing: true, safetyHalt: true),
             "A burning or reloading soldier was walked sideways.");
+
+        True(HaltSpacingCore.ShouldAttempt(false, MovementOwner.EngagementHold),
+            "A newly crowded fighting halt did not receive its one spacing attempt.");
+        False(HaltSpacingCore.ShouldAttempt(true, MovementOwner.EngagementHold),
+            "The same fighting halt repeatedly restarted its spacing step.");
+        False(HaltSpacingCore.ShouldAttempt(false, MovementOwner.PinnedHold),
+            "A pinned halt was incorrectly treated as a spacing episode.");
+        False(HaltSpacingCore.EndsEpisode(MovementOwner.CoverHold),
+            "A handoff between fighting halts rearmed spacing and could create a loop.");
+        True(HaltSpacingCore.EndsEpisode(MovementOwner.OrderedMove),
+            "Real movement did not end the prior halt-spacing episode.");
+        False(HaltSpacingCore.ShouldRearm(
+                true,
+                MovementOwner.OrderedMove,
+                HaltSpacingCore.RearmTravelMeters - 0.01f),
+            "A movement-owner flicker rearmed spacing without physical travel.");
+        True(HaltSpacingCore.ShouldRearm(
+                true,
+                MovementOwner.OrderedMove,
+                HaltSpacingCore.RearmTravelMeters),
+            "Physical movement did not rearm spacing for a later fighting halt.");
     }
 
     private static void AuthoredCoverRemainsAFallbackWhenBallisticsCannotClassifyIt()
@@ -1246,6 +1719,79 @@ internal static class Program
         False(CoverPostureOwnershipCore.CoverPoseOwned(
                 hasThreatMemory: true, onUsableCover: false, defensiveHold: false),
             "Cover-pose ownership persisted off cover without a stable anchor.");
+
+        True(StableCoverInteropCore.CanUseAnchor(
+                hasStableAnchor: true,
+                horizontalDistanceMeters: 0.75f,
+                destinationKnownInvalid: false),
+            "A soldier still standing on his owned cover anchor trusted one flickering native flag.");
+        False(StableCoverInteropCore.CanUseAnchor(
+                hasStableAnchor: true,
+                horizontalDistanceMeters: StableCoverInteropCore.AnchorToleranceMeters + 0.01f,
+                destinationKnownInvalid: false),
+            "A soldier far from cover inherited the old anchor's pose.");
+        False(StableCoverInteropCore.CanUseAnchor(
+                hasStableAnchor: true,
+                horizontalDistanceMeters: 0.75f,
+                destinationKnownInvalid: true),
+            "A destroyed or unsafe cover anchor remained usable.");
+    }
+
+    private static void CachedCoverPostureSurvivesNativeWrapperGaps()
+    {
+        var coverId = new IntPtr(42);
+        True(StableCoverPostureCore.CanReuse(
+                nativeOnCover: false,
+                distanceFromEvaluatedPosition: 0.2f,
+                hasStableAnchor: true,
+                distanceFromStableAnchor: 0.75f,
+                stableAnchorId: coverId,
+                evaluatedCoverId: coverId,
+                hasEvaluatedThreatDirection: true,
+                evaluatedThreatDirectionDot: 1f),
+            "A stable owned cover anchor lost its measured posture with the native wrapper.");
+        True(StableCoverPostureCore.CanReuse(
+                nativeOnCover: true,
+                distanceFromEvaluatedPosition: 0.5f,
+                hasStableAnchor: false,
+                distanceFromStableAnchor: float.PositiveInfinity,
+                stableAnchorId: IntPtr.Zero,
+                evaluatedCoverId: coverId,
+                hasEvaluatedThreatDirection: true,
+                evaluatedThreatDirectionDot: 0.95f),
+            "Native cover at the same physical position lost its measured posture with the destination wrapper.");
+        False(StableCoverPostureCore.CanReuse(
+                nativeOnCover: false,
+                distanceFromEvaluatedPosition: 0.2f,
+                hasStableAnchor: true,
+                distanceFromStableAnchor: 0.75f,
+                stableAnchorId: new IntPtr(99),
+                evaluatedCoverId: coverId,
+                hasEvaluatedThreatDirection: true,
+                evaluatedThreatDirectionDot: 1f),
+            "A different stable cover anchor inherited the old slot's posture.");
+        False(StableCoverPostureCore.CanReuse(
+                nativeOnCover: true,
+                distanceFromEvaluatedPosition:
+                    StableCoverPostureCore.EvaluatedPositionToleranceMeters + 0.01f,
+                hasStableAnchor: false,
+                distanceFromStableAnchor: float.PositiveInfinity,
+                stableAnchorId: IntPtr.Zero,
+                evaluatedCoverId: coverId,
+                hasEvaluatedThreatDirection: true,
+                evaluatedThreatDirectionDot: 1f),
+            "A soldier who left the evaluated position retained its old cover posture.");
+        False(StableCoverPostureCore.CanReuse(
+                nativeOnCover: true,
+                distanceFromEvaluatedPosition: 0.2f,
+                hasStableAnchor: false,
+                distanceFromStableAnchor: float.PositiveInfinity,
+                stableAnchorId: IntPtr.Zero,
+                evaluatedCoverId: coverId,
+                hasEvaluatedThreatDirection: true,
+                evaluatedThreatDirectionDot:
+                    StableCoverPostureCore.ThreatDirectionDotTolerance - 0.01f),
+            "A materially different threat direction reused the old firing posture.");
     }
 
     private static void EngagedCoverPoseConvergesInsteadOfLooping()
@@ -1284,80 +1830,55 @@ internal static class Program
             "The engaged cover pose did not converge to a single stance.");
     }
 
-    private static void SuppressionRecoveryKeepsAnAlreadyProneSoldierDownInTheOpen()
+    private static void SuppressionRecoveryDoesNotOwnProneInTheOpen()
     {
-        // Root cause: rising prone->crouch in the open while still suppressed produced
-        // the reported prone<->crouch loop. Recovery must keep an already-prone soldier
-        // down off cover, while still crouching a standing/crouched soldier as before -
-        // that reaction and the on-cover fighting crouch must both survive the fix.
+        // Suppression is allowed to pin movement and lower the silhouette, but it is not
+        // one of the two reasons that can create Prone.
+        Equal(TacticalStance.Crouched,
+            SuppressionRecoveryPoseCore.Resolve(
+                onUsableCover: false, coverEvaluationOwnsProne: false),
+            "Suppression recovery invented a prone posture in the open.");
+        Equal(TacticalStance.Crouched,
+            SuppressionRecoveryPoseCore.Resolve(
+                onUsableCover: true, coverEvaluationOwnsProne: false),
+            "Usable cover without a prone-only evaluation invented a prone posture.");
+        Equal(TacticalStance.Crouched,
+            PinnedSuppressionPoseCore.Resolve(
+                onUsableCover: false, hasCoverEvaluation: false,
+                evaluatedCoverPose: TacticalStance.Prone),
+            "A hard pin invented a prone posture in the open.");
         Equal(TacticalStance.Prone,
             SuppressionRecoveryPoseCore.Resolve(
-                hasOverheadProtection: false, onUsableCover: false,
-                current: TacticalStance.Prone, coverEvaluationOwnsProne: false),
-            "A prone soldier in the open was raised to crouch by the suppression recovery rule.");
-        Equal(TacticalStance.Crouched,
-            SuppressionRecoveryPoseCore.Resolve(
-                hasOverheadProtection: false, onUsableCover: true,
-                current: TacticalStance.Prone, coverEvaluationOwnsProne: false),
-            "A prone soldier on usable cover with no owned prone evaluation was not allowed to rise to the fighting crouch.");
-        Equal(TacticalStance.Crouched,
-            SuppressionRecoveryPoseCore.Resolve(
-                hasOverheadProtection: false, onUsableCover: false,
-                current: TacticalStance.Crouched, coverEvaluationOwnsProne: false),
-            "The already-crouched suppression reaction was lost off cover.");
-        Equal(TacticalStance.Crouched,
-            SuppressionRecoveryPoseCore.Resolve(
-                hasOverheadProtection: false, onUsableCover: false,
-                current: TacticalStance.Standing, coverEvaluationOwnsProne: false),
-            "The standing->crouch suppression reaction was lost off cover.");
-        Equal(TacticalStance.Prone,
-            SuppressionRecoveryPoseCore.Resolve(
-                hasOverheadProtection: false, onUsableCover: true,
-                current: TacticalStance.Crouched, coverEvaluationOwnsProne: true),
+                onUsableCover: true, coverEvaluationOwnsProne: true),
             "Suppression recovery fought an owned cover evaluation that already measured the slot as prone-only.");
     }
 
-    private static void SuppressionRecoveryPreventsProneCrouchLoopOnRelease()
+    private static void SuppressionPinStaysCrouchedWithoutAValidProneOwner()
     {
-        // Reproduces the reported loop end to end through the real pose latch: pin
-        // engages (instant prone, held through PinnedMinimumSeconds), then releases
-        // while suppression is still in the crouch band. The old flat Crouch proposal
-        // forced the soldier up in the open on every release; the recovery-core
-        // proposal must keep him prone for the rest of the engagement.
+        // Reproduce repeated pin/recovery reassessment in the open. Both systems must
+        // agree on Crouch, leaving no alternating Prone proposal for the latch to accept.
         var owner = PoseOwner.TacticalCrouch;
         var latched = TacticalStance.Crouched;
         var holdUntil = 0f;
-        var reachedProne = false;
-        var everRoseAfterProne = false;
-        for (var t = 0f; t <= 6f; t += 0.5f)
+        var poseChanges = 0;
+        for (var tick = 0; tick <= 40; tick++)
         {
-            // The pin is the highest tactical owner; it drops the soldier prone at once.
-            StepLatch(ref owner, ref latched, ref holdUntil,
-                PoseOwner.Suppression, TacticalStance.Prone, measuredStand: false, t);
-            if (latched == TacticalStance.Prone)
-                reachedProne = true;
-        }
-
-        for (var t = 6.5f; t <= 20f; t += 0.5f)
-        {
-            // Pin released; the suppression-recovery owner takes over. It keeps an
-            // already-prone soldier down in the open, so the proposal stays Prone.
-            var proposed = SuppressionRecoveryPoseCore.Resolve(
-                hasOverheadProtection: false, onUsableCover: false,
-                latched, coverEvaluationOwnsProne: false);
+            var pinned = tick % 2 == 0;
+            var proposedOwner = pinned ? PoseOwner.Suppression : PoseOwner.SuppressionRecovery;
+            var proposed = pinned
+                ? PinnedSuppressionPoseCore.Resolve(
+                    onUsableCover: false, hasCoverEvaluation: false,
+                    evaluatedCoverPose: TacticalStance.Crouched)
+                : SuppressionRecoveryPoseCore.Resolve(
+                    onUsableCover: false, coverEvaluationOwnsProne: false);
             if (StepLatch(ref owner, ref latched, ref holdUntil,
-                    PoseOwner.SuppressionRecovery, proposed, measuredStand: false, t) &&
-                reachedProne && proposed != TacticalStance.Prone)
-            {
-                everRoseAfterProne = true;
-            }
+                    proposedOwner, proposed, measuredStand: false, tick * 0.5f))
+                poseChanges++;
         }
 
-        True(reachedProne, "The pin never latched the soldier prone.");
-        False(everRoseAfterProne,
-            "Suppression recovery let the pinned soldier rise to crouch in the open on release.");
-        Equal(TacticalStance.Prone, latched,
-            "The soldier did not stay prone through the suppression-band release window.");
+        Equal(0, poseChanges, "Pin/recovery reassessment changed the soldier's posture.");
+        Equal(TacticalStance.Crouched, latched,
+            "Pin/recovery reassessment created an unowned prone posture.");
     }
 
     private static void SuppressionRecoveryDefersToAnOwnedProneCoverEvaluation()
@@ -1393,8 +1914,7 @@ internal static class Program
                 : PoseOwner.CoverEvaluation;
             var proposed = suppressionBandActive
                 ? SuppressionRecoveryPoseCore.Resolve(
-                    hasOverheadProtection: false, onUsableCover: true,
-                    latched, coverEvaluationOwnsProne: coverOwned)
+                    onUsableCover: true, coverEvaluationOwnsProne: coverOwned)
                 : TacticalStance.Prone;
 
             if (StepLatch(ref owner, ref latched, ref holdUntil,
@@ -1411,36 +1931,31 @@ internal static class Program
             "The latched pose did not stay converged on the protective stance under a flickering suppression band.");
     }
 
-    private static void IndoorSuppressionKeepsAFiringCrouch()
+    private static void SuppressionOnlyPreservesAnOwnedProneCoverPose()
     {
         Equal(TacticalStance.Crouched,
             PinnedSuppressionPoseCore.Resolve(
-                hasOverheadProtection: true,
                 onUsableCover: false,
                 hasCoverEvaluation: false,
                 evaluatedCoverPose: TacticalStance.Crouched),
-            "A pinned soldier under a building ceiling went prone on the indoor floor.");
-        Equal(TacticalStance.Crouched,
+            "A pinned soldier in the open went prone.");
+        Equal(TacticalStance.Prone,
             PinnedSuppressionPoseCore.Resolve(
-                hasOverheadProtection: true,
                 onUsableCover: true,
                 hasCoverEvaluation: true,
                 evaluatedCoverPose: TacticalStance.Prone),
-            "A prone-only cover evaluation overrode the indoor suppression crouch.");
+            "Pinning raised a soldier out of cover that genuinely requires prone.");
         Equal(TacticalStance.Crouched,
             SuppressionRecoveryPoseCore.Resolve(
-                hasOverheadProtection: true,
                 onUsableCover: false,
-                current: TacticalStance.Prone,
                 coverEvaluationOwnsProne: false),
-            "An indoor soldier remained prone after the hard pin released.");
+            "Suppression recovery invented prone without cover ownership.");
         Equal(TacticalStance.Prone,
             PinnedSuppressionPoseCore.Resolve(
-                hasOverheadProtection: false,
-                onUsableCover: false,
-                hasCoverEvaluation: false,
-                evaluatedCoverPose: TacticalStance.Crouched),
-            "The indoor guard stopped an exposed outdoor soldier from going prone.");
+                onUsableCover: true,
+                hasCoverEvaluation: true,
+                evaluatedCoverPose: TacticalStance.Prone),
+            "A protective prone cover posture was not preserved during a pin.");
     }
 
     private static void WrongSideAnchorReleasesForALiveEngagedThreat()
@@ -1515,6 +2030,249 @@ internal static class Program
             "A gap just past the continuity boundary failed to reset the observed streak.");
     }
 
+    private static void ConfirmedTargetMemoryDoesNotBecomeAVisualLock()
+    {
+        True(TargetConfirmationCore.CanReuseConfirmedTarget(
+                true, true, false, false),
+            "An uninterrupted positive observation did not retain its confirmed target.");
+        False(TargetConfirmationCore.CanReuseConfirmedTarget(
+                true, true, true, false),
+            "Remembered identity bypassed reacquisition after line of sight was lost.");
+        True(TargetConfirmationCore.CanReuseConfirmedTarget(
+                true, true, true, true),
+            "An independent exact-shooter sight proof could not bridge a native vegetation miss.");
+        False(TargetConfirmationCore.CanReuseConfirmedTarget(
+                true, false, false, true),
+            "An independent proof for one shooter was reused for a different target.");
+
+        True(TargetConfirmationCore.HasRecentIndependentVisualProof(
+                true, 10f,
+                10f + TargetConfirmationCore.RecentPositiveObservationGraceSeconds),
+            "The exact independent-proof boundary was rejected.");
+        False(TargetConfirmationCore.HasRecentIndependentVisualProof(
+                true, 10f,
+                10f + TargetConfirmationCore.RecentPositiveObservationGraceSeconds + 0.01f),
+            "A stale independent sight proof overruled a newer negative scan.");
+    }
+
+    private static void StationaryFightingPostureFollowsCoverAndClearance()
+    {
+        Equal(CoverPostureChoice.Crouched,
+            InfantryCoverDecisionCore.FallbackStationaryPosture(true),
+            "A stationary fighter on usable cover did not prefer crouch.");
+        Equal(CoverPostureChoice.Crouched,
+            InfantryCoverDecisionCore.FallbackStationaryPosture(false),
+            "A stationary fighter in the open invented a prone cover intent.");
+
+        var standingCanFire = new CoverPostureInput(4, 4, true);
+        var protectedCrouchCannotFire = new CoverPostureInput(4, 4, false);
+        var protectedProneCanFire = new CoverPostureInput(4, 4, true);
+        Equal(CoverPostureChoice.Prone,
+            InfantryCoverDecisionCore.SelectCoverPosture(
+                standingCanFire, protectedCrouchCannotFire, protectedProneCanFire),
+            "Standing was selected even though the soldier could fire prone from cover.");
+
+        var protectedProneCannotFire = protectedProneCanFire with { CanFire = false };
+        Equal(CoverPostureChoice.Standing,
+            InfantryCoverDecisionCore.SelectCoverPosture(
+                standingCanFire, protectedCrouchCannotFire, protectedProneCannotFire),
+            "A measured clearance stand was not selected after both lower poses failed to fire.");
+
+        var exposedCrouchCannotFire = new CoverPostureInput(0, 4, false);
+        Equal(CoverPostureChoice.Standing,
+            InfantryCoverDecisionCore.SelectCoverPosture(
+                standingCanFire, exposedCrouchCannotFire, protectedProneCannotFire),
+            "Prone-only cover could not rise for clearance after neither lower pose could fire.");
+
+    }
+
+    private static void FinalPoseBoundaryOverridesVanillaOnlyDuringStationaryCombat()
+    {
+        True(FinalPoseAuthorityCore.OwnsStationaryCombatPose(
+                true, false, true, false, false),
+            "A visible enemy did not give the mod final stationary-pose ownership.");
+        True(FinalPoseAuthorityCore.OwnsStationaryCombatPose(
+                true, false, false, true, false),
+            "Recent credible contact did not retain final stationary-pose ownership.");
+        True(FinalPoseAuthorityCore.OwnsStationaryCombatPose(
+                true, false, false, false, true),
+            "A tactical fighting hold fell through to the native posture selector.");
+        False(FinalPoseAuthorityCore.OwnsStationaryCombatPose(
+                true, true, true, true, true),
+            "A moving soldier was incorrectly forced into a stationary posture.");
+        False(FinalPoseAuthorityCore.OwnsStationaryCombatPose(
+                true, false, false, false, false),
+            "An idle soldier was taken away from ordinary native posture control.");
+        False(FinalPoseAuthorityCore.OwnsStationaryCombatPose(
+                false, false, true, true, true),
+            "A disabled contact-response system still replaced the native fighting pose.");
+
+        // Reproduce the live call order: SequentialUpdate alternates the native request,
+        // then both stationary paths reach Soldier.StopMove. The boundary must expose
+        // only the one committed mod pose, regardless of what native wrote upstream.
+        var previousOutput = TacticalStance.Crouched;
+        var outputChanges = 0;
+        for (var tick = 0; tick < 40; tick++)
+        {
+            var nativeRequest = tick % 2 == 0
+                ? TacticalStance.Prone
+                : TacticalStance.Crouched;
+            var output = FinalPoseAuthorityCore.RewriteNativeRequest(
+                modOwnsPose: true,
+                nativeRequest: nativeRequest,
+                committedPose: TacticalStance.Crouched);
+            if (output != previousOutput)
+                outputChanges++;
+            previousOutput = output;
+        }
+
+        Equal(0, outputChanges,
+            "The final boundary leaked native prone/crouch alternation to the soldier.");
+        Equal(TacticalStance.Crouched, previousOutput,
+            "The final boundary did not preserve the committed cover posture.");
+        Equal(TacticalStance.Prone,
+            FinalPoseAuthorityCore.RewriteNativeRequest(
+                modOwnsPose: false,
+                nativeRequest: TacticalStance.Prone,
+                committedPose: TacticalStance.Crouched),
+            "An idle/native pose request did not pass through unchanged.");
+    }
+
+    private static void SoldierPostureSimulationStaysContinuousAcrossSystems()
+    {
+        // Simulate one prone-protective cover occupant across the actual ownership
+        // boundaries that previously fought: movement arrival, visible-target contact,
+        // low and moderate suppression, a hard pin and release, target-memory-only
+        // contact, and intermittent loss of both native cover signals. Once movement
+        // ends, every system must resolve the same measured Prone posture.
+        var coverId = new IntPtr(42);
+        var owner = PoseOwner.MovementPose;
+        var stance = TacticalStance.Standing;
+        var holdUntil = 0f;
+        var stationaryPoseChanges = 0;
+        var roseAfterSettling = false;
+        var settledProne = false;
+
+        for (var tick = 0; tick < 48; tick++)
+        {
+            var now = tick * 0.5f;
+            var moving = tick < 4;
+            var hasVisibleTarget = tick % 7 != 0;
+            var suppression = tick switch
+            {
+                >= 12 and < 18 => 20,
+                >= 18 and < 25 => 40,
+                >= 25 and < 31 => 85,
+                >= 31 and < 38 => 45,
+                _ => 0
+            };
+            var wrapperAvailable = tick % 3 != 0;
+            var nativeOnCover = wrapperAvailable;
+            var cachedEvaluationAvailable = wrapperAvailable ||
+                StableCoverPostureCore.CanReuse(
+                    nativeOnCover,
+                    distanceFromEvaluatedPosition: 0.25f,
+                    hasStableAnchor: true,
+                    distanceFromStableAnchor: 0.5f,
+                    stableAnchorId: coverId,
+                    evaluatedCoverId: coverId,
+                    hasEvaluatedThreatDirection: true,
+                    evaluatedThreatDirectionDot: 1f);
+            var onUsableCover = wrapperAvailable ||
+                StableCoverInteropCore.CanUseAnchor(
+                    hasStableAnchor: true,
+                    horizontalDistanceMeters: 0.5f,
+                    destinationKnownInvalid: false);
+
+            PoseOwner proposedOwner;
+            TacticalStance proposedStance;
+            if (moving)
+            {
+                proposedOwner = PoseOwner.MovementPose;
+                proposedStance = TacticalStance.Standing;
+            }
+            else if (suppression >= AiBehaviorTuningCore.DefaultPinSuppressionThreshold)
+            {
+                proposedOwner = PoseOwner.Suppression;
+                proposedStance = PinnedSuppressionPoseCore.Resolve(
+                    onUsableCover: onUsableCover,
+                    hasCoverEvaluation: cachedEvaluationAvailable,
+                    evaluatedCoverPose: TacticalStance.Prone);
+            }
+            else if (suppression >= AiBehaviorTuningCore.DefaultCrouchSuppressionThreshold)
+            {
+                proposedOwner = PoseOwner.SuppressionRecovery;
+                proposedStance = SuppressionRecoveryPoseCore.Resolve(
+                    onUsableCover: onUsableCover,
+                    coverEvaluationOwnsProne: cachedEvaluationAvailable);
+            }
+            else if (CoverPostureOwnershipCore.CoverPoseOwned(
+                         hasThreatMemory: true,
+                         onUsableCover,
+                         defensiveHold: true) && cachedEvaluationAvailable)
+            {
+                proposedOwner = PoseOwner.CoverEvaluation;
+                proposedStance = TacticalStance.Prone;
+            }
+            else
+            {
+                True(FinalPoseAuthorityCore.OwnsStationaryCombatPose(
+                        contactResponseEnabled: true,
+                        movementActive: false,
+                        hasVisibleTarget: hasVisibleTarget,
+                        hasRecentContact: true,
+                        hasStationaryTacticalHold: true),
+                    "A stationary targeted simulation frame fell through to the vanilla pose alternator.");
+                proposedOwner = PoseOwner.StationaryCombat;
+                proposedStance = TacticalStance.Crouched;
+            }
+
+            var changed = StepLatch(
+                ref owner,
+                ref stance,
+                ref holdUntil,
+                proposedOwner,
+                proposedStance,
+                measuredStand: false,
+                now);
+            if (moving)
+                continue;
+
+            if (changed)
+                stationaryPoseChanges++;
+            if (settledProne && stance != TacticalStance.Prone)
+                roseAfterSettling = true;
+            settledProne |= stance == TacticalStance.Prone;
+        }
+
+        True(settledProne, "The simulated soldier never settled into his measured cover posture.");
+        False(roseAfterSettling,
+            "Target, suppression, cover-wrapper, or movement ownership raised the simulated soldier after he settled prone.");
+        Equal(1, stationaryPoseChanges,
+            "The simulated soldier changed posture more than once after reaching the fighting position.");
+        Equal(TacticalStance.Prone, stance,
+            "The full-system simulation did not finish in the stable measured posture.");
+    }
+
+    private static void CloseCombatCommitsToOneLivingVisibleTarget()
+    {
+        True(CloseTargetCommitmentCore.ShouldRetain(
+                true, true, true, true, true, 20f, 20f),
+            "A confirmed living target on the close-range boundary was not retained.");
+        False(CloseTargetCommitmentCore.ShouldRetain(
+                true, true, true, true, true, 20.01f, 20f),
+            "A target outside close range suppressed normal priority retargeting.");
+        False(CloseTargetCommitmentCore.ShouldRetain(
+                true, true, true, true, false, 5f, 20f),
+            "An unseen close target prevented the soldier from selecting a visible threat.");
+        False(CloseTargetCommitmentCore.ShouldRetain(
+                true, true, true, false, true, 5f, 20f),
+            "A dead or non-infantry target held the close-combat commitment.");
+        False(CloseTargetCommitmentCore.ShouldRetain(
+                true, true, false, true, true, 5f, 20f),
+            "A competing target was mistaken for the soldier's chosen close target.");
+    }
+
     private static void LocalTargetReportsRespectRangeAndPreferTheNearestContact()
     {
         True(LocalTargetReportCore.IsInsideSharingRadius(225f, 15f),
@@ -1560,6 +2318,32 @@ internal static class Program
             "The configurable target-memory increase did not extend direct-threat memory.");
     }
 
+    private static void RecentGunfireChecksOnlyTheExactVisibleShooter()
+    {
+        True(RecentGunfireVisibilityCore.ShouldCheckExactShooter(
+                cueActive: true,
+                cueShooterId: 42,
+                candidateShooterId: 42,
+                candidateAlive: true,
+                candidateHostile: true,
+                insideFieldOfView: true),
+            "A live exact shooter inside the field of view was not checked.");
+        False(RecentGunfireVisibilityCore.ShouldCheckExactShooter(
+                true, 42, 43, true, true, true),
+            "Recent gunfire revealed a different shooter.");
+        False(RecentGunfireVisibilityCore.ShouldCheckExactShooter(
+                true, 42, 42, true, true, false),
+            "Recent gunfire bypassed the configured field of view.");
+        True(RecentGunfireVisibilityCore.HasVisualContact(
+                nativeVisible: false,
+                triggerIgnoringRayHitExactShooter: true),
+            "A trigger-only obstruction still hid the exact shooter.");
+        False(RecentGunfireVisibilityCore.HasVisualContact(
+                nativeVisible: false,
+                triggerIgnoringRayHitExactShooter: false),
+            "Solid cover was treated as trigger-only concealment.");
+    }
+
     private static MapPoint DirectionAt(float degrees)
     {
         var radians = degrees * MathF.PI / 180f;
@@ -1584,16 +2368,75 @@ internal static class Program
         False(decision.ShouldSearch, "Useful cover triggered another cover search.");
     }
 
+    private static void EarlyAttackBoundsKeepBetterFiringCover()
+    {
+        var goodCurrent = new CoverPositionQuality(
+            IsProtective: true,
+            IsMeasured: true,
+            ProtectionFraction: 0.92f,
+            HasFiringLane: true);
+
+        False(InfantryCoverDecisionCore.ShouldLeaveCurrentCoverForAttackBound(
+                goodCurrent,
+                new CoverPositionQuality(true, true, 0.76f, true),
+                forcedByDeadline: false),
+            "Coordinated fire made an attacker abandon materially better protection.");
+        False(InfantryCoverDecisionCore.ShouldLeaveCurrentCoverForAttackBound(
+                goodCurrent,
+                new CoverPositionQuality(true, true, 0.98f, false),
+                forcedByDeadline: false),
+            "An attacker left protective firing cover for a blind destination.");
+        False(InfantryCoverDecisionCore.ShouldLeaveCurrentCoverForAttackBound(
+                goodCurrent,
+                new CoverPositionQuality(true, false, 0f, true),
+                forcedByDeadline: false),
+            "Measured cover was abandoned for an unclassified authored slot.");
+
+        True(InfantryCoverDecisionCore.ShouldLeaveCurrentCoverForAttackBound(
+                goodCurrent,
+                new CoverPositionQuality(true, true, 0.84f, true),
+                forcedByDeadline: false),
+            "An equivalent protected firing position could not be used for the next bound.");
+        True(InfantryCoverDecisionCore.ShouldLeaveCurrentCoverForAttackBound(
+                goodCurrent,
+                new CoverPositionQuality(true, false, 0f, false),
+                forcedByDeadline: true),
+            "The maximum combat halt could not force progress from cover.");
+    }
+
+    private static void DeferredCoverSearchDoesNotStopExposedMovement()
+    {
+        True(InfantryCoverDecisionCore.ShouldKeepMovingDuringDeferredCoverSearch(
+                searchDeferred: true,
+                hasUsableCover: false,
+                closeThreat: false,
+                hasMovementOrder: true,
+                hasDestination: true),
+            "A budgeted next-frame cover retry stopped an exposed moving soldier in the open.");
+        False(InfantryCoverDecisionCore.ShouldKeepMovingDuringDeferredCoverSearch(
+                true, true, false, true, true),
+            "A soldier already in useful cover abandoned it during a deferred search.");
+        False(InfantryCoverDecisionCore.ShouldKeepMovingDuringDeferredCoverSearch(
+                true, false, true, true, true),
+            "Immediate close-contact fire was displaced by a deferred cover search.");
+        False(InfantryCoverDecisionCore.ShouldKeepMovingDuringDeferredCoverSearch(
+                true, false, false, true, false),
+            "Deferred cover logic fabricated movement without a destination.");
+        False(InfantryCoverDecisionCore.ShouldKeepMovingDuringDeferredCoverSearch(
+                true, false, false, true, true, firingCommitActive: true),
+            "A deferred cover evaluation bypassed a committed attack firing phase.");
+    }
+
     private static void CoverPostureRequiresWholeBodyProtection()
     {
         var standing = new CoverPostureInput(1, 4, true);
         var narrowTreeCrouch = new CoverPostureInput(2, 4, true);
         var openProne = new CoverPostureInput(0, 4, true);
         Equal(
-            CoverPostureChoice.Prone,
+            CoverPostureChoice.Crouched,
             InfantryCoverDecisionCore.SelectCoverPosture(
                 standing, narrowTreeCrouch, openProne),
-            "A narrow obstruction made a soldier kneel with most of his body exposed.");
+            "A narrow obstruction created a prone cover intent despite leaving most of the body exposed.");
         False(InfantryCoverDecisionCore.HasMeaningfulProtection(narrowTreeCrouch),
             "Two protected body samples were incorrectly treated as genuine cover.");
 
@@ -1784,19 +2627,19 @@ internal static class Program
         // cannot be compiled here): the small HARD radius every reservation-conflict
         // check passes to AiState.CoverReservedByOther, and the wider SCORING-only
         // radius used for the crowding count.
-        const float hardReservationRadius = 1.75f;
+        const float hardReservationRadius = 2.5f;
         const float dispersionScoringRadius = 5f;
 
         var reserved = new MapPoint(0f, 0f);
         var twoMetresAway = new MapPoint(2f, 0f);
         var threeMetresAway = new MapPoint(0f, 3f);
 
-        // A trench or building whose slots sit 2-3 m apart must stay usable by the
-        // rest of the squad: dispersion may rank a slot lower, never veto it.
-        False(
+        // The configured default rejects a second center inside 2.5 m, while a
+        // genuinely separate 3 m slot remains usable by the rest of the squad.
+        True(
             InfantryCoverDecisionCore.CoverPositionsConflict(
                 twoMetresAway, reserved, hardReservationRadius),
-            "A cover slot 2 m from a squadmate's reservation was rejected outright.");
+            "Two soldiers were allowed inside the default hard separation radius.");
         False(
             InfantryCoverDecisionCore.CoverPositionsConflict(
                 threeMetresAway, reserved, hardReservationRadius),
@@ -1845,6 +2688,83 @@ internal static class Program
             "An attacker without an objective route was forced to wander.");
     }
 
+    private static void AttackAdvanceAlternatesBoundAndFiringPhases()
+    {
+        Equal(7f, CombatMovementPolicyCore.ResolveAttackFiringHoldSeconds(
+                CombatMovementPolicyCore.DefaultAttackFiringHoldSeconds),
+            "The attack firing-hold slider lost its seven-second default.");
+        Equal(5f, CombatMovementPolicyCore.ResolveAttackFiringHoldSeconds(1f),
+            "The attack firing-hold slider allowed an ineffective sub-five-second phase.");
+        Equal(15f, CombatMovementPolicyCore.ResolveAttackFiringHoldSeconds(30f),
+            "The attack firing-hold slider exceeded its deliberate upper bound.");
+        const float boundStartedAt = 100f;
+        var initialCommitUntil = CombatMovementPolicyCore.EnsureInitialAttackFiringCommit(
+            currentCommitUntil: 0f,
+            attackBoundActive: false,
+            hasMovementOrder: true,
+            underPressure: true,
+            now: boundStartedAt,
+            configuredSeconds: CombatMovementPolicyCore.DefaultAttackFiringHoldSeconds);
+        Equal(boundStartedAt + CombatMovementPolicyCore.DefaultAttackFiringHoldSeconds,
+            initialCommitUntil,
+            "The first attack contact did not receive the configured firing commitment.");
+        Equal(initialCommitUntil,
+            CombatMovementPolicyCore.EnsureInitialAttackFiringCommit(
+                initialCommitUntil,
+                attackBoundActive: false,
+                hasMovementOrder: true,
+                underPressure: true,
+                now: boundStartedAt + 2f,
+                configuredSeconds: CombatMovementPolicyCore.DefaultAttackFiringHoldSeconds),
+            "A repeated contact update extended or replaced the initial firing deadline.");
+        Equal(0f,
+            CombatMovementPolicyCore.EnsureInitialAttackFiringCommit(
+                currentCommitUntil: 0f,
+                attackBoundActive: false,
+                hasMovementOrder: false,
+                underPressure: true,
+                now: boundStartedAt,
+                configuredSeconds: CombatMovementPolicyCore.DefaultAttackFiringHoldSeconds),
+            "A stationary defender inherited the attack firing commitment.");
+        False(CombatMovementPolicyCore.CoveringFireMayAuthorizeBound(
+                initialCommitUntil,
+                initialCommitUntil - 0.01f),
+            "Covering fire bypassed the first committed firing phase.");
+        False(CombatMovementPolicyCore.AttackBoundComplete(
+                active: true,
+                startedAt: boundStartedAt,
+                now: boundStartedAt + CombatMovementPolicyCore.AttackBoundSeconds - 0.01f),
+            "An attack bound ended before its bounded movement window elapsed.");
+        True(CombatMovementPolicyCore.AttackBoundComplete(
+                active: true,
+                startedAt: boundStartedAt,
+                now: boundStartedAt + CombatMovementPolicyCore.AttackBoundSeconds),
+            "A continuously pressured attacker was allowed to run forever.");
+
+        var firingCommitUntil = boundStartedAt +
+                                CombatMovementPolicyCore.AttackBoundSeconds +
+                                CombatMovementPolicyCore.ResolveAttackFiringHoldSeconds(12f);
+        Equal(boundStartedAt + CombatMovementPolicyCore.AttackBoundSeconds + 12f,
+            firingCommitUntil,
+            "The configured firing-hold duration did not reach the attack cycle unchanged.");
+        True(CombatMovementPolicyCore.AttackFiringPhaseActive(
+                firingCommitUntil,
+                firingCommitUntil - 0.01f),
+            "The attack firing commitment disappeared before its deadline.");
+        False(CombatMovementPolicyCore.AttackFiringPhaseActive(
+                firingCommitUntil,
+                firingCommitUntil),
+            "The completed firing commitment remained latched.");
+        False(CombatMovementPolicyCore.CoveringFireMayAuthorizeBound(
+                firingCommitUntil,
+                firingCommitUntil - 0.01f),
+            "Squad covering fire immediately restarted movement before the mover could shoot.");
+        True(CombatMovementPolicyCore.CoveringFireMayAuthorizeBound(
+                firingCommitUntil,
+                firingCommitUntil),
+            "A completed firing phase could not authorize the next attack bound.");
+    }
+
     private static void DefendingReinforcementsKeepTheirMovementOrderUntilArrival()
     {
         True(SquadOrderMovementCore.ShouldTreatAsMoving(
@@ -1859,6 +2779,22 @@ internal static class Program
                 isDefendOrder: false,
                 isInsideDefendArea: true),
             "A non-defend squad order lost its ordinary movement behavior.");
+    }
+
+    private static void UnchangedSquadIntentDoesNotRestartNativeMovement()
+    {
+        False(SquadOrderContinuityCore.ShouldReissue(
+                planStampMatches: true,
+                nativeOrderMatches: true),
+            "Native formation/path destination drift restarted an unchanged squad order.");
+        True(SquadOrderContinuityCore.ShouldReissue(
+                planStampMatches: false,
+                nativeOrderMatches: true),
+            "A new objective plan failed to issue its squad order.");
+        True(SquadOrderContinuityCore.ShouldReissue(
+                planStampMatches: true,
+                nativeOrderMatches: false),
+            "A lost or externally changed high-level order was not restored.");
     }
 
     private static void DefensivePositionOwnershipStaysLatchedOutsideTheArrivalArea()
@@ -2251,6 +3187,23 @@ internal static class Program
             "A cover reservation was released while its soldier was still in transit.");
     }
 
+    private static void ManeuverAnchorsKeepTheirSpatialReservations()
+    {
+        True(InfantryCoverDecisionCore.HasStableReservationAnchor(
+                defensiveHold: false,
+                defensiveAnchor: false,
+                maneuverAnchor: true),
+            "A reached maneuver cover slot was not recognized as a stable reservation anchor.");
+        False(InfantryCoverDecisionCore.ShouldReleaseUnoccupiedReservation(
+                relocating: false,
+                nativeCoverReported: false,
+                stableAnchor: InfantryCoverDecisionCore.HasStableReservationAnchor(
+                    defensiveHold: false,
+                    defensiveAnchor: false,
+                    maneuverAnchor: true)),
+            "A reached maneuver slot lost its reservation when native cover status flickered.");
+    }
+
     private static void AutonomousDefendersSeekCoverEvenWithVisibleContact()
     {
         True(InfantryCoverDecisionCore.ShouldSeekInitialDefensiveCover(
@@ -2305,8 +3258,12 @@ internal static class Program
             "The first stalled destination did not receive a quiet recovery hold.");
         Near(8f, MovementProgressWatchdogCore.RecoverySeconds(2), 0.001f,
             "A repeated stall did not lengthen the quiet recovery hold.");
-        Near(12f, MovementProgressWatchdogCore.RecoverySeconds(10), 0.001f,
+        Near(8f, MovementProgressWatchdogCore.RecoverySeconds(10), 0.001f,
             "Repeated stalls were not capped at the intended quiet hold.");
+        False(MovementProgressWatchdogCore.ShouldAbandonDestination(1),
+            "The first blocked-path failure abandoned the destination without one retry.");
+        True(MovementProgressWatchdogCore.ShouldAbandonDestination(2),
+            "The same blocked destination could still enter an infinite halt/retry loop.");
     }
 
     private static void RealMovementAndPathChangesResetTheStallWatch()
@@ -2586,13 +3543,13 @@ internal static class Program
     {
         var reserved = new MapPoint(10f, -5f);
         True(InfantryCoverDecisionCore.CoverPositionsConflict(
-                reserved, new MapPoint(11.75f, -5f), 1.75f),
+                reserved, new MapPoint(12.5f, -5f), 2.5f),
             "A duplicate cover slot on the spacing boundary was accepted.");
         False(InfantryCoverDecisionCore.CoverPositionsConflict(
-                reserved, new MapPoint(11.751f, -5f), 1.75f),
+                reserved, new MapPoint(12.501f, -5f), 2.5f),
             "A genuinely separate cover slot was rejected.");
         False(InfantryCoverDecisionCore.CoverPositionsConflict(
-                reserved, new MapPoint(float.NaN, -5f), 1.75f),
+                reserved, new MapPoint(float.NaN, -5f), 2.5f),
             "Invalid cover coordinates conflicted with a valid reservation.");
     }
 
@@ -2913,13 +3870,14 @@ internal static class Program
         bool autonomous = true,
         bool hasPlayerHoldOrder = false,
         bool hasProtectedAssignment = false,
-        bool mounted = false)
+        bool mounted = false,
+        bool hasVehicleBoardingOrder = false)
     {
         return new SoldierTacticalSnapshot(
             1, 1, 1, StrategicPosture.Attack, playerLed, scriptOwned, true, mounted,
             suppressed, needsReloadSafety, lethalHazard, position, threatPosition,
             hazardPosition, contactMovement, autonomous, hasPlayerHoldOrder,
-            hasProtectedAssignment);
+            hasProtectedAssignment, hasVehicleBoardingOrder);
     }
 
     private static void ExternalSquadWithoutPlayerHoldCoverEmitsOnlyNativeAndExternal()
@@ -3001,6 +3959,33 @@ internal static class Program
             "Suppression did not produce a movement hold once hazard and reload safety were absent.");
     }
 
+    private static void VehicleBoardingOrderDefersCoverControlUntilReentry()
+    {
+        var contactSensor = new ContactMovementSensor(
+            HasActionableContact: true, HasRecentContact: true, HasCommittedCoverMove: false,
+            HasStableCoverHold: false, HasTimedCoverHold: false, CanClaimReachedCover: false,
+            HasEngagementHold: false, NeedsDefensivePositionControl: true);
+        var snapshot = ProposalSnapshot(
+            suppressed: true,
+            contactMovement: contactSensor,
+            hasVehicleBoardingOrder: true);
+        var proposals = new List<TacticalProposal>();
+
+        ProposalGenerationCore.Collect(snapshot, new TacticalPolicyOptions(true), proposals);
+        var resolution = TacticalArbitrationCore.Resolve(snapshot, proposals);
+        Equal(ProposalSource.VehicleBoarding, resolution.Winners[TacticalChannel.Movement].Source,
+            "Cover or suppression movement displaced a native vehicle-boarding order.");
+        Equal(TacticalAction.Native, resolution.Winners[TacticalChannel.Movement].Action,
+            "The vehicle-boarding proposal did not defer movement to the game's native order.");
+
+        var hazardSnapshot = snapshot with { LethalHazard = true };
+        proposals.Clear();
+        ProposalGenerationCore.Collect(hazardSnapshot, new TacticalPolicyOptions(true), proposals);
+        var hazardResolution = TacticalArbitrationCore.Resolve(hazardSnapshot, proposals);
+        Equal(ProposalSource.Hazard, hazardResolution.Winners[TacticalChannel.Movement].Source,
+            "A lethal hazard could not temporarily interrupt vehicle boarding.");
+    }
+
     private static void ProtectedAssignmentSkipsDefensivePositionBranch()
     {
         var sensor = new ContactMovementSensor(
@@ -3058,7 +4043,7 @@ internal static class Program
             "Contact response did not target the sensed threat position.");
     }
 
-    private static void ReloadSafetyAddsProneAndFireInhibitionAlongsideTheHold()
+    private static void ReloadSafetyAddsCrouchAndFireInhibitionAlongsideTheHold()
     {
         var snapshot = ProposalSnapshot(needsReloadSafety: true);
         var destination = new List<TacticalProposal>();
@@ -3069,7 +4054,7 @@ internal static class Program
         Equal(TacticalAction.Hold, hold.Action, "Reload safety did not hold the movement channel.");
 
         var pose = destination.Single(p => p.Channel == TacticalChannel.Pose && p.Source == ProposalSource.ActionSafety);
-        Equal(TacticalAction.Prone, pose.Action, "Reload safety did not drop to prone on the pose channel.");
+        Equal(TacticalAction.Crouch, pose.Action, "Reload safety did not use crouch on the pose channel.");
         Equal(CommandAuthority.RequiredSafety, pose.Priority,
             "Reload safety pose proposal used the wrong authority.");
 

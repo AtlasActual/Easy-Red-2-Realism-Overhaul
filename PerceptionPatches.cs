@@ -40,11 +40,13 @@ internal static class IncomingFireCuePatch
                 return;
             }
 
+            var shooterTarget = shooter.TryCast<Spottable>();
             IncomingFireAwareness.Record(
                 __instance,
                 shooter.GetCenterOfUnit(),
-                shooter.Pointer,
+                shooterTarget?.Pointer ?? shooter.Pointer,
                 shooter.GetInstanceID(),
+                shooterTarget,
                 Time.time);
         }
         catch (Exception ex)
@@ -137,7 +139,8 @@ internal static class GunfireAwareness
             return;
         }
 
-        var shooterToken = shooter.Pointer;
+        var shooterTarget = shooter.TryCast<Spottable>();
+        var shooterToken = shooterTarget?.Pointer ?? shooter.Pointer;
         if (shooterToken == IntPtr.Zero)
             return;
 
@@ -152,6 +155,7 @@ internal static class GunfireAwareness
         // One entry per shooter bounds automatic fire to a position/expiry refresh.
         AiState.GunfireCues[shooterId] = new GunfireCue(
             shooterToken,
+            shooterTarget,
             faction,
             shooter.GetCenterOfUnit(),
             now + CueLifetimeSeconds);
@@ -227,6 +231,7 @@ internal static class GunfireAwareness
                 nearest.Position,
                 nearest.ShooterToken,
                 nearestShooterId,
+                nearest.Shooter,
                 now,
                 nearest.ExpiresAt);
         }
@@ -240,7 +245,8 @@ internal static class GunfireAwareness
 
         foreach (var memory in AiState.TargetMemory.Values)
         {
-            if (memory.IncomingFireShooterToken == shooterToken)
+            if (memory.IncomingFireShooterId == shooterId ||
+                memory.IncomingFireShooterToken == shooterToken)
                 IncomingFireAwareness.Clear(memory);
         }
     }
@@ -262,6 +268,7 @@ internal static class GunfireAwareness
     internal static void ResetBattle()
     {
         ClearAll();
+        RecentGunfireVisibility.ResetBattle();
         _disabled = !Settings.PerceptionEnabled.Value ||
                     !MultiplayerAuthority.CanMutateGameplay();
         _nextCuePruneAt = 0f;
@@ -368,6 +375,7 @@ internal static class GunfireAwarenessBattleResetPatch
 internal static class IncomingFireAwareness
 {
     private const float CandidateAttentionFreshSeconds = 1.5f;
+    private const float ExactShooterVisibilitySeconds = 3f;
 
     [ThreadStatic]
     private static int _nonDirectionalSuppressionDepth;
@@ -379,12 +387,14 @@ internal static class IncomingFireAwareness
         Vector3 sourcePosition,
         IntPtr shooterToken,
         int shooterId,
+        Spottable? shooterTarget,
         float now)
         => RecordCue(
             soldier,
             sourcePosition,
             shooterToken,
             shooterId,
+            shooterTarget,
             now,
             now + DirectThreatMemoryCore.RetentionSeconds(
                 AiBehaviorTuning.TargetMemorySeconds),
@@ -395,6 +405,7 @@ internal static class IncomingFireAwareness
         Vector3 sourcePosition,
         IntPtr shooterToken,
         int shooterId,
+        Spottable? shooterTarget,
         float now,
         float expiresAt)
     {
@@ -406,6 +417,7 @@ internal static class IncomingFireAwareness
             sourcePosition,
             shooterToken,
             shooterId,
+            shooterTarget,
             now,
             expiresAt,
             isDirect: false);
@@ -416,6 +428,7 @@ internal static class IncomingFireAwareness
         Vector3 sourcePosition,
         IntPtr shooterToken,
         int shooterId,
+        Spottable? shooterTarget,
         float now,
         float expiresAt,
         bool isDirect)
@@ -436,7 +449,7 @@ internal static class IncomingFireAwareness
         // Repeated fire from the same source refreshes the cue. Competing sources
         // at the same priority only replace it when they are closer.
         if (!isNewCue && state.IncomingFireIsDirect == isDirect &&
-            state.IncomingFireShooterToken != shooterToken)
+            state.IncomingFireShooterId != shooterId)
         {
             var origin = soldier.LookPosition();
             var existingDistanceSqr = (state.IncomingFirePosition - origin).sqrMagnitude;
@@ -447,7 +460,12 @@ internal static class IncomingFireAwareness
 
         state.IncomingFirePosition = sourcePosition;
         state.IncomingFireUntil = expiresAt;
+        state.IncomingFireVisibilityUntil = Mathf.Min(
+            expiresAt,
+            now + ExactShooterVisibilitySeconds);
         state.IncomingFireShooterToken = shooterToken;
+        state.IncomingFireShooterId = shooterId;
+        state.IncomingFireShooter = shooterTarget;
         state.IncomingFireIsDirect = isDirect;
 
         if (isNewCue)
@@ -525,6 +543,13 @@ internal static class IncomingFireAwareness
             Clear(state);
             return;
         }
+
+        // Native CanSee includes trigger colliders in its ray. Bush prefabs use
+        // oversized trigger spheres for concealment, so a crouched or prone shooter
+        // can be physically hidden from the native ray even after firing. Re-check
+        // only this exact recent shooter with triggers ignored; solid cover remains
+        // fully blocking and the normal FOV/reaction delay still applies.
+        RecentGunfireVisibility.Update(ai, soldier, state, origin, now);
 
         // A closer incoming shooter may pull attention, but a nearer confirmed or
         // actively observed target wins. The shooter still has to enter the cone
@@ -640,8 +665,236 @@ internal static class IncomingFireAwareness
     {
         state.IncomingFirePosition = default;
         state.IncomingFireUntil = 0f;
+        state.IncomingFireVisibilityUntil = 0f;
         state.IncomingFireShooterToken = IntPtr.Zero;
+        state.IncomingFireShooterId = 0;
+        state.IncomingFireShooter = null;
         state.IncomingFireIsDirect = false;
+        state.NextIncomingFireVisibilityAt = 0f;
+    }
+}
+
+internal static class RecentGunfireVisibility
+{
+    private const float VisibilityPollSeconds = 0.12f;
+    private const float RayOriginAdvanceMeters = 0.4f;
+    private const float RayEndAllowanceMeters = 0.5f;
+
+    private static bool _loggedActive;
+    private static bool _loggedTriggerBypass;
+    private static bool _loggedSolidBlocker;
+
+    internal static void ResetBattle()
+    {
+        _loggedActive = false;
+        _loggedTriggerBypass = false;
+        _loggedSolidBlocker = false;
+    }
+
+    internal static void Update(
+        SoldierAI ai,
+        Soldier listener,
+        TargetMemoryState state,
+        Vector3 origin,
+        float now)
+    {
+        if (now < state.NextIncomingFireVisibilityAt ||
+            !TryResolveExactShooter(state, now, out var target, out var shooter))
+        {
+            return;
+        }
+
+        if (!TargetAcquisition.TryGetTargetSnapshot(
+                target, out var targetToken, out var targetPosition))
+        {
+            return;
+        }
+
+        var distance = Vector3.Distance(origin, targetPosition);
+        var suppression = TargetAcquisition.Suppression(listener);
+        var insideFov = TargetAcquisition.IsInsideEffectiveFov(
+            listener, targetPosition, distance, suppression);
+        var hostile = ResourcesManager.IsEnemyFaction(
+            AiState.FactionOf(listener), AiState.FactionOf(shooter));
+        if (!RecentGunfireVisibilityCore.ShouldCheckExactShooter(
+                cueActive: true,
+                cueShooterId: state.IncomingFireShooterId,
+                candidateShooterId: shooter.GetInstanceID(),
+                candidateAlive: shooter.IsAlive,
+                candidateHostile: hostile,
+                insideFieldOfView: insideFov))
+        {
+            return;
+        }
+
+        state.NextIncomingFireVisibilityAt = now + VisibilityPollSeconds +
+                                               (listener.GetInstanceID() & 3) * 0.01f;
+        if (!_loggedActive)
+        {
+            _loggedActive = true;
+            Plugin.LogSource.LogInfo(
+                "Recent-gunfire exact-shooter visibility check is active; " +
+                "Unity trigger volumes are ignored while solid cover remains blocking.");
+        }
+
+        var nativeVisible = false;
+        try
+        {
+            nativeVisible = listener.CanSee(target);
+        }
+        catch (NullReferenceException) { }
+        catch (Il2CppException) { }
+        catch (ObjectCollectedException) { }
+
+        var triggerIgnoringRayHitTarget = false;
+        RaycastHit firstSolidHit = default;
+        if (!nativeVisible)
+        {
+            triggerIgnoringRayHitTarget = TriggerIgnoringRayHitsExactTarget(
+                listener,
+                targetToken,
+                origin,
+                targetPosition,
+                out firstSolidHit);
+        }
+
+        if (!RecentGunfireVisibilityCore.HasVisualContact(
+                nativeVisible, triggerIgnoringRayHitTarget))
+        {
+            LogFirstSolidBlocker(firstSolidHit);
+            return;
+        }
+
+        if (triggerIgnoringRayHitTarget && !_loggedTriggerBypass)
+        {
+            _loggedTriggerBypass = true;
+            Plugin.LogSource.LogInfo(
+                "Recent-gunfire visibility reached the exact shooter after ignoring " +
+                "trigger-only concealment; normal target reaction timing still applies.");
+        }
+
+        TargetAcquisition.RecordIndependentVisualProof(state, targetToken, now);
+        TargetAcquisition.RetainOnlyNativeCandidate(listener, targetToken);
+        if (!TargetAcquisition.TryConfirm(
+                listener,
+                target,
+                distance,
+                suppression,
+                now,
+                allowIndependentVisualContinuity: true))
+        {
+            return;
+        }
+
+        TargetAcquisition.RecordConfirmedNativeObservation(
+            listener, targetToken, targetPosition, now);
+        TargetAcquisition.PublishSoldierTarget(listener, target);
+        if (!TargetAcquisition.MatchesTarget(ai.visibleTarget, targetToken))
+            ai.visibleTarget = target;
+    }
+
+    private static bool TryResolveExactShooter(
+        TargetMemoryState state,
+        float now,
+        out Spottable target,
+        out Soldier shooter)
+    {
+        target = null!;
+        shooter = null!;
+
+        var cueActive = now < state.IncomingFireVisibilityUntil;
+        var candidate = state.IncomingFireShooter;
+        if (AiState.GunfireCues.TryGetValue(
+                state.IncomingFireShooterId, out var gunfireCue) &&
+            gunfireCue.ExpiresAt > now &&
+            gunfireCue.ShooterToken == state.IncomingFireShooterToken)
+        {
+            cueActive = true;
+            if (!TargetAcquisition.IsUsableTarget(candidate))
+                candidate = gunfireCue.Shooter;
+        }
+
+        if (!cueActive || !TargetAcquisition.IsUsableTarget(candidate))
+            return false;
+
+        try
+        {
+            var candidateSoldier = candidate!.TryCast<Soldier>();
+            if (candidateSoldier == null ||
+                candidateSoldier.GetInstanceID() != state.IncomingFireShooterId)
+            {
+                return false;
+            }
+
+            target = candidate;
+            shooter = candidateSoldier;
+            return true;
+        }
+        catch (NullReferenceException) { return false; }
+        catch (Il2CppException) { return false; }
+        catch (ObjectCollectedException) { return false; }
+    }
+
+    private static bool TriggerIgnoringRayHitsExactTarget(
+        Soldier listener,
+        IntPtr targetToken,
+        Vector3 origin,
+        Vector3 targetPosition,
+        out RaycastHit firstSolidHit)
+    {
+        firstSolidHit = default;
+        var direction = targetPosition - origin;
+        var distance = direction.magnitude;
+        if (distance <= 0.01f)
+            return false;
+
+        direction /= distance;
+        var advance = Mathf.Min(RayOriginAdvanceMeters, distance * 0.5f);
+        origin += direction * advance;
+        distance -= advance;
+
+        if (!Physics.Raycast(
+                origin,
+                direction,
+                out firstSolidHit,
+                distance + RayEndAllowanceMeters,
+                Physics.DefaultRaycastLayers,
+                QueryTriggerInteraction.Ignore) ||
+            firstSolidHit.collider == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var hitTarget = Creature.GetConnectedSpottable(
+                firstSolidHit.collider.transform);
+            return TargetAcquisition.MatchesTarget(hitTarget, targetToken);
+        }
+        catch (NullReferenceException) { return false; }
+        catch (Il2CppException) { return false; }
+        catch (ObjectCollectedException) { return false; }
+    }
+
+    private static void LogFirstSolidBlocker(RaycastHit hit)
+    {
+        if (_loggedSolidBlocker || hit.collider == null)
+            return;
+
+        _loggedSolidBlocker = true;
+        try
+        {
+            var gameObject = hit.collider.gameObject;
+            Plugin.LogSource.LogInfo(
+                $"Recent-gunfire visibility sample remained blocked by solid " +
+                $"'{gameObject.name}' on layer {gameObject.layer} " +
+                $"({hit.collider.GetType().Name}).");
+        }
+        catch
+        {
+            Plugin.LogSource.LogInfo(
+                "Recent-gunfire visibility sample remained blocked by a solid collider.");
+        }
     }
 }
 
@@ -904,7 +1157,10 @@ internal static class IncomingFireOrientationPatch
 internal static class SoldierVisibilityConePatch
 {
     [HarmonyPrefix]
-    private static bool Prefix(Creature __instance, Spottable seeTarget, ref bool __result)
+    private static bool Prefix(
+        Creature __instance,
+        Spottable seeTarget,
+        ref bool __result)
     {
         if (!Settings.PerceptionEnabled.Value ||
             !MultiplayerAuthority.CanMutateGameplay() ||
@@ -998,7 +1254,30 @@ internal static class SoldierTargetAcquisitionPatch
         try
         {
             var now = Time.time;
-            if (!TargetAcquisition.TryGetTargetSnapshot(__result, out var targetToken, out var targetPosition))
+            var hasNativeTarget = TargetAcquisition.TryGetTargetSnapshot(
+                __result, out var targetToken, out var targetPosition);
+
+            // Native priority scoring may nominate a different enemy on every scan.
+            // At close range, keep finishing the already-confirmed infantry target
+            // while it remains alive and directly visible. Medium/far contacts and
+            // invalid, hidden, dead, or departing close targets still use the native
+            // result and the normal confirmation path below.
+            if ((!hasNativeTarget ||
+                 !TargetAcquisition.MatchesTarget(__state, targetToken)) &&
+                TargetAcquisition.TryRetainCloseCombatTarget(
+                    __instance,
+                    __state,
+                    now,
+                    out var committedTarget,
+                    out var committedDistance))
+            {
+                TargetAcquisition.PublishSoldierTarget(__instance, committedTarget);
+                __result = committedTarget;
+                dist = committedDistance;
+                return;
+            }
+
+            if (!hasNativeTarget)
             {
                 // This is the result of a real native visibility scan. Unlike the
                 // later SequentialUpdate null (which can be caused by this patch
@@ -1006,6 +1285,23 @@ internal static class SoldierTargetAcquisitionPatch
                 // evidence and must break any pending observation streak.
                 TargetAcquisition.ResetCandidatesAfterNegativeObservation(__instance);
                 TargetAcquisition.ExpireUnobserved(__instance, now);
+                // A recent exact-shooter ray is stronger evidence than the native
+                // vegetation query. Bridge only that short independent proof; ordinary
+                // target memory is never allowed to turn a negative scan into vision.
+                if (TargetAcquisition.TryRetainRecentIndependentVisualTarget(
+                        __instance,
+                        __state,
+                        now,
+                        out var independentlyVisible,
+                        out var independentlyVisibleDistance))
+                {
+                    TargetAcquisition.PublishSoldierTarget(__instance, independentlyVisible);
+                    __result = independentlyVisible;
+                    dist = independentlyVisibleDistance;
+                    return;
+                }
+
+                TargetAcquisition.RequireReacquisitionAfterNegativeObservation(__instance);
                 TargetAcquisition.PublishSoldierTarget(__instance, null);
                 __result = null!;
                 dist = float.MaxValue;
@@ -1271,6 +1567,8 @@ internal static class TargetAcquisition
         if (AiState.TargetMemory.TryGetValue(soldier.GetInstanceID(), out var memory) &&
             memory.HasConfirmedTarget)
         {
+            if (memory.RequiresTargetReacquisition)
+                return null;
             if (MatchesTarget(visible, memory.TargetToken))
                 return visible;
             if (MatchesTarget(current, memory.TargetToken))
@@ -1410,7 +1708,10 @@ internal static class TargetAcquisition
 
     internal static float Suppression(Soldier soldier)
         => Settings.SuppressionAwarenessEnabled.Value
-            ? Mathf.Clamp01(soldier.GetSuppressionValue() / 255f)
+            ? AiBehaviorTuningCore.SuppressionPenaltyStrength(
+                soldier.GetSuppressionValue(),
+                AiBehaviorTuning.CrouchSuppressionThreshold,
+                AiBehaviorTuning.ProneSuppressionThreshold)
             : 0f;
 
     internal static float EffectivePeripheralDistance(float suppression)
@@ -1450,7 +1751,8 @@ internal static class TargetAcquisition
         Spottable target,
         float distance,
         float suppression,
-        float now)
+        float now,
+        bool allowIndependentVisualContinuity = false)
     {
         var soldierId = soldier.GetInstanceID();
         if (!TryGetTargetSnapshot(target, out var targetToken, out var targetPosition))
@@ -1461,17 +1763,22 @@ internal static class TargetAcquisition
 
         // A positive observation of the already-confirmed target is current proof,
         // even when native visibility scans are farther apart than the memory timer.
-        if (state.HasConfirmedTarget && state.TargetToken == targetToken)
+        if (TargetConfirmationCore.CanReuseConfirmedTarget(
+                state.HasConfirmedTarget,
+                state.TargetToken == targetToken,
+                state.RequiresTargetReacquisition,
+                allowIndependentVisualContinuity))
         {
+            state.RequiresTargetReacquisition = false;
             state.LastObservedAt = now;
+            state.Candidates.Clear();
             return true;
         }
 
         if (state.HasConfirmedTarget && now - state.LastObservedAt > effectiveMemory)
         {
             var expiredToken = state.TargetToken;
-            state.HasConfirmedTarget = false;
-            state.TargetToken = IntPtr.Zero;
+            ClearConfirmedTarget(state);
             AiState.Trace($"Acquisition: soldier {soldierId} forgot target {expiredToken} before evaluating {targetToken}");
         }
 
@@ -1510,8 +1817,11 @@ internal static class TargetAcquisition
         state.HasConfirmedTarget = true;
         state.TargetToken = targetToken;
         state.LastObservedAt = now;
-        if (state.IncomingFireShooterToken == targetToken)
-            IncomingFireAwareness.Clear(state);
+        state.RequiresTargetReacquisition = false;
+        // Keep an exact-shooter cue until its own short visibility lifetime ends.
+        // That lets the fixed-update visibility path maintain a confirmed shooter
+        // through trigger-only vegetation while automatic fire continues. The cue
+        // still expires normally and never extends precise contact by itself.
         state.Candidates.Clear();
         AiState.Trace($"Acquisition: soldier {soldierId} confirmed target {targetToken} after " +
                       $"{candidate.ObservedSeconds:0.0}s observed at {distance:0}m");
@@ -1529,8 +1839,7 @@ internal static class TargetAcquisition
                               Mathf.Lerp(1f, Settings.SuppressedMemoryMultiplier.Value, suppression);
         if (state.HasConfirmedTarget && now - state.LastObservedAt > effectiveMemory)
         {
-            state.HasConfirmedTarget = false;
-            state.TargetToken = IntPtr.Zero;
+            ClearConfirmedTarget(state);
             AiState.Trace($"Acquisition: soldier {soldierId} forgot an unobserved target");
         }
 
@@ -1619,7 +1928,9 @@ internal static class TargetAcquisition
         target = null!;
         distance = float.MaxValue;
         var soldierId = soldier.GetInstanceID();
-        if (!AiState.TargetMemory.TryGetValue(soldierId, out var state) || !state.HasConfirmedTarget)
+        if (!AiState.TargetMemory.TryGetValue(soldierId, out var state) ||
+            !state.HasConfirmedTarget ||
+            state.RequiresTargetReacquisition)
             return false;
 
         if (!MatchesTarget(priorConfirmed, state.TargetToken))
@@ -1629,20 +1940,83 @@ internal static class TargetAcquisition
                               Mathf.Lerp(1f, Settings.SuppressedMemoryMultiplier.Value, Suppression(soldier));
         if (now - state.LastObservedAt > effectiveMemory)
         {
-            state.HasConfirmedTarget = false;
-            state.TargetToken = IntPtr.Zero;
+            ClearConfirmedTarget(state);
             return false;
         }
 
         target = priorConfirmed!;
         if (!TryGetTargetSnapshot(priorConfirmed, out _, out var targetPosition))
         {
-            state.HasConfirmedTarget = false;
-            state.TargetToken = IntPtr.Zero;
+            ClearConfirmedTarget(state);
             return false;
         }
         distance = Vector3.Distance(soldier.LookPosition(), targetPosition);
         return true;
+    }
+
+    internal static bool TryRetainCloseCombatTarget(
+        Soldier soldier,
+        Spottable? priorConfirmed,
+        float now,
+        out Spottable target,
+        out float distance)
+    {
+        target = null!;
+        distance = float.MaxValue;
+
+        var soldierId = soldier.GetInstanceID();
+        if (!AiState.TargetMemory.TryGetValue(soldierId, out var state) ||
+            !state.HasConfirmedTarget ||
+            !MatchesTarget(priorConfirmed, state.TargetToken))
+        {
+            return false;
+        }
+
+        try
+        {
+            if (!TryGetTargetSnapshot(
+                    priorConfirmed, out var targetToken, out var targetPosition))
+            {
+                return false;
+            }
+
+            var targetSoldier = priorConfirmed!.TryCast<Soldier>();
+            distance = Vector3.Distance(soldier.LookPosition(), targetPosition);
+            var visible = targetSoldier != null &&
+                          targetSoldier.IsAlive &&
+                          soldier.CanSee(priorConfirmed);
+            if (!CloseTargetCommitmentCore.ShouldRetain(
+                    Settings.CloseQuartersEnabled.Value,
+                    state.HasConfirmedTarget,
+                    targetToken == state.TargetToken,
+                    targetSoldier != null && targetSoldier.IsAlive,
+                    visible,
+                    distance,
+                    AiBehaviorTuning.ImmediateFireDistance))
+            {
+                return false;
+            }
+
+            state.LastObservedAt = now;
+            state.RequiresTargetReacquisition = false;
+            state.Candidates.Clear();
+            RecordConfirmedNativeObservation(
+                soldier, targetToken, targetPosition, now);
+            target = priorConfirmed;
+            return true;
+        }
+        catch (NullReferenceException)
+        {
+            return false;
+        }
+        catch (Il2CppException)
+        {
+            return false;
+        }
+        catch (ObjectCollectedException)
+        {
+            return false;
+        }
     }
 
     internal static void PublishSoldierTarget(Soldier soldier, Spottable? target)
@@ -1671,10 +2045,69 @@ internal static class TargetAcquisition
     {
         if (state.HasConfirmedTarget && state.TargetToken == targetToken)
         {
-            state.HasConfirmedTarget = false;
-            state.TargetToken = IntPtr.Zero;
+            ClearConfirmedTarget(state);
         }
         state.Candidates.Remove(targetToken);
+    }
+
+    internal static void RecordIndependentVisualProof(
+        TargetMemoryState state,
+        IntPtr targetToken,
+        float now)
+    {
+        state.IndependentVisualProofTargetToken = targetToken;
+        state.IndependentVisualProofAt = now;
+    }
+
+    internal static bool TryRetainRecentIndependentVisualTarget(
+        Soldier soldier,
+        Spottable? priorConfirmed,
+        float now,
+        out Spottable target,
+        out float distance)
+    {
+        target = null!;
+        distance = float.MaxValue;
+        if (!AiState.TargetMemory.TryGetValue(soldier.GetInstanceID(), out var state) ||
+            !state.HasConfirmedTarget ||
+            state.RequiresTargetReacquisition ||
+            !MatchesTarget(priorConfirmed, state.TargetToken) ||
+            !TargetConfirmationCore.HasRecentIndependentVisualProof(
+                state.IndependentVisualProofTargetToken == state.TargetToken,
+                state.IndependentVisualProofAt,
+                now) ||
+            !TryGetTargetSnapshot(priorConfirmed, out _, out var targetPosition))
+        {
+            return false;
+        }
+
+        target = priorConfirmed!;
+        distance = Vector3.Distance(soldier.LookPosition(), targetPosition);
+        return true;
+    }
+
+    internal static void RequireReacquisitionAfterNegativeObservation(Soldier soldier)
+    {
+        if (!AiState.TargetMemory.TryGetValue(soldier.GetInstanceID(), out var state) ||
+            !state.HasConfirmedTarget ||
+            state.RequiresTargetReacquisition)
+        {
+            return;
+        }
+
+        state.RequiresTargetReacquisition = true;
+        AiState.Trace(
+            $"Acquisition: soldier {soldier.GetInstanceID()} lost visual lock on " +
+            $"confirmed target {state.TargetToken}; reacquisition required");
+    }
+
+    private static void ClearConfirmedTarget(TargetMemoryState state)
+    {
+        state.HasConfirmedTarget = false;
+        state.TargetToken = IntPtr.Zero;
+        state.RequiresTargetReacquisition = false;
+        state.IndependentVisualProofTargetToken = IntPtr.Zero;
+        state.IndependentVisualProofAt = 0f;
     }
 
     private static void TryClearAiTarget(SoldierAI ai)
@@ -1806,7 +2239,7 @@ internal static class CloseRangeAcquisitionTick
 
         var soldierId = soldier.GetInstanceID();
         var state = AiState.GetTargetMemory(soldierId);
-        if (state.HasConfirmedTarget)
+        if (state.HasConfirmedTarget && !state.RequiresTargetReacquisition)
             return;
 
         // Nearby discovery is independent of the current candidate list. A soldier
@@ -1815,7 +2248,9 @@ internal static class CloseRangeAcquisitionTick
         // perform the short confirmation poll on the next physics tick.
         var ranDiscoveryScan =
             TryDiscoverCloseTarget(ai, soldier, state, soldierId, now);
-        if (state.HasConfirmedTarget || state.Candidates.Count == 0 || ranDiscoveryScan)
+        if ((state.HasConfirmedTarget && !state.RequiresTargetReacquisition) ||
+            state.Candidates.Count == 0 ||
+            ranDiscoveryScan)
             return;
 
         if (now < state.NextCloseConfirmPollAt)
@@ -2014,6 +2449,7 @@ internal static class CloseRangeAcquisitionTick
         // This confirmation runs outside the shared tactical decision queue. Apply
         // the equally urgent close-contact halt here too, so a rifleman does not
         // spend the queue delay walking through an enemy with fire inhibited.
-        ContactResponse.ReactToNewCloseTarget(ai, soldier, targetPosition, now);
+        ContactResponse.ReactToNewCloseTarget(
+            ai, soldier, targetToken, targetPosition, now);
     }
 }

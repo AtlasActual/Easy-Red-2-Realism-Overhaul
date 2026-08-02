@@ -11,8 +11,20 @@ internal readonly record struct AircraftAimState(
     Quaternion Orientation,
     bool IsHeld)
 {
-    // This is the only value the flight controller should consume. Free-look
-    // holds this orientation; camera return never changes or blocks it.
+    // This is the only value the flight controller should consume. It follows
+    // the camera target only while that target remains in the aircraft's legal
+    // forward command hemisphere. Free-look holds this orientation.
+    internal Vector3 Direction => Vector3.Transform(Vector3.UnitZ, Orientation);
+}
+
+internal readonly record struct AircraftCameraTargetState(
+    Quaternion Orientation,
+    bool IsOutsideFlightCone,
+    bool HasPendingMouseUpdate)
+{
+    // Mouse input always moves this unrestricted world-space look target. The
+    // chase camera follows it through a complete orbit even when flight aim is
+    // held at the last legal forward-hemisphere command.
     internal Vector3 Direction => Vector3.Transform(Vector3.UnitZ, Orientation);
 }
 
@@ -37,6 +49,7 @@ internal readonly record struct AircraftHorizonChaseState(
 
 internal readonly record struct AircraftCameraCoreState(
     AircraftAimState Aim,
+    AircraftCameraTargetState CameraTarget,
     AircraftFreeLookState FreeLook,
     AircraftCameraReturnState Return,
     AircraftCameraOwnershipState Ownership,
@@ -122,6 +135,7 @@ internal static class AircraftCameraCore
 
         return new AircraftCameraCoreState(
             new AircraftAimState(rotation, false),
+            new AircraftCameraTargetState(rotation, false, false),
             new AircraftFreeLookState(false, rotation),
             new AircraftCameraReturnState(false, rotation),
             new AircraftCameraOwnershipState(true, ownerToken),
@@ -157,27 +171,37 @@ internal static class AircraftCameraCore
         }
 
         // Mouse deltas belong to the view the player is actually looking
-        // through. The persistent aim orientation can retain old twist after
-        // an inverted maneuver or horizon recovery, so using its local axes
-        // would turn horizontal input into diagonal or vertical cursor motion.
+        // through. The unrestricted target may retain old twist after an
+        // inverted maneuver or horizon recovery, so its axes are corrected by
+        // the rendered reference before the delta is applied.
+        var nextTargetOrientation = ApplyPitchYawAroundReference(
+            state.CameraTarget.Orientation,
+            GetRenderedRotation(state),
+            pitchDeltaRadians,
+            yawDeltaRadians);
         return state with
         {
-            Aim = state.Aim with
+            CameraTarget = state.CameraTarget with
             {
-                Orientation = ApplyPitchYawAroundReference(
-                    state.Aim.Orientation,
-                    GetRenderedRotation(state),
-                    pitchDeltaRadians,
-                    yawDeltaRadians)
-            }
+                Orientation = nextTargetOrientation,
+                HasPendingMouseUpdate = true
+            },
+            // Before the camera leaves the legal command hemisphere, retain
+            // the former one-target behavior. The cone resolver either accepts
+            // this command or parks it at the boundary. Once outside, further
+            // mouse motion changes only the camera target.
+            Aim = state.CameraTarget.IsOutsideFlightCone
+                ? state.Aim
+                : state.Aim with { Orientation = nextTargetOrientation }
         };
     }
 
     /// <summary>
-    /// Keeps the point-aim ray inside the aircraft's forward travel
-    /// hemisphere. The adapter supplies the flight-path direction, so the
-    /// command can use the whole forward 178-degree field without ever
-    /// crossing behind the moving aircraft.
+    /// Resolves the unrestricted camera target into the aircraft's bounded
+    /// flight command. The first transition outside parks flight aim at the
+    /// forward-travel boundary; subsequent rearward camera motion cannot move
+    /// that command. Re-entering the legal hemisphere reconnects flight aim to
+    /// the camera target immediately.
     /// </summary>
     internal static AircraftCameraCoreState ConstrainPointAimToAircraftCone(
         AircraftCameraCoreState state,
@@ -190,25 +214,134 @@ internal static class AircraftCameraCore
             return state;
         }
 
-        var orientation = NormalizeRotation(state.Aim.Orientation);
-        var aimDirection = NormalizeOr(
-            state.Aim.Direction,
+        var cameraOrientation = NormalizeRotation(
+            state.CameraTarget.Orientation);
+        var cameraDirection = NormalizeOr(
+            state.CameraTarget.Direction,
             Vector3.UnitZ);
-        var forward = NormalizeOr(aircraftForward, aimDirection);
+        var forward = NormalizeOr(aircraftForward, cameraDirection);
         var limit = Math.Clamp(
             maximumAngleRadians,
             0f,
             MaximumPointAimConeRadians);
         var dot = Math.Clamp(
-            Vector3.Dot(forward, aimDirection),
+            Vector3.Dot(forward, cameraDirection),
             -1f,
             1f);
         var angle = MathF.Acos(dot);
-        if (angle <= limit + Epsilon)
-            return state;
+        // A rear camera must not reconnect to flight merely because the plane
+        // turns underneath it. Only fresh mouse movement can bring an outside
+        // camera target back into the legal flight-command hemisphere.
+        if (state.CameraTarget.IsOutsideFlightCone)
+        {
+            if (state.CameraTarget.HasPendingMouseUpdate &&
+                angle <= limit + Epsilon)
+            {
+                return state with
+                {
+                    Aim = state.Aim with
+                    {
+                        Orientation = cameraOrientation
+                    },
+                    CameraTarget = state.CameraTarget with
+                    {
+                        Orientation = cameraOrientation,
+                        IsOutsideFlightCone = false,
+                        HasPendingMouseUpdate = false
+                    }
+                };
+            }
 
-        var tangent =
-            aimDirection - forward * dot;
+            var heldOrientation = NormalizeRotation(state.Aim.Orientation);
+            var heldDirection = NormalizeOr(state.Aim.Direction, forward);
+            var heldDot = Math.Clamp(
+                Vector3.Dot(forward, heldDirection),
+                -1f,
+                1f);
+            if (MathF.Acos(heldDot) <= limit + Epsilon)
+            {
+                return state with
+                {
+                    CameraTarget = state.CameraTarget with
+                    {
+                        Orientation = cameraOrientation,
+                        IsOutsideFlightCone = true,
+                        HasPendingMouseUpdate = false
+                    }
+                };
+            }
+
+            return state with
+            {
+                Aim = state.Aim with
+                {
+                    Orientation = ConstrainOrientationToCone(
+                        heldOrientation,
+                        heldDirection,
+                        forward,
+                        aircraftUp,
+                        heldDot,
+                        limit)
+                },
+                CameraTarget = state.CameraTarget with
+                {
+                    Orientation = cameraOrientation,
+                    IsOutsideFlightCone = true,
+                    HasPendingMouseUpdate = false
+                }
+            };
+        }
+
+        if (angle <= limit + Epsilon)
+        {
+            return state with
+            {
+                Aim = state.Aim with
+                {
+                    Orientation = cameraOrientation
+                },
+                CameraTarget = state.CameraTarget with
+                {
+                    Orientation = cameraOrientation,
+                    IsOutsideFlightCone = false,
+                    HasPendingMouseUpdate = false
+                }
+            };
+        }
+
+        // The first move behind the forward hemisphere parks flight aim at the
+        // crossed boundary. Later mouse movement changes only the camera target.
+
+        return state with
+        {
+            Aim = state.Aim with
+            {
+                Orientation = ConstrainOrientationToCone(
+                    cameraOrientation,
+                    cameraDirection,
+                    forward,
+                    aircraftUp,
+                    dot,
+                    limit)
+            },
+            CameraTarget = state.CameraTarget with
+            {
+                Orientation = cameraOrientation,
+                IsOutsideFlightCone = true,
+                HasPendingMouseUpdate = false
+            }
+        };
+    }
+
+    private static Quaternion ConstrainOrientationToCone(
+        Quaternion orientation,
+        Vector3 direction,
+        Vector3 forward,
+        Vector3 aircraftUp,
+        float forwardDot,
+        float limit)
+    {
+        var tangent = direction - forward * forwardDot;
         if (!IsFinite(tangent) ||
             tangent.LengthSquared() <= Epsilon * Epsilon)
         {
@@ -227,19 +360,12 @@ internal static class AircraftCameraCore
             tangent * MathF.Sin(limit),
             forward);
         var rotationDelta = FromToRotation(
-            aimDirection,
+            direction,
             constrainedDirection,
             Vector3.Transform(Vector3.UnitY, orientation));
-        return state with
-        {
-            Aim = state.Aim with
-            {
-                // Apply the shortest direction correction to the complete
-                // orientation so existing camera twist remains continuous.
-                Orientation = NormalizeRotation(
-                    Quaternion.Multiply(rotationDelta, orientation))
-            }
-        };
+        // Apply the shortest direction correction to the complete orientation
+        // so existing twist remains continuous.
+        return NormalizeRotation(Quaternion.Multiply(rotationDelta, orientation));
     }
 
     /// <summary>

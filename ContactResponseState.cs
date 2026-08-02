@@ -66,30 +66,34 @@ internal sealed class ContactResponseState
     internal bool MovementInhibitedByContactResponse;
     // Outputs of the movement arbiter (plan 018), not inputs. ApplyMovementDecision is the
     // only writer: MovementHalted is "the single write site stopped this soldier on its
-    // last apply" (it drives the halt-spacing rising edge, the close-contact relocation
-    // resume that RelocationPausedByCloseFire used to encode, and any future reader that
+    // last apply" (it drives the close-contact relocation resume that
+    // RelocationPausedByCloseFire used to encode, and any future reader that
     // needs the fact rather than one particular halt's flag), and LastMovementOwner exists
     // so the verbose trace fires on the ownership FLIP instead of every frame.
     internal bool MovementHalted;
     internal MovementOwner LastMovementOwner;
+    // A move command is only executor intent, not proof that the character translated.
+    // Physical movement refreshes this short lease so path-node sampling gaps keep one
+    // continuous movement pose, while an objective/order refresh at rest cannot stand a
+    // crouched soldier up.
+    internal float MovementPoseEvidenceUntil;
     // Halt spacing (plan 018 item 3): the bounded window during which the lateral
-    // dispersion step outranks the fighting halt it steps out of, and the long cooldown
-    // that guarantees the check runs at most once per halt episode.
+    // dispersion step outranks the fighting halt it steps out of. The episode latch is
+    // cleared only after real/native movement resumes, preventing step/halt oscillation.
     internal float HaltSpacingMoveUntil;
-    internal float HaltSpacingNextCheckAt;
+    internal bool HaltSpacingAttemptedThisEpisode;
+    internal Vector3 HaltSpacingAttemptPosition;
     internal bool HasHaltSpacingTarget;
     internal Vector3 HaltSpacingTarget;
     internal bool SuppressionMovementOwned;
     internal bool SuppressionPoseOwned;
     internal bool SuppressionFireInhibited;
     internal float SuppressionCrouchUntil;
-    internal float NextOverheadProtectionCheckAt;
-    internal bool HasOverheadProtection;
     internal bool ContactCrouchOwned;
     internal bool CoverClearancePoseOwned;
     internal IntPtr CoverClearanceCoverId;
     internal bool StationaryThreatFacingOwned;
-    internal bool ExposedReloadProneOwned;
+    internal bool ExposedReloadSafetyOwned;
     internal float TacticalCrouchUntil;
     internal float EngagementHoldUntil;
     internal float ContactUntil;
@@ -122,15 +126,25 @@ internal sealed class ContactResponseState
     internal int SquadId;
     internal IntPtr AttackContactToken;
     internal float AttackContactLastSeenAt;
+    // Absolute deadline for the one non-cover prone intent: a moving soldier's first
+    // visual acquisition of a continuous contact episode. While active he halts and fires.
+    internal float ContactDiveProneUntil;
     internal bool AttackConditionsWereFavorable;
     internal float AttackHaltStartedAt;
     internal bool AttackProgressForced;
+    internal bool AttackObjectiveBoundActive;
+    internal float AttackObjectiveBoundStartedAt;
+    internal float AttackFiringCommitUntil;
     internal IntPtr LastOutgoingShotTargetToken;
     internal float LastOutgoingShotAt;
     internal bool LastOutgoingShotWasStationary;
     internal IntPtr EvaluatedCoverPostureId;
+    internal Vector3 EvaluatedCoverPosition;
     internal SoldierPose EvaluatedCoverPosture;
     internal bool EvaluatedCoverIsProtective;
+    internal bool EvaluatedCoverProtectionMeasured;
+    internal float EvaluatedCoverProtectionFraction;
+    internal bool EvaluatedCoverHasFiringLane;
     internal Vector3 EvaluatedCoverThreatDirection;
     internal float EvaluatedCoverPostureUntil;
     internal Vector3 PostureThreatAxis;
@@ -146,7 +160,7 @@ internal sealed class ContactResponseState
     internal float CoverPostureDowngradeSince;
     // Pose arbiter stagger cache (round-robin K=3): the last decision-frame outcome of
     // the interop-heavy DECISION tail (owner ranks d-i) - the owner it resolved and the
-    // pose - reused on this soldier's non-decision frames by the maintain/favourite/
+    // pose - reused on this soldier's non-decision frames by the maintain/final-boundary/
     // write-through fast paths. HasArbiterCache stays false until the first full
     // resolution so a first result is never deferred. The safety owners (required action,
     // pinned/fire) are recomputed every frame above the cache.

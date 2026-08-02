@@ -220,7 +220,7 @@ internal static class AiState
         return count;
     }
 
-    internal static void ReserveCover(
+    private static void ReserveCover(
         IntPtr coverId,
         Vector3 coverPosition,
         int soldierId,
@@ -256,6 +256,15 @@ internal static class AiState
         ReserveCover(coverId, coverPosition, soldierId, expiresAt);
         return true;
     }
+
+    internal static bool OwnsCoverReservation(
+        IntPtr coverId,
+        int soldierId,
+        float now)
+        => coverId != IntPtr.Zero &&
+           CoverReservations.TryGetValue(coverId, out var reservation) &&
+           reservation.SoldierId == soldierId &&
+           reservation.ExpiresAt > now;
 
     internal static void ReleaseCoverReservation(int soldierId)
     {
@@ -321,6 +330,7 @@ internal readonly record struct CoverReservation(
 
 internal readonly record struct GunfireCue(
     IntPtr ShooterToken,
+    Spottable? Shooter,
     string ShooterFaction,
     Vector3 Position,
     float ExpiresAt);
@@ -330,14 +340,27 @@ internal sealed class TargetMemoryState
     internal bool HasConfirmedTarget;
     internal IntPtr TargetToken;
     internal float LastObservedAt;
+    // A remembered identity is not a live visual lock. Once a genuine negative
+    // visibility result breaks contact, this target must earn the normal reaction
+    // delay again before it can own aim, fire, or contact posture.
+    internal bool RequiresTargetReacquisition;
+    // The recent-gunfire path independently proves line of sight to one exact
+    // shooter. Its short-lived proof can outweigh a conflicting native vegetation
+    // result without making memory itself count as vision.
+    internal IntPtr IndependentVisualProofTargetToken;
+    internal float IndependentVisualProofAt;
     internal bool HasConfirmedLastKnownPosition;
     internal IntPtr ConfirmedLastKnownTargetToken;
     internal Vector3 ConfirmedLastKnownPosition;
     internal float ConfirmedLastKnownObservedAt;
     internal Vector3 IncomingFirePosition;
     internal float IncomingFireUntil;
+    internal float IncomingFireVisibilityUntil;
     internal IntPtr IncomingFireShooterToken;
+    internal int IncomingFireShooterId;
+    internal Spottable? IncomingFireShooter;
     internal bool IncomingFireIsDirect;
+    internal float NextIncomingFireVisibilityAt;
     internal float NextGunfirePollAt;
     internal float NextNearbyTargetShareAt;
     internal IntPtr ReportedTargetToken;

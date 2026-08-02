@@ -32,12 +32,11 @@ internal static class ExposedReloadPosture
             if (AiState.IsFlameEvading(soldierId, UnityEngine.Time.time))
                 return;
 
-            // Only change posture after the game has accepted and started the
-            // reload. Starting a prone transition in the Reload prefix could make
-            // the action lose its animation window, producing a prone/crouch loop
-            // in which the AI repeatedly dry-fired the still-empty weapon.
+            // Only claim the safety halt after the game has accepted and started the
+            // reload. The required action stays crouched and cannot create a third
+            // prone intent.
             var state = AiState.GetContactState(soldierId);
-            state.ExposedReloadProneOwned = true;
+            state.ExposedReloadSafetyOwned = true;
             GroundAiDirector.ExecuteRequiredActionHalt(soldier);
         }
         catch
@@ -50,7 +49,7 @@ internal static class ExposedReloadPosture
     internal static bool TryMaintain(Soldier soldier, float now)
     {
         var state = AiState.GetContactState(soldier.GetInstanceID());
-        if (!state.ExposedReloadProneOwned)
+        if (!state.ExposedReloadSafetyOwned)
             return false;
 
         try
@@ -61,7 +60,7 @@ internal static class ExposedReloadPosture
                 !soldier.IsReloading || soldier.IsOnVehicle() || soldier.IsOnFire ||
                 flameEvading || ContactResponse.IsOnUsableCover(soldier))
             {
-                state.ExposedReloadProneOwned = false;
+                state.ExposedReloadSafetyOwned = false;
                 return false;
             }
 
@@ -73,7 +72,7 @@ internal static class ExposedReloadPosture
         }
         catch
         {
-            state.ExposedReloadProneOwned = false;
+            state.ExposedReloadSafetyOwned = false;
             return false;
         }
     }
@@ -88,8 +87,9 @@ internal static class ProneMovingActionRestriction
 
         try
         {
-            // This mod never gates a player's own actions; only an AI crawler is
-            // halted here so its urgent action can begin from a stable position.
+            // This mod never gates a player's own actions; an autonomous soldier who
+            // is already moving prone is halted so the urgent action starts from a
+            // stable position. This restriction never requests the prone pose itself.
             if (!AiOwnership.IsAutonomous(soldier) ||
                 !MultiplayerAuthority.CanMutateGameplay())
             {

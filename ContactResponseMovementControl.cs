@@ -34,7 +34,7 @@ internal static partial class ContactResponse
             // "!flameEvading &&" guards on the old halt sites encoded.
             onFire ||
             (!flameEvading &&
-             (state.ExposedReloadProneOwned || now < state.MovementStallHoldUntil)),
+            (state.ExposedReloadSafetyOwned || now < state.MovementStallHoldUntil)),
             flameEvading,
             state.SuppressionMovementOwned,
             now < state.HaltSpacingMoveUntil,
@@ -47,6 +47,26 @@ internal static partial class ContactResponse
             // IsOnCover is interop, so the timer is tested first and short-circuits it.
             now < state.HoldCoverUntil && soldier.IsOnCover(),
             state.Relocating);
+    }
+
+    /// <summary>
+    /// Filters SoldierAI's path-intent result through the same owner that controls the
+    /// actual locomotion write. This is deliberately read-only: preserving the native path
+    /// lets a lapsed hold or a real movement grant resume on the very next native update.
+    /// </summary>
+    internal static bool FilterNativeMovementIntent(
+        Soldier soldier,
+        bool nativeMoving,
+        float now)
+    {
+        if (!nativeMoving)
+            return false;
+
+        var soldierId = soldier.GetInstanceID();
+        var state = AiState.GetContactState(soldierId);
+        var owner = ResolveMovementOwner(
+            soldier, state, soldierId, now, MovementOwner.Free);
+        return NativeMovementIntentCore.ShouldReportMoving(nativeMoving, owner);
     }
 
     /// <summary>
@@ -98,17 +118,14 @@ internal static partial class ContactResponse
     /// owner (plan 020 D1). It used to be whatever <c>fallbackPose</c> the halting call
     /// site passed in, and that was the last multi-writer disagreement left after plan 014:
     /// two sites halting the same defender on alternate decisions - one passing
-    /// <c>StationaryHoldPose</c> (Crouch), one a hardcoded Prone - flip-flopped him
+    /// <c>StationaryHoldPose</c>, one a hardcoded Prone - flip-flopped him
     /// forever, and the owner-aware latch could not arbitrate it because both commit under
     /// the same <see cref="PoseOwner.HaltFallback"/>. That is the prone-crouch loop.
     ///
-    /// Crouch is the correct answer here by construction, not by tuning: every reason a
-    /// halted soldier should be prone - pinned, suppressed, on fire, hiding from armour,
-    /// exposed reload, a measured cover-geometry pose - is an owner ABOVE HaltFallback in
-    /// the ladder, so reaching this line means none of them applies. A man halted with no
-    /// tactical reason to be down takes a fighting crouch, not a nap in the open.
+    /// The fallback follows the same stationary fighting rule as the pose arbiter:
+    /// crouch on usable cover and prone in the open. A measured clearance stand remains
+    /// an owner above HaltFallback.
     /// </summary>
-    private const SoldierPose OwnerlessHaltPose = SoldierPose.Crouch;
 
     /// <summary>
     /// The write half of <see cref="ApplyMovementDecision"/>, split out only so the
@@ -126,6 +143,17 @@ internal static partial class ContactResponse
         string? traceSource,
         bool resolvePose)
     {
+        if (HaltSpacingCore.ShouldRearm(
+                state.HaltSpacingAttemptedThisEpisode,
+                owner,
+                HorizontalDistance(
+                    soldier.transform.position,
+                    state.HaltSpacingAttemptPosition)))
+        {
+            state.HaltSpacingAttemptedThisEpisode = false;
+            state.HaltSpacingAttemptPosition = default;
+        }
+
         // End a dispersion grant as soon as its destination is reached instead of
         // leaving moveCharacter enabled for the remainder of a fixed timer. A higher
         // priority halt also cancels the step rather than allowing it to resume later.
@@ -186,16 +214,17 @@ internal static partial class ContactResponse
         state.MovementHalted = true;
         ai.moveCharacter = false;
         soldier.isSprinting = false;
+        var ownerlessHaltPose = StationaryHoldPose(soldier);
         SoldierPose pose;
         if (resolvePose)
         {
             pose = ApplyArbitratedPose(
-                ai, soldier, now, resolveDecisionTail: true, OwnerlessHaltPose, traceSource);
+                ai, soldier, now, resolveDecisionTail: true, ownerlessHaltPose, traceSource);
         }
         else
         {
             ReassertLatchedPose(ai, soldier);
-            pose = state.HasLatchedTacticalPose ? state.LatchedTacticalPose : OwnerlessHaltPose;
+            pose = state.HasLatchedTacticalPose ? state.LatchedTacticalPose : ownerlessHaltPose;
         }
 
         // Idempotent within a frame: StopMove applies a deltaTime-scaled stop, so issuing
@@ -222,14 +251,14 @@ internal static partial class ContactResponse
     }
 
     /// <summary>
-    /// Plan 018 item 3. At most once per cooldown, a soldier in a fighting halt who
-    /// overlaps an already-halted friendly takes one bounded lateral step off the threat
-    /// axis. Rechecking a settled halt closes the old rising-edge gap where two soldiers
-    /// could become co-located after arrival. An unreachable step still ends in a halt:
-    /// this never becomes a formation manager. Safety halts (burning, pinned) are
-    /// deliberately excluded - a man under a burst does not walk sideways - and a
-    /// soldier already committed to a cover route is excluded so the step cannot replace
-    /// his destination.
+    /// Plan 018 item 3. Once per fighting-halt episode, a soldier who overlaps a nearby
+    /// friendly takes one bounded lateral step off the threat axis. Looking at all nearby
+    /// friendlies, rather than only soldiers whose halt write happened earlier that frame,
+    /// lets a whole squad entering the halt together spread instead of stacking. An
+    /// unreachable step still ends in a halt: this never becomes a formation manager.
+    /// Safety halts (burning, pinned) are deliberately excluded - a man under a burst does
+    /// not walk sideways - and a soldier already committed to a cover route is excluded so
+    /// the step cannot replace his destination.
     /// </summary>
     private static bool TryStepOutOfStackedHalt(
         SoldierAI ai,
@@ -240,17 +269,58 @@ internal static partial class ContactResponse
         float now)
     {
         if (!Settings.HaltSpacingEnabled.Value ||
-            owner is not (MovementOwner.EngagementHold or MovementOwner.CoverHold) ||
-            state.Relocating ||
-            now < state.HaltSpacingNextCheckAt)
+            !HaltSpacingCore.ShouldAttempt(state.HaltSpacingAttemptedThisEpisode, owner) ||
+            state.Relocating)
         {
             return false;
         }
 
-        state.HaltSpacingNextCheckAt = now + HaltSpacingCore.RecheckCooldownSeconds;
+        // Mark the episode even when no reachable step exists. Repeatedly probing and
+        // granting movement is the crouch/run/stop loop this correction is designed to end.
+        state.HaltSpacingAttemptedThisEpisode = true;
+        state.HaltSpacingAttemptPosition = soldier.transform.position;
+        if (!TryStartSpacingStep(ai, soldier, state, now))
+            return false;
+
+        AiState.Trace(
+            $"Halt spacing: soldier {soldierId} stepped clear of a halted squadmate " +
+            "before taking his own fighting halt");
+        return true;
+    }
+
+    internal static bool TryStartCoverConflictSeparation(
+        Soldier soldier,
+        ContactResponseState state,
+        int soldierId,
+        float now)
+    {
+        var ai = soldier.aiController;
+        if (ai == null)
+            return false;
+
+        // Losing an exclusive cover claim is positive evidence of a contested slot,
+        // not an ordinary optional halt-dispersion event. Vacate it even when the
+        // cosmetic halt-spacing option is disabled; a new cover move may supersede
+        // this short step on the same decision if another valid slot is available.
+        state.HaltSpacingAttemptedThisEpisode = true;
+        state.HaltSpacingAttemptPosition = soldier.transform.position;
+        if (!TryStartSpacingStep(ai, soldier, state, now))
+            return false;
+
+        AiState.Trace(
+            $"Cover occupancy: soldier {soldierId} stepped away from the retained slot owner");
+        return true;
+    }
+
+    private static bool TryStartSpacingStep(
+        SoldierAI ai,
+        Soldier soldier,
+        ContactResponseState state,
+        float now)
+    {
         var separation = InfantryCoverPolicy.OccupancyRadiusMeters;
         var position = soldier.transform.position;
-        if (!CoverOccupancy.TryFindHaltedNeighbour(
+        if (!CoverOccupancy.TryFindCrowdedFriendly(
                 position, soldier, separation, out var neighbour) ||
             !HaltSpacingCore.TryResolveStep(
                 new MapPoint(position.x, position.z),
@@ -295,9 +365,6 @@ internal static partial class ContactResponse
         state.HasHaltSpacingTarget = true;
         state.HaltSpacingTarget = target;
         ai.MoveDirectlyToward(target, stepWindow);
-        AiState.Trace(
-            $"Halt spacing: soldier {soldierId} stepped clear of a halted squadmate " +
-            "before taking his own fighting halt");
         return true;
     }
 

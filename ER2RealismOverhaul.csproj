@@ -20,6 +20,8 @@
   <ItemGroup>
     <!-- Local reverse-engineering scratch projects are not part of the plugin. -->
     <Compile Remove="_inspect\**\*.cs" />
+    <!-- Timestamped recovery snapshots are not plugin source. -->
+    <Compile Remove="backups\**\*.cs" />
     <!-- The package-free deterministic scenario runner links the planner separately. -->
     <Compile Remove="tests\**\*.cs" />
     <Reference Include="0Harmony"><HintPath>$(BepInExCore)\0Harmony.dll</HintPath><Private>false</Private></Reference>
@@ -29,6 +31,7 @@
     <Reference Include="Il2CppInterop.Common"><HintPath>$(BepInExCore)\Il2CppInterop.Common.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="Il2CppInterop.Runtime"><HintPath>$(BepInExCore)\Il2CppInterop.Runtime.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="Assembly-CSharp"><HintPath>$(ER2Interop)\Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="com.rlabrecque.steamworks.net"><HintPath>$(ER2Interop)\com.rlabrecque.steamworks.net.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="Il2Cppmscorlib"><HintPath>$(ER2Interop)\Il2Cppmscorlib.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="Photon3Unity3D"><HintPath>$(ER2Interop)\Photon3Unity3D.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="PhotonRealtime"><HintPath>$(ER2Interop)\PhotonRealtime.dll</HintPath><Private>false</Private></Reference>

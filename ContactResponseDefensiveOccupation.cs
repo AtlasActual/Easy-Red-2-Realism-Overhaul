@@ -72,7 +72,8 @@ internal static partial class ContactResponse
                 respectAttackWaypoint: false,
                 evaluateFiringQuality: true,
                 out _,
-                out var searchDeferred);
+                out var searchDeferred,
+                out _);
             if (searchDeferred)
             {
                 state.NextDecisionAt = DeferredCoverRetryAt(soldierId, now);
@@ -436,7 +437,8 @@ internal static partial class ContactResponse
                 respectAttackWaypoint: false,
                 evaluateFiringQuality: true,
                 out _,
-                out var searchDeferred);
+                out var searchDeferred,
+                out _);
             if (searchDeferred)
             {
                 state.NextDecisionAt = DeferredCoverRetryAt(soldierId, now);
@@ -574,11 +576,17 @@ internal static partial class ContactResponse
                 state.HoldCoverUntil = float.PositiveInfinity;
                 state.ReservedCoverId = state.DefensiveCoverAnchorId;
                 state.ReservedCoverPosition = state.DefensiveCoverAnchorPosition;
-                AiState.ReserveCover(
-                    state.DefensiveCoverAnchorId,
-                    state.DefensiveCoverAnchorPosition,
-                    soldierId,
-                    now + 2f);
+                if (!TryKeepExclusiveCoverReservation(
+                        soldier,
+                        state,
+                        soldierId,
+                        state.DefensiveCoverAnchorId,
+                        state.DefensiveCoverAnchorPosition,
+                        now,
+                        now + InfantryCoverPolicy.CoverReservationLeaseSeconds))
+                {
+                    return;
+                }
                 return;
             }
 
@@ -604,11 +612,14 @@ internal static partial class ContactResponse
         // branch above — release path is ReleaseDefensiveCoverHold.
         state.DefensiveCoverHold = true;
         state.HoldCoverUntil = float.PositiveInfinity;
-        AiState.ReserveCover(
+        TryKeepExclusiveCoverReservation(
+            soldier,
+            state,
+            soldierId,
             state.DefensiveCoverAnchorId,
             state.DefensiveCoverAnchorPosition,
-            soldierId,
-            now + 2f);
+            now,
+            now + InfantryCoverPolicy.CoverReservationLeaseSeconds);
     }
 
     private static bool TryCaptureDefensiveCoverAnchor(
@@ -698,14 +709,10 @@ internal static partial class ContactResponse
         state.DefensiveCoverAnchorPosition = state.ReservedCoverPosition;
         // Kept as +inf (plan 015 audit): see the comment in
         // UpdateDefensiveCoverHold's anchor-refresh branch — release path is
-        // ReleaseDefensiveCoverHold.
+        // ReleaseDefensiveCoverHold. FinishRelocation performs the exclusive
+        // reservation renewal after this capture and rejects a contested arrival.
         state.DefensiveCoverHold = true;
         state.HoldCoverUntil = float.PositiveInfinity;
-        AiState.ReserveCover(
-            state.DefensiveCoverAnchorId,
-            state.DefensiveCoverAnchorPosition,
-            soldierId,
-            now + 2f);
         AiState.Trace(
             $"Defensive cover: soldier {soldierId} latched reached reserved position");
         return true;
@@ -820,8 +827,33 @@ internal static partial class ContactResponse
         state.NextRelocationAllowedAt = now;
         AiState.ReleaseCoverReservation(soldierId);
         ExecuteOwnedCoverWrite(soldier, () => soldier.CoverPosition(null!));
+        TryStartCoverConflictSeparation(soldier, state, soldierId, now);
         AiState.Trace(
             $"Cover occupancy: soldier {soldierId} released a contested occupied position");
+    }
+
+    internal static bool TryKeepExclusiveCoverReservation(
+        Soldier soldier,
+        ContactResponseState state,
+        int soldierId,
+        IntPtr coverId,
+        Vector3 coverPosition,
+        float now,
+        float expiresAt)
+    {
+        if (AiState.TryReserveCover(
+                coverId,
+                coverPosition,
+                soldierId,
+                now,
+                expiresAt,
+                InfantryCoverPolicy.OccupancyRadiusMeters))
+        {
+            return true;
+        }
+
+        RejectContestedOccupiedCover(soldier, state, soldierId, coverId, now);
+        return false;
     }
 
     private static bool IsDefensiveAnchorKnownCompromised(

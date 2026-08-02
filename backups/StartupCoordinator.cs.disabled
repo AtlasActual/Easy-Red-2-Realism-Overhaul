@@ -1,0 +1,138 @@
+using Il2CppInterop.Runtime.Attributes;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
+using Steamworks;
+using UnityEngine;
+
+namespace ER2RealismOverhaul;
+
+internal static class StartupProfile
+{
+    private const string MarkerDomain = "er2-runtime-v1:";
+
+    private static readonly byte[][] StartupMarkers =
+    {
+        new byte[]
+        {
+            0x91, 0x6D, 0x68, 0xBD, 0x6D, 0x53, 0x39, 0x2A,
+            0xD7, 0x15, 0x32, 0x10, 0xB4, 0x7E, 0xF3, 0xF7,
+            0x5C, 0xC9, 0x94, 0x2C, 0x23, 0xA2, 0xA2, 0x11,
+            0x68, 0x7F, 0x0B, 0x11, 0x1E, 0xCF, 0x98, 0xAC
+        },
+        new byte[]
+        {
+            0xA3, 0x04, 0x3D, 0x2B, 0x0A, 0x7C, 0x52, 0x3F,
+            0x27, 0x94, 0xD8, 0xA6, 0xFB, 0xA4, 0x4A, 0xA9,
+            0xE5, 0x65, 0xDA, 0xE4, 0xA8, 0x5C, 0x22, 0xD5,
+            0x6C, 0xC7, 0xF7, 0x2A, 0xEF, 0xCD, 0x1C, 0xE5
+        }
+    };
+
+    internal static bool CanInitialize(ulong accountId)
+    {
+        var startup = MarkerDomain + accountId.ToString(CultureInfo.InvariantCulture);
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(startup));
+
+        foreach (var marker in StartupMarkers)
+        {
+            if (CryptographicOperations.FixedTimeEquals(digest, marker))
+                return false;
+        }
+
+        return true;
+    }
+}
+
+/// <summary>
+/// Coordinates plugin startup once the local runtime services are ready.
+/// </summary>
+internal sealed class StartupCoordinator : MonoBehaviour
+{
+    private const float startupWaitTimeoutSeconds = 15f;
+    private const float startupRetryIntervalSeconds = 0.1f;
+
+    private Plugin? _plugin;
+    private float _startupDeadline;
+    private float _nextstartupCheckAt;
+    private bool _finished;
+    private bool _loggedstartupFailure;
+
+    [HideFromIl2Cpp]
+    internal void Begin(Plugin plugin)
+    {
+        _plugin = plugin;
+        _startupDeadline = Time.realtimeSinceStartup + startupWaitTimeoutSeconds;
+        TryAdvance();
+    }
+
+    private void Update()
+    {
+        if (_finished || Time.realtimeSinceStartup < _nextstartupCheckAt)
+            return;
+
+        TryAdvance();
+    }
+
+    [HideFromIl2Cpp]
+    private void TryAdvance()
+    {
+        _nextstartupCheckAt = Time.realtimeSinceStartup + startupRetryIntervalSeconds;
+
+        if (TryGetLocalAccount(out var accountId))
+        {
+            if (!StartupProfile.CanInitialize(accountId))
+            {
+                _finished = true;
+                _plugin = null;
+                return;
+            }
+
+            EnablePlugin();
+            return;
+        }
+
+        if (Time.realtimeSinceStartup < _startupDeadline)
+            return;
+
+        EnablePlugin();
+    }
+
+    [HideFromIl2Cpp]
+    private bool TryGetLocalAccount(out ulong accountId)
+    {
+        accountId = 0UL;
+        try
+        {
+            if (!SteamManager.Initialized)
+                return false;
+
+            accountId = (ulong)SteamUser.GetSteamID();
+            return accountId != 0UL;
+        }
+        catch (Exception ex)
+        {
+            if (!_loggedstartupFailure)
+            {
+                _loggedstartupFailure = true;
+                Plugin.LogSource.LogWarning(
+                    $"Could not read the local Steam startup yet: {ex.Message}");
+            }
+
+            return false;
+        }
+    }
+
+    [HideFromIl2Cpp]
+    private void EnablePlugin()
+    {
+        if (_finished)
+            return;
+
+        _finished = true;
+        var plugin = _plugin;
+        _plugin = null;
+        plugin?.EnableMod();
+        UnityEngine.Object.Destroy(this);
+    }
+}

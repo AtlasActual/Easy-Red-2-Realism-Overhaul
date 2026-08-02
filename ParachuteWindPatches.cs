@@ -8,9 +8,10 @@ namespace ER2RealismOverhaul;
 internal static class ParachuteDrift
 {
     // Keep extreme custom weather profiles from turning a parachute into an aircraft.
-    private const float MaximumWindDriftSpeed = 12f;
-    private const float AircraftMomentumFraction = 0.25f;
-    private const float MaximumAircraftDriftSpeed = 18f;
+    private const float WindDriftFraction = 0.4f;
+    private const float MaximumWindDriftSpeed = 5f;
+    private const float AircraftMomentumFraction = 0.1f;
+    private const float MaximumAircraftDriftSpeed = 7f;
     private const float AircraftDriftDuration = 2.5f;
     private const float PendingMomentumLifetime = 60f;
 
@@ -128,7 +129,10 @@ internal static class ParachuteDrift
             return Vector3.zero;
 
         var direction = weather.windDirection.value;
-        var speed = Mathf.Clamp(weather.windSpeed.value, 0f, MaximumWindDriftSpeed);
+        var speed = Mathf.Clamp(
+            weather.windSpeed.value * WindDriftFraction,
+            0f,
+            MaximumWindDriftSpeed);
         if (direction.sqrMagnitude < 0.0001f || speed <= 0.01f)
             return Vector3.zero;
 

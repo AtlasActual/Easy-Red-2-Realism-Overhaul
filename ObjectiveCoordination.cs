@@ -15,10 +15,9 @@ namespace ER2RealismOverhaul;
 /// </summary>
 internal static class ObjectiveCoordination
 {
-    private const float PlanningIntervalSeconds = 12f;
+    private const float PlanningIntervalSeconds = 24f;
     private const float PressureChangeThreshold = 0.02f;
     private const float PressureMemorySeconds = 45f;
-    private const float NativeDestinationToleranceMeters = 8f;
     private const float FlankAngleDegrees = 38f;
     private const int DefensiveCoverCandidateLimit = 64;
     private const float DefensiveCoverObjectiveToleranceMeters = 8f;
@@ -620,9 +619,9 @@ internal static class ObjectiveCoordination
         var expectedOrder = proposed.Order == CoordinatedOrder.Defend
             ? Order.defend
             : Order.attackFromSide;
-        return squad.order != expectedOrder ||
-               HorizontalDistanceSquared(squad.moveOrderPosition, existing.NativeDestination) >
-               NativeDestinationToleranceMeters * NativeDestinationToleranceMeters;
+        return SquadOrderContinuityCore.ShouldReissue(
+            planStampMatches: true,
+            nativeOrderMatches: squad.order == expectedOrder);
     }
 
     private static void TracePlanChange(
