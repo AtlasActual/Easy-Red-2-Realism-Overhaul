@@ -54,6 +54,8 @@ internal static class TargetConfirmationCore
 /// </summary>
 internal static class CloseTargetCommitmentCore
 {
+    internal const float MinimumSwitchAdvantageMeters = 2f;
+
     internal static bool ShouldRetain(
         bool closeQuartersEnabled,
         bool hasConfirmedTarget,
@@ -61,13 +63,33 @@ internal static class CloseTargetCommitmentCore
         bool isLivingInfantry,
         bool isVisible,
         float distance,
-        float closeRange)
+        float closeRange,
+        float challengerDistance = float.MaxValue)
         => closeQuartersEnabled &&
            hasConfirmedTarget &&
            isSameTarget &&
            isLivingInfantry &&
            isVisible &&
-           distance <= Math.Max(0f, closeRange);
+           distance <= Math.Max(0f, closeRange) &&
+           challengerDistance + MinimumSwitchAdvantageMeters >= distance;
+}
+
+/// <summary>
+/// Keeps the bounded close-threat scan active when an existing target cannot
+/// account for an immediate living infantry threat.
+/// </summary>
+internal static class CloseTargetDiscoveryCore
+{
+    internal static bool ShouldSearch(
+        bool hasConfirmedTarget,
+        bool requiresTargetReacquisition,
+        bool hasLivingVisibleConfirmedInfantry,
+        float confirmedDistance,
+        float closeRange)
+        => !hasConfirmedTarget ||
+           requiresTargetReacquisition ||
+           !hasLivingVisibleConfirmedInfantry ||
+           confirmedDistance > Math.Max(0f, closeRange);
 }
 
 /// <summary>

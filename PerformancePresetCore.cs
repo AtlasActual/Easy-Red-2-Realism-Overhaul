@@ -75,7 +75,6 @@ internal static class PerformancePresetCore
         new("7d. Audio balance", "MinimumRealAudioVoices", "128", "64"),
         new("7d. Audio balance", "MinimumVirtualAudioVoices", "256", "128"),
 
-        new("6c. Aircraft flight physics", "TelemetryLogging", "false", "false"),
         new("AI - Diagnostics", "VisualDebugStartEnabled", "false", "false"),
         new("AI - Diagnostics", "VerboseLogging", "false", "false"),
         new("AI - Diagnostics", "StutterProbeEnabled", "false", "false"),

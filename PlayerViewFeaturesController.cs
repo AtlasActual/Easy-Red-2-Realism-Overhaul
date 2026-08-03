@@ -589,7 +589,20 @@ internal sealed class PlayerViewFeaturesController : MonoBehaviour
         if (width <= 0f || height <= 0f)
             return;
 
-        GUI.DrawTexture(new Rect(x, y, width, height), Texture2D.whiteTexture);
+        // The circular binocular mask produces fractional-pixel strip bounds.
+        // IMGUI can drop a sub-pixel-wide outer strip, leaving isolated scene
+        // pixels visible along the lens edge. Expand the blackout out to the
+        // enclosing screen pixels so the mask remains continuous.
+        var left = Mathf.Floor(x);
+        var top = Mathf.Floor(y);
+        var right = Mathf.Ceil(x + width);
+        var bottom = Mathf.Ceil(y + height);
+        if (right <= left || bottom <= top)
+            return;
+
+        GUI.DrawTexture(
+            new Rect(left, top, right - left, bottom - top),
+            Texture2D.whiteTexture);
     }
 
     [HideFromIl2Cpp]

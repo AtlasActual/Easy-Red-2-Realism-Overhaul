@@ -1,6 +1,6 @@
 [h1]Easy Red 2 Realism Overhaul[/h1]
 
-[b]Current mod version:[/b] 1.1.0
+[b]Current mod version:[/b] 1.1.1
 [b]Compatible game version:[/b] 2.0.9 Stable (Steam build 24512933)
 [b]Download:[/b] [url=https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul/releases/]Easy Red 2 Realism Overhaul releases[/url]
 
@@ -150,7 +150,7 @@ If an unmodded player becomes host after the original host leaves, the host-auth
 
 [h2]Compatibility and feedback[/h2]
 
-Version 1.1.0 is compatible with Easy Red 2 version 2.0.9 Stable, Steam public-branch build [b]24512933[/b] (August 1, 2026). It is not compatible with the beta branch.
+Version 1.1.1 is compatible with Easy Red 2 version 2.0.9 Stable, Steam public-branch build [b]24512933[/b] (August 1, 2026). It is not compatible with the beta branch.
 
 Game updates can sometimes break BepInEx mods. Please report loading problems, unusual AI behaviour, multiplayer issues, performance regressions, or settings that need adjustment on the [url=https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul/issues]GitHub Issues page[/url].
 

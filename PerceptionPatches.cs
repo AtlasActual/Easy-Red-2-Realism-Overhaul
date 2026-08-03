@@ -1256,6 +1256,9 @@ internal static class SoldierTargetAcquisitionPatch
             var now = Time.time;
             var hasNativeTarget = TargetAcquisition.TryGetTargetSnapshot(
                 __result, out var targetToken, out var targetPosition);
+            var nativeDistance = hasNativeTarget
+                ? Vector3.Distance(__instance.LookPosition(), targetPosition)
+                : float.MaxValue;
 
             // Native priority scoring may nominate a different enemy on every scan.
             // At close range, keep finishing the already-confirmed infantry target
@@ -1267,6 +1270,7 @@ internal static class SoldierTargetAcquisitionPatch
                 TargetAcquisition.TryRetainCloseCombatTarget(
                     __instance,
                     __state,
+                    nativeDistance,
                     now,
                     out var committedTarget,
                     out var committedDistance))
@@ -1312,7 +1316,7 @@ internal static class SoldierTargetAcquisitionPatch
             // inside our cone; this layer only applies target-specific acquisition.
             var target = __result;
             TargetAcquisition.RetainOnlyNativeCandidate(__instance, targetToken);
-            var distance = Vector3.Distance(__instance.LookPosition(), targetPosition);
+            var distance = nativeDistance;
             var suppression = TargetAcquisition.Suppression(__instance);
             var insideFov = TargetAcquisition.IsInsideEffectiveFov(
                 __instance, targetPosition, distance, suppression);
@@ -1771,7 +1775,9 @@ internal static class TargetAcquisition
         {
             state.RequiresTargetReacquisition = false;
             state.LastObservedAt = now;
-            state.Candidates.Clear();
+            // Refreshing the active target must not erase a different visible
+            // candidate while it earns its own reaction delay.
+            state.Candidates.Remove(targetToken);
             return true;
         }
 
@@ -1957,6 +1963,7 @@ internal static class TargetAcquisition
     internal static bool TryRetainCloseCombatTarget(
         Soldier soldier,
         Spottable? priorConfirmed,
+        float challengerDistance,
         float now,
         out Spottable target,
         out float distance)
@@ -1992,7 +1999,8 @@ internal static class TargetAcquisition
                     targetSoldier != null && targetSoldier.IsAlive,
                     visible,
                     distance,
-                    AiBehaviorTuning.ImmediateFireDistance))
+                    AiBehaviorTuning.ImmediateFireDistance,
+                    challengerDistance))
             {
                 return false;
             }
@@ -2239,8 +2247,6 @@ internal static class CloseRangeAcquisitionTick
 
         var soldierId = soldier.GetInstanceID();
         var state = AiState.GetTargetMemory(soldierId);
-        if (state.HasConfirmedTarget && !state.RequiresTargetReacquisition)
-            return;
 
         // Nearby discovery is independent of the current candidate list. A soldier
         // may already be observing somebody farther away when a more immediate enemy
@@ -2248,8 +2254,7 @@ internal static class CloseRangeAcquisitionTick
         // perform the short confirmation poll on the next physics tick.
         var ranDiscoveryScan =
             TryDiscoverCloseTarget(ai, soldier, state, soldierId, now);
-        if ((state.HasConfirmedTarget && !state.RequiresTargetReacquisition) ||
-            state.Candidates.Count == 0 ||
+        if (state.Candidates.Count == 0 ||
             ranDiscoveryScan)
             return;
 
@@ -2347,6 +2352,31 @@ internal static class CloseRangeAcquisitionTick
         try
         {
             origin = soldier.LookPosition();
+
+            var confirmedTarget = TargetAcquisition.ResolveObservedTarget(ai, soldier);
+            var hasLivingVisibleConfirmedInfantry = false;
+            var confirmedDistance = float.MaxValue;
+            if (TargetAcquisition.MatchesTarget(confirmedTarget, state.TargetToken) &&
+                TargetAcquisition.TryGetTargetSnapshot(
+                    confirmedTarget, out _, out var confirmedPosition))
+            {
+                var confirmedSoldier = confirmedTarget!.TryCast<Soldier>();
+                confirmedDistance = Vector3.Distance(origin, confirmedPosition);
+                hasLivingVisibleConfirmedInfantry = confirmedSoldier != null &&
+                                                    confirmedSoldier.IsAlive &&
+                                                    soldier.CanSee(confirmedTarget);
+            }
+
+            if (!CloseTargetDiscoveryCore.ShouldSearch(
+                    state.HasConfirmedTarget,
+                    state.RequiresTargetReacquisition,
+                    hasLivingVisibleConfirmedInfantry,
+                    confirmedDistance,
+                    AiBehaviorTuning.ImmediateFireDistance))
+            {
+                return true;
+            }
+
             NearbyCreatures.Clear();
             var octree = Creature.creaturesOctatree;
             if (octree == null ||

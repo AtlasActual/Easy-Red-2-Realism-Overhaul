@@ -6,9 +6,16 @@ ER2RealismOverhaul is built around the rough edges that become hard to ignore af
 
 The goal is to fix those moments without replacing the game underneath them. This is not a health or damage multiplier mod; Easy Red 2's missions, armour system, and basic damage model remain intact.
 
-> **Current release:** 1.1.0
+> **Current release:** 1.1.1
 >
 > **Compatibility:** Tested with Easy Red 2 2.0.9 Stable, Steam public-branch build `24512933` (August 1, 2026)
+
+## What's new in 1.1.1
+
+- AI can acquire a materially closer visible threat after the normal reaction delay even while another target is confirmed.
+- Newly spawning and mission-scripted squads are no longer frozen by autonomous defensive-position holding.
+- The **Quality**, **Balanced**, and **Large Battle** Quick Setup presets apply again.
+- Fixed isolated scene-pixel dots leaking through the edge of the binocular blackout mask.
 
 ## What's new in 1.1.0
 

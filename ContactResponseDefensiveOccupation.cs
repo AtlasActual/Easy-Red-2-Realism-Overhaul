@@ -159,6 +159,9 @@ internal static partial class ContactResponse
             var squad = soldier.joinedSquad;
             var squadId = squad == null ? 0 : SquadIdentity.GetSquadId(squad);
             var revision = GroundAiDirector.CurrentObjectiveRevision(AiState.FactionOf(soldier));
+            var squadFullySpawned = squad != null && squad.fullySpawned;
+            var externallyControlled = squadFullySpawned &&
+                                       GroundAiDirector.IsExternallyControlledSquad(squad);
             // The commander's own stationary-area lease is gone; a squad's native
             // defend order (the same signal TryGetDefensiveArea already falls back
             // to) is now the sole source of a stationary defensive area.
@@ -177,7 +180,9 @@ internal static partial class ContactResponse
                     eligible,
                     insideArea,
                     state.DefensivePositionSquadId == squadId,
-                    state.DefensivePositionObjectiveRevision == revision));
+                    state.DefensivePositionObjectiveRevision == revision,
+                    squadFullySpawned,
+                    externallyControlled));
             if (!shouldOwn)
             {
                 if (state.DefensivePositionOwned)

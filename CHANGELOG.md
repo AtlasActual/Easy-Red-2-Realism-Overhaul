@@ -2,6 +2,15 @@
 
 This file records only concrete, player-visible changes in each released version of Easy Red 2 Realism Overhaul. It is a living description of the shipped mod: superseded wording is replaced with the final behavior, and changes that are removed or reverted are deleted instead of retained as historical notes.
 
+## 1.1.1 - 2026-08-03
+
+Easy Red 2 compatibility: version 2.0.9 Stable, Steam public branch build `24512933` (August 1, 2026).
+
+- AI infantry now notice and switch to a materially closer visible threat after the normal reaction delay, even while tracking another confirmed target. A valid close target is still retained until it is killed, lost, or meaningfully out-prioritized.
+- Newly spawning and mission-scripted squads can no longer be mistaken for settled autonomous defenders, preventing them from being halted at their spawn or scripted move point.
+- Fixed the **Quality**, **Balanced**, and **Large Battle** Quick Setup presets reporting that their settings were unavailable instead of applying.
+- Fixed isolated scene-pixel dots leaking through the edge of the binocular blackout mask.
+
 ## 1.1.0 - 2026-08-02
 
 Easy Red 2 compatibility: version 2.0.9 Stable, Steam public branch build `24512933` (August 1, 2026).

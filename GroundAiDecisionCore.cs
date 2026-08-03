@@ -1766,13 +1766,17 @@ internal readonly record struct DefensivePositionOwnershipInput(
     bool EligibleDefender,
     bool InsideAssignedArea,
     bool SameSquad,
-    bool SameObjectiveRevision);
+    bool SameObjectiveRevision,
+    bool SquadFullySpawned = true,
+    bool ExternallyControlled = false);
 
 internal static class DefensivePositionOwnershipCore
 {
     internal static bool ShouldOwn(DefensivePositionOwnershipInput input)
     {
-        if (!input.EligibleDefender)
+        if (!input.EligibleDefender ||
+            !input.SquadFullySpawned ||
+            input.ExternallyControlled)
             return false;
 
         // Crossing into the assigned area is the one acquisition gate. Once the

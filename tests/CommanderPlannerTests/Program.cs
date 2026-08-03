@@ -40,6 +40,7 @@ internal static class Program
             (nameof(ArrivedDefendersStayUnderPositionControl), ArrivedDefendersStayUnderPositionControl),
             (nameof(AutonomousDefendersSeekCoverEvenWithVisibleContact), AutonomousDefendersSeekCoverEvenWithVisibleContact),
             (nameof(DefensivePositionOwnershipStaysLatchedOutsideTheArrivalArea), DefensivePositionOwnershipStaysLatchedOutsideTheArrivalArea),
+            (nameof(DefensivePositionOwnershipRequiresReadyUnscriptedSquad), DefensivePositionOwnershipRequiresReadyUnscriptedSquad),
             (nameof(ReachedCoverCreatesAStableFightingHalt), ReachedCoverCreatesAStableFightingHalt),
             (nameof(AttackBoundsRequireSafetyAndTacticalAuthorization), AttackBoundsRequireSafetyAndTacticalAuthorization),
             (nameof(OpenFieldAttackBoundsIgnoreDirectFireButNotPinning), OpenFieldAttackBoundsIgnoreDirectFireButNotPinning),
@@ -130,6 +131,8 @@ internal static class Program
             (nameof(FinalPoseBoundaryOverridesVanillaOnlyDuringStationaryCombat), FinalPoseBoundaryOverridesVanillaOnlyDuringStationaryCombat),
             (nameof(SoldierPostureSimulationStaysContinuousAcrossSystems), SoldierPostureSimulationStaysContinuousAcrossSystems),
             (nameof(CloseCombatCommitsToOneLivingVisibleTarget), CloseCombatCommitsToOneLivingVisibleTarget),
+            (nameof(MateriallyCloserThreatBreaksCloseCombatCommitment), MateriallyCloserThreatBreaksCloseCombatCommitment),
+            (nameof(DistantConfirmedTargetDoesNotBlockCloseThreatSearch), DistantConfirmedTargetDoesNotBlockCloseThreatSearch),
             (nameof(DirectThreatMemoryOutlastsPreciseContactMemory), DirectThreatMemoryOutlastsPreciseContactMemory),
             (nameof(RecentGunfireChecksOnlyTheExactVisibleShooter), RecentGunfireChecksOnlyTheExactVisibleShooter),
             (nameof(LocalTargetReportsRespectRangeAndPreferTheNearestContact), LocalTargetReportsRespectRangeAndPreferTheNearestContact),
@@ -176,6 +179,10 @@ internal static class Program
             PerformancePresetCore.Targets.Any(target =>
                 target.Id == "7h. Animation quality\u001fKeepHighQualityDistantAnimations"),
             "The known high-cost distant-animation option was not managed by performance presets.");
+        False(
+            PerformancePresetCore.Targets.Any(target =>
+                target.Id == "6c. Aircraft flight physics\u001fTelemetryLogging"),
+            "A hidden config-only telemetry setting made every visible preset fail atomically.");
     }
 
     private static void LargeBattlePresetIsStricterThanBalanced()
@@ -2273,6 +2280,41 @@ internal static class Program
             "A competing target was mistaken for the soldier's chosen close target.");
     }
 
+    private static void MateriallyCloserThreatBreaksCloseCombatCommitment()
+    {
+        False(CloseTargetCommitmentCore.ShouldRetain(
+                true, true, true, true, true, 10f, 20f, 1f),
+            "A point-blank challenger could not break commitment to a much farther target.");
+        True(CloseTargetCommitmentCore.ShouldRetain(
+                true, true, true, true, true, 10f, 20f, 9f),
+            "A negligible distance change caused close-target churn.");
+        True(CloseTargetCommitmentCore.ShouldRetain(
+                true, true, true, true, true, 10f, 20f, 8f),
+            "The exact close-target switching boundary did not retain the active target.");
+        False(CloseTargetCommitmentCore.ShouldRetain(
+                true, true, true, true, true, 10f, 20f, 7.99f),
+            "A challenger beyond the switching boundary did not receive normal acquisition.");
+    }
+
+    private static void DistantConfirmedTargetDoesNotBlockCloseThreatSearch()
+    {
+        True(CloseTargetDiscoveryCore.ShouldSearch(
+                true, false, true, 20.01f, 20f),
+            "A distant confirmed target suppressed the bounded close-threat scan.");
+        False(CloseTargetDiscoveryCore.ShouldSearch(
+                true, false, true, 20f, 20f),
+            "A valid visible close target did not suppress redundant discovery work.");
+        True(CloseTargetDiscoveryCore.ShouldSearch(
+                true, true, true, 5f, 20f),
+            "A target awaiting visual reacquisition suppressed close-threat discovery.");
+        True(CloseTargetDiscoveryCore.ShouldSearch(
+                true, false, false, 5f, 20f),
+            "A dead, invalid, non-infantry, or hidden target suppressed close-threat discovery.");
+        True(CloseTargetDiscoveryCore.ShouldSearch(
+                false, false, false, float.MaxValue, 20f),
+            "A targetless soldier did not search for an immediate threat.");
+    }
+
     private static void LocalTargetReportsRespectRangeAndPreferTheNearestContact()
     {
         True(LocalTargetReportCore.IsInsideSharingRadius(225f, 15f),
@@ -2814,6 +2856,28 @@ internal static class Program
         False(DefensivePositionOwnershipCore.ShouldOwn(
                 new DefensivePositionOwnershipInput(true, false, true, true, true)),
             "External or attacker ownership failed to release a defensive position.");
+    }
+
+    private static void DefensivePositionOwnershipRequiresReadyUnscriptedSquad()
+    {
+        False(DefensivePositionOwnershipCore.ShouldOwn(
+                new DefensivePositionOwnershipInput(
+                    false, true, true, false, false,
+                    SquadFullySpawned: false,
+                    ExternallyControlled: false)),
+            "An incomplete squad acquired a stationary hold before its mission order was ready.");
+        False(DefensivePositionOwnershipCore.ShouldOwn(
+                new DefensivePositionOwnershipInput(
+                    true, true, false, true, true,
+                    SquadFullySpawned: true,
+                    ExternallyControlled: true)),
+            "A mission-scripted or player-controlled squad retained autonomous defensive ownership.");
+        True(DefensivePositionOwnershipCore.ShouldOwn(
+                new DefensivePositionOwnershipInput(
+                    false, true, true, false, false,
+                    SquadFullySpawned: true,
+                    ExternallyControlled: false)),
+            "A ready autonomous defender could not acquire its assigned stationary area.");
     }
 
     private static void IdleSoldiersRemainUnderNativeControl()
