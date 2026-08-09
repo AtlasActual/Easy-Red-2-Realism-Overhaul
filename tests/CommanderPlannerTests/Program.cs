@@ -254,9 +254,10 @@ internal static class Program
             "The configured pin point is unreachable inside the native suppression range.");
         Equal(pin, AiBehaviorTuningCore.DefaultMountedGunnerDuckSuppressionThreshold,
             "Exposed mounted gunners no longer enter their ducking band at the common pin point.");
-        Equal(AiBehaviorTuningCore.DefaultPinReleaseSuppressionThreshold,
-            AiBehaviorTuningCore.DefaultMountedGunnerRiseSuppressionThreshold,
-            "Infantry and mounted gunners no longer share a coherent recovery point.");
+        Equal(35, AiBehaviorTuningCore.DefaultPinReleaseSuppressionThreshold,
+            "The infantry pin-release default no longer matches the promoted tuning snapshot.");
+        Equal(45, AiBehaviorTuningCore.DefaultMountedGunnerRiseSuppressionThreshold,
+            "The mounted-gunner rise default no longer matches the promoted tuning snapshot.");
     }
 
     private static void SuppressionCrouchBandUsesFifteenPointReleaseHysteresis()

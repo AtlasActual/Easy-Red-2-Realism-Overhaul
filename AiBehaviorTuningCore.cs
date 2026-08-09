@@ -11,7 +11,7 @@ internal static class AiBehaviorTuningCore
     internal const int DefaultCrouchSuppressionThreshold = 35;
     internal const int DefaultCrouchSuppressionReleaseThreshold = 15;
     internal const int DefaultPinSuppressionThreshold = 80;
-    internal const int DefaultPinReleaseSuppressionThreshold = 45;
+    internal const int DefaultPinReleaseSuppressionThreshold = 35;
     internal const int DefaultMountedGunnerDuckSuppressionThreshold = 80;
     internal const int DefaultMountedGunnerRiseSuppressionThreshold = 45;
 

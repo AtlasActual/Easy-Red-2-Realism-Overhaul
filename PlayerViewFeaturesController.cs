@@ -407,7 +407,8 @@ internal sealed class PlayerViewFeaturesController : MonoBehaviour
 
         var width = Mathf.Clamp(screenWidth * 0.18f, 180f, 260f);
         const float height = 10f;
-        var left = (screenWidth - width) * 0.5f;
+        const float rightMargin = 32f;
+        var left = screenWidth - width - rightMargin;
         var top = screenHeight - 112f;
         var staminaFraction = Mathf.Clamp01(soldier.staminaCount / NativeStaminaMaximum);
         var previousColor = GUI.color;

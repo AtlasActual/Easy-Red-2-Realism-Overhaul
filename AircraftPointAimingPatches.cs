@@ -572,12 +572,10 @@ internal static class AircraftMousePointAiming
             var manualRollActive =
                 _lastMouseCaptureFrame == frame &&
                 Mathf.Abs(_manualRollInput) > ManualRollDeadZone;
-            // A/D is a deliberate axial-roll override in point-aim mode. It
-            // must not retain instructor elevator and turn a pure roll into a
-            // climbing barrel roll.
-            pitch = manualRollActive
-                ? 0f
-                : -output.Pitch;
+            // A/D owns only the aileron channel. Point aim must retain its
+            // simultaneous elevator and rudder corrections while the player
+            // manually rolls.
+            pitch = -output.Pitch;
             roll = manualRollActive
                 ? _manualRollInput
                 : output.Roll;
