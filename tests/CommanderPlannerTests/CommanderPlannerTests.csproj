@@ -32,5 +32,6 @@
     <Compile Include="..\..\TankEngagementDecisionCore.cs" Link="TankEngagementDecisionCore.cs" />
     <Compile Include="..\..\TracerRetentionCore.cs" Link="TracerRetentionCore.cs" />
     <Compile Include="..\..\PerformancePresetCore.cs" Link="PerformancePresetCore.cs" />
+    <Compile Include="..\..\ObjectiveAttackPlanCore.cs" Link="ObjectiveAttackPlanCore.cs" />
   </ItemGroup>
 </Project>

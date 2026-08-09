@@ -139,6 +139,35 @@ internal readonly record struct AircraftNativeControlSchedule(
         new(1f, 1f, 1f);
 }
 
+/// <summary>
+/// Native lift thresholds are authored as fractions of maxKmhSpeed. Scaling the
+/// speed envelope must preserve those fractions so every absolute threshold
+/// moves by the same amount as maximum speed.
+/// </summary>
+internal readonly record struct AircraftNativeSpeedEnvelope(
+    float MaximumSpeedKmh,
+    float StartLiftFraction,
+    float FullLiftFraction)
+{
+    internal float StartLiftSpeedMs =>
+        MaximumSpeedKmh * StartLiftFraction / 3.6f;
+
+    internal float FullLiftSpeedMs =>
+        MaximumSpeedKmh * FullLiftFraction / 3.6f;
+
+    internal AircraftNativeSpeedEnvelope Scaled(float speedScale)
+    {
+        speedScale = AircraftAerodynamicsCore.Clamp(
+            float.IsFinite(speedScale) ? speedScale : 1f,
+            0.01f,
+            10f);
+        return new(
+            MaximumSpeedKmh * speedScale,
+            StartLiftFraction,
+            FullLiftFraction);
+    }
+}
+
 internal readonly record struct AircraftWingForce(
     Vector3 Position,
     Vector3 AirVelocity,

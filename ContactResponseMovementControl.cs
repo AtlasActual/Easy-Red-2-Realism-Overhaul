@@ -257,8 +257,10 @@ internal static partial class ContactResponse
     /// lets a whole squad entering the halt together spread instead of stacking. An
     /// unreachable step still ends in a halt: this never becomes a formation manager.
     /// Safety halts (burning, pinned) are deliberately excluded - a man under a burst does
-    /// not walk sideways - and a soldier already committed to a cover route is excluded so
-    /// the step cannot replace his destination.
+    /// not walk sideways. An active cover run is excluded too, but a route already paused
+    /// for stationary close-contact fire may take the correction: MoveDirectlyToward does
+    /// not replace its saved cover destination, and the normal relocation resume rebuilds
+    /// that path when the firing halt releases.
     /// </summary>
     private static bool TryStepOutOfStackedHalt(
         SoldierAI ai,
@@ -270,7 +272,10 @@ internal static partial class ContactResponse
     {
         if (!Settings.HaltSpacingEnabled.Value ||
             !HaltSpacingCore.ShouldAttempt(state.HaltSpacingAttemptedThisEpisode, owner) ||
-            state.Relocating)
+            !HaltSpacingCore.RelocationAllowsAttempt(
+                state.Relocating,
+                owner,
+                state.MovementInhibitedByContactResponse))
         {
             return false;
         }
@@ -279,7 +284,7 @@ internal static partial class ContactResponse
         // granting movement is the crouch/run/stop loop this correction is designed to end.
         state.HaltSpacingAttemptedThisEpisode = true;
         state.HaltSpacingAttemptPosition = soldier.transform.position;
-        if (!TryStartSpacingStep(ai, soldier, state, now))
+        if (!TryStartSpacingStep(ai, soldier, state, soldierId, now))
             return false;
 
         AiState.Trace(
@@ -304,7 +309,7 @@ internal static partial class ContactResponse
         // this short step on the same decision if another valid slot is available.
         state.HaltSpacingAttemptedThisEpisode = true;
         state.HaltSpacingAttemptPosition = soldier.transform.position;
-        if (!TryStartSpacingStep(ai, soldier, state, now))
+        if (!TryStartSpacingStep(ai, soldier, state, soldierId, now))
             return false;
 
         AiState.Trace(
@@ -316,46 +321,53 @@ internal static partial class ContactResponse
         SoldierAI ai,
         Soldier soldier,
         ContactResponseState state,
+        int soldierId,
         float now)
     {
         var separation = InfantryCoverPolicy.OccupancyRadiusMeters;
         var position = soldier.transform.position;
         if (!CoverOccupancy.TryFindCrowdedFriendly(
-                position, soldier, separation, out var neighbour) ||
-            !HaltSpacingCore.TryResolveStep(
-                new MapPoint(position.x, position.z),
-                new MapPoint(neighbour.x, neighbour.z),
-                new MapPoint(state.LastThreatPosition.x, state.LastThreatPosition.z),
-                state.HasThreatPosition,
-                separation,
-                out var step))
-        {
+                position, soldier, separation, out var neighbour))
             return false;
-        }
 
-        var target = new Vector3(position.x + step.X, position.y, position.z + step.Z);
-        if (!IsShortStepReachable(soldier, position, target))
+        var self = new MapPoint(position.x, position.z);
+        var crowdedNeighbour = new MapPoint(neighbour.x, neighbour.z);
+        var threat = new MapPoint(state.LastThreatPosition.x, state.LastThreatPosition.z);
+        var target = default(Vector3);
+        var foundTarget = false;
+        for (var candidateIndex = 0;
+             candidateIndex < HaltSpacingCore.CandidateDirectionCount;
+             candidateIndex++)
         {
-            // With co-located soldiers either side of the threat-lateral axis opens the
-            // same gap. Try the other side when it does not move toward an offset
-            // neighbour; this matters in narrow trenches where one wall can block the
-            // otherwise arbitrary first side.
-            var alternate = new MapPoint(-step.X, -step.Z);
-            if (!HaltSpacingCore.StepDoesNotCloseGap(
-                    new MapPoint(position.x, position.z),
-                    new MapPoint(neighbour.x, neighbour.z),
-                    alternate))
+            if (!HaltSpacingCore.TryResolveCandidateStep(
+                    self,
+                    crowdedNeighbour,
+                    threat,
+                    state.HasThreatPosition,
+                    separation,
+                    candidateIndex,
+                    out var step))
             {
-                return false;
+                continue;
             }
 
             target = new Vector3(
-                position.x + alternate.X,
+                position.x + step.X,
                 position.y,
-                position.z + alternate.Z);
-            if (!IsShortStepReachable(soldier, position, target))
-                return false;
+                position.z + step.Z);
+            if (AiState.HaltSpacingTargetReservedByOther(
+                    target, soldierId, now, separation) ||
+                !IsShortStepReachable(soldier, position, target))
+            {
+                continue;
+            }
+
+            foundTarget = true;
+            break;
         }
+
+        if (!foundTarget)
+            return false;
 
         var stepWindow = Mathf.Clamp(
             separation / 1.5f + 0.35f,

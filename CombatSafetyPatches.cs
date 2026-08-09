@@ -227,50 +227,66 @@ internal static class CombatSafety
 [HarmonyPatch(typeof(GenericGun), nameof(GenericGun.Fire))]
 internal static class HandheldFriendlyFirePatch
 {
+    private static bool _loggedFailure;
+
     [HarmonyPrefix]
     private static bool Prefix(GenericGun __instance, Creature user, ref bool __result)
     {
-        if (!MultiplayerAuthority.CanMutateGameplay())
+        try
         {
-            return true;
-        }
+            if (!MultiplayerAuthority.CanMutateGameplay())
+            {
+                return true;
+            }
 
-        var shooter = user as Soldier;
-        if (!AiOwnership.IsAutonomous(shooter))
-            return true;
+            var shooter = user as Soldier;
+            if (!AiOwnership.IsAutonomous(shooter))
+                return true;
 
-        if (InfantryAntiArmorFireDiscipline.ShouldWithhold(shooter, __instance))
-        {
+            if (InfantryAntiArmorFireDiscipline.ShouldWithhold(shooter, __instance))
+            {
+                AiDebugTelemetry.RecordDecision(AiDebugCategory.Combat, shooter.GetInstanceID(),
+                    "Fire withheld: ineffective handheld weapon against armored target");
+                __result = false;
+                return false;
+            }
+
+            var origin = __instance.GetBulletGenerationPosition();
+            if (ContactResponse.TryPreventBlockedCoverShot(
+                    shooter, origin, shooter.GetFireDir()))
+            {
+                AiDebugTelemetry.RecordDecision(AiDebugCategory.Combat, shooter.GetInstanceID(),
+                    "Fire withheld: selected cover blocks muzzle clearance");
+                __result = false;
+                return false;
+            }
+
+            if (!Settings.FriendlyFireChecksEnabled.Value)
+                return true;
+
+            if (!CombatSafety.FriendlyInFiringLane(
+                    shooter, origin, shooter.GetFireDir(),
+                    Settings.FriendlyFireLaneRadius.Value, 350f))
+            {
+                return true;
+            }
+
             AiDebugTelemetry.RecordDecision(AiDebugCategory.Combat, shooter.GetInstanceID(),
-                "Fire withheld: ineffective handheld weapon against armored target");
+                "Fire withheld: friendly occupies handheld firing lane");
             __result = false;
             return false;
         }
-
-        var origin = __instance.GetBulletGenerationPosition();
-        if (ContactResponse.TryPreventBlockedCoverShot(
-                shooter, origin, shooter.GetFireDir()))
+        catch (Exception ex)
         {
-            AiDebugTelemetry.RecordDecision(AiDebugCategory.Combat, shooter.GetInstanceID(),
-                "Fire withheld: selected cover blocks muzzle clearance");
-            __result = false;
-            return false;
-        }
+            if (!_loggedFailure)
+            {
+                _loggedFailure = true;
+                Plugin.LogSource.LogWarning(
+                    $"Handheld fire safety check failed open so the native shot can continue: {ex.GetType().Name}: {ex.Message}");
+            }
 
-        if (!Settings.FriendlyFireChecksEnabled.Value)
-            return true;
-
-        if (!CombatSafety.FriendlyInFiringLane(
-                shooter, origin, shooter.GetFireDir(),
-                Settings.FriendlyFireLaneRadius.Value, 350f))
-        {
             return true;
         }
-
-        AiDebugTelemetry.RecordDecision(AiDebugCategory.Combat, shooter.GetInstanceID(),
-            "Fire withheld: friendly occupies handheld firing lane");
-        __result = false;
-        return false;
     }
 }
 

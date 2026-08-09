@@ -24,7 +24,7 @@ internal readonly record struct AircraftCameraTargetState(
 {
     // Mouse input always moves this unrestricted world-space look target. The
     // chase camera follows it through a complete orbit even when flight aim is
-    // held at the last legal forward-hemisphere command.
+    // constrained to the aircraft's moving forward-hemisphere boundary.
     internal Vector3 Direction => Vector3.Transform(Vector3.UnitZ, Orientation);
 }
 
@@ -187,9 +187,8 @@ internal static class AircraftCameraCore
                 HasPendingMouseUpdate = true
             },
             // Before the camera leaves the legal command hemisphere, retain
-            // the former one-target behavior. The cone resolver either accepts
-            // this command or parks it at the boundary. Once outside, further
-            // mouse motion changes only the camera target.
+            // the former one-target behavior. Once outside, the cone resolver
+            // advances the flight command along the aircraft's moving boundary.
             Aim = state.CameraTarget.IsOutsideFlightCone
                 ? state.Aim
                 : state.Aim with { Orientation = nextTargetOrientation }
@@ -198,10 +197,9 @@ internal static class AircraftCameraCore
 
     /// <summary>
     /// Resolves the unrestricted camera target into the aircraft's bounded
-    /// flight command. The first transition outside parks flight aim at the
-    /// forward-travel boundary; subsequent rearward camera motion cannot move
-    /// that command. Re-entering the legal hemisphere reconnects flight aim to
-    /// the camera target immediately.
+    /// flight command. A rear camera target advances flight aim along the
+    /// moving forward-travel boundary as the aircraft turns. Re-entering the
+    /// legal hemisphere reconnects flight aim to the camera target immediately.
     /// </summary>
     internal static AircraftCameraCoreState ConstrainPointAimToAircraftCone(
         AircraftCameraCoreState state,
@@ -229,29 +227,11 @@ internal static class AircraftCameraCore
             -1f,
             1f);
         var angle = MathF.Acos(dot);
-        // A rear camera must not reconnect to flight merely because the plane
-        // turns underneath it. Only fresh mouse movement can bring an outside
-        // camera target back into the legal flight-command hemisphere.
-        if (state.CameraTarget.IsOutsideFlightCone)
+        // Free-look deliberately freezes the flight command. Keep that held
+        // command legal if the aircraft turns underneath it, without allowing
+        // the independently rendered free-look direction to steer the plane.
+        if (state.Aim.IsHeld)
         {
-            if (state.CameraTarget.HasPendingMouseUpdate &&
-                angle <= limit + Epsilon)
-            {
-                return state with
-                {
-                    Aim = state.Aim with
-                    {
-                        Orientation = cameraOrientation
-                    },
-                    CameraTarget = state.CameraTarget with
-                    {
-                        Orientation = cameraOrientation,
-                        IsOutsideFlightCone = false,
-                        HasPendingMouseUpdate = false
-                    }
-                };
-            }
-
             var heldOrientation = NormalizeRotation(state.Aim.Orientation);
             var heldDirection = NormalizeOr(state.Aim.Direction, forward);
             var heldDot = Math.Clamp(
@@ -280,6 +260,7 @@ internal static class AircraftCameraCore
                         heldDirection,
                         forward,
                         aircraftUp,
+                        heldDirection,
                         heldDot,
                         limit)
                 },
@@ -309,9 +290,10 @@ internal static class AircraftCameraCore
             };
         }
 
-        // The first move behind the forward hemisphere parks flight aim at the
-        // crossed boundary. Later mouse movement changes only the camera target.
-
+        // Keep steering along the moving legal boundary instead of parking the
+        // command in world space. Near the exact rear antipode the shortest
+        // tangent changes sign; use the previous bounded command as the route
+        // hint so a continuous orbit cannot reverse or stall at 180 degrees.
         return state with
         {
             Aim = state.Aim with
@@ -321,6 +303,7 @@ internal static class AircraftCameraCore
                     cameraDirection,
                     forward,
                     aircraftUp,
+                    state.Aim.Direction,
                     dot,
                     limit)
             },
@@ -338,21 +321,35 @@ internal static class AircraftCameraCore
         Vector3 direction,
         Vector3 forward,
         Vector3 aircraftUp,
+        Vector3 tangentHint,
         float forwardDot,
         float limit)
     {
         var tangent = direction - forward * forwardDot;
+        var hint = tangentHint -
+                   forward * Vector3.Dot(tangentHint, forward);
+        var hasHint =
+            IsFinite(hint) &&
+            hint.LengthSquared() > Epsilon * Epsilon;
+        if (hasHint)
+            hint = Vector3.Normalize(hint);
+
         if (!IsFinite(tangent) ||
             tangent.LengthSquared() <= Epsilon * Epsilon)
         {
-            var aimUp = Vector3.Transform(Vector3.UnitY, orientation);
-            tangent = PerpendicularUnit(
-                IsFinite(aimUp) ? aimUp : aircraftUp,
-                forward);
+            tangent = hasHint
+                ? hint
+                : PerpendicularUnit(
+                    NormalizeOr(
+                        Vector3.Transform(Vector3.UnitY, orientation),
+                        aircraftUp),
+                    forward);
         }
         else
         {
             tangent = Vector3.Normalize(tangent);
+            if (hasHint && Vector3.Dot(tangent, hint) < 0f)
+                tangent = hint;
         }
 
         var constrainedDirection = NormalizeOr(

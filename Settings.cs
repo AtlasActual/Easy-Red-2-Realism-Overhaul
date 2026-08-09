@@ -153,7 +153,6 @@ internal static class Settings
     internal static ConfigEntry<bool> AircraftFreeLookSteeringEnabled = null!;
     internal static ConfigEntry<float> AircraftFreeLookZoom = null!;
     internal static ConfigEntry<bool> AircraftFlightPhysicsEnabled = null!;
-    internal static ConfigEntry<bool> AircraftAiFlightModelExperimentalEnabled = null!;
     internal static ConfigEntry<bool> AircraftPhysicsApplyToOfflinePlayers = null!;
     internal static ConfigEntry<bool> AircraftPhysicsApplyToMultiplayerPlayers = null!;
     internal static ConfigEntry<bool> AircraftAdvancedTuningEnabled = null!;
@@ -235,6 +234,8 @@ internal static class Settings
     internal static ConfigEntry<bool> FirstPersonPlayerShadowEnabled = null!;
     internal static ConfigEntry<bool> RealisticAimFatigueEnabled = null!;
     internal static ConfigEntry<float> UnsupportedAimFatigueSeconds = null!;
+    internal static ConfigEntry<float> PlayerStaminaMultiplier = null!;
+    internal static ConfigEntry<bool> PlayerStaminaBarEnabled = null!;
     internal static ConfigEntry<float> HoldBreathZoomMultiplier = null!;
     internal static ConfigEntry<bool> DirectTurretAimingEnabled = null!;
     internal static ConfigEntry<bool> GroundVehicleAimRingsEnabled = null!;
@@ -259,6 +260,8 @@ internal static class Settings
     internal static ConfigEntry<float> ContextualSquadNameRangeMeters = null!;
     internal static ConfigEntry<bool> HidePlayerNamesInSameVehicle = null!;
     internal static ConfigEntry<bool> LeaveSquadRedeployEnabled = null!;
+    internal static ConfigEntry<bool> SpectatorHudEnabled = null!;
+    internal static ConfigEntry<KeyCode> SpectatorHudToggleKey = null!;
 
     internal static ConfigEntry<bool> RagdollMomentumEnabled = null!;
     internal static ConfigEntry<float> RagdollMomentumMultiplier = null!;
@@ -334,7 +337,7 @@ internal static class Settings
         ContactResponseEnabled = config.Bind("AI - Infantry tactics - Contact response", "Enabled", true,
             "Coordinates cover selection, forward relocations, and close engagement halts when infantry make contact.");
         HaltSpacingEnabled = config.Bind("AI - Infantry tactics - Contact response", "StepClearOfStackedSquadmates", true,
-            "When a soldier is about to take a fighting halt on top of an already-halted squadmate, he first takes one short sideways step to open the gap. Cover-slot spacing is handled separately by the cover-search crowding penalty and is unaffected by this setting.");
+            "When a soldier is about to take a fighting halt on top of a squadmate, he first takes one short sideways or rear-side step into a distinct open position. Cover-slot spacing is handled separately by the cover-search crowding penalty and is unaffected by this setting.");
         InfantrySeparationDistance = config.Bind("AI - Infantry tactics - Contact response", "MinimumSoldierSeparationMeters", 2.5f,
             new ConfigDescription("Minimum center-to-center distance autonomous AI tries to preserve when reserving cover or settling into a fighting halt. Larger values reduce bunching but may leave very tightly spaced trench or building slots unused.", new AcceptableValueRange<float>(1.25f, 4f)));
         ContactImmediateFireDistance = config.Bind("AI - Infantry tactics - Contact response", "ImmediateFireDistanceMeters", 20.103f,
@@ -344,7 +347,7 @@ internal static class Settings
         ContactEngagementHaltDistance = config.Bind("AI - Infantry tactics - Contact response", "EngagementHaltDistanceMeters", 179.44f,
             new ConfigDescription("Inside this distance, visible contact overrides ordinary attack waypoints and the soldier establishes a firing halt. A charge keeps moving except when a non-SMG soldier meets an immediate close threat. The recommended baseline is centered on this slider.", new AcceptableValueRange<float>(58.88f, 300f)));
         MaximumAttackCombatHaltSeconds = config.Bind("AI - Infantry tactics - Contact response", "MaximumAttackCombatHaltSeconds", 22.538f,
-            new ConfigDescription("Maximum continuous firing halt before a soldier whose squad is still moving resumes progress. It applies to any squad with a live move order (attack, charge or ordinary follow), so a rifleman who takes cover cannot sit there for as long as he can see an enemy while his squad walks away; a soldier on cover gets 2.5x this before he bounds. Squads on a defend order and squads that have stopped are not capped. Movement under fire remains crouched; troops still seek forward cover and immediate close threats remain higher priority.", new AcceptableValueRange<float>(6f, 30f)));
+            new ConfigDescription("Maximum continuous firing halt before a soldier whose squad is still moving resumes progress. It applies to any squad with a live move order (attack, charge or ordinary follow), so a rifleman who takes cover cannot sit there for as long as he can see an enemy while his squad walks away; a soldier on cover gets 2.5x this, capped at 30 seconds, before he bounds. Squads on a defend order and squads that have stopped are not capped. Movement under fire remains crouched; troops still seek forward cover and immediate close threats remain higher priority.", new AcceptableValueRange<float>(6f, 30f)));
         AttackFiringHoldSeconds = config.Bind("AI - Infantry tactics - Contact response", "AttackFiringHoldSeconds", CombatMovementPolicyCore.DefaultAttackFiringHoldSeconds,
             new ConfigDescription("Minimum time an attacker stops to aim and fire after completing each five-second movement bound, and the firing commitment used when a moving soldier sees a new enemy and dives prone. Covering fire cannot start the next bound until this phase ends. The selected value is used directly and is not scaled by Aggressiveness.", new AcceptableValueRange<float>(CombatMovementPolicyCore.MinimumAttackFiringHoldSeconds, CombatMovementPolicyCore.MaximumAttackFiringHoldSeconds)));
         KnownTargetSuppressionEnabled = config.Bind("AI - Infantry tactics - Contact response", "SuppressKnownTargets", true,
@@ -370,7 +373,7 @@ internal static class Settings
             new ConfigDescription("Minimum radius of the melee hit capsule. The base game uses 0.25 m; a modest increase forgives small animation and collider misalignments.", new AcceptableValueRange<float>(0.25f, 1f)));
 
         ObjectiveCoordinationEnabled = config.Bind("AI - Objective coordination", "Enabled", true,
-            "Spreads AI attackers across as many active objectives as their squad count can support, gives some squads offset approach angles, and keeps defenders distributed around nearby cover at every active objective. Uses native synchronized squad orders and never controls player-led or mission-scripted squads.");
+            "Spreads AI attackers across as many active objectives as their squad count can support, keeps one pressure squad on each direct attack, and sends every additional squad on alternating wide flanks. Keeps defenders distributed around nearby cover at every active objective. Uses native synchronized squad orders and never controls player-led or mission-scripted squads.");
 
         StaticWeaponStaffingEnabled = config.Bind("AI - Defense", "Enabled", true,
             "Proactively sends autonomous AI squads on defend orders to staff viable loaded static weapons in every active hold area, regardless of which faction began the battle on defense.");
@@ -387,7 +390,7 @@ internal static class Settings
             new ConfigDescription("Target-memory duration multiplier at the pinned threshold and above. Penalties begin gently, then steepen as suppression approaches a pin.", new AcceptableValueRange<float>(0.1f, 1f)));
 
         DangerReactionsEnabled = config.Bind("AI - Infantry tactics - Danger", "Enabled", true,
-            "Makes exposed soldiers get low for reloads, suppressed soldiers seek a lower stationary posture, recover from the initial shock to return fire, escape active flames, and dismount AI-led APCs before credible nearby contact.");
+            "Makes reloading soldiers duck to a cover-derived crouched or prone reload posture, keeps exposed crouched soldiers low for reloads, lets suppressed soldiers seek a lower stationary posture and recover from the initial shock to return fire, escapes active flames, and dismounts AI-led APCs before credible nearby contact.");
         CrouchSuppression = config.Bind("AI - Infantry tactics - Danger", "CrouchSuppressionThreshold", AiBehaviorTuningCore.DefaultCrouchSuppressionThreshold,
             new ConfigDescription("Suppression value that starts the crouched-but-still-fighting band. Several rapid nearby projectile impacts normally reach this band without pinning the soldier.", new AcceptableValueRange<int>(1, AiBehaviorTuningCore.NativeMaximumSuppression - 1)));
         CrouchSuppressionRelease = config.Bind("AI - Infantry tactics - Danger", "CrouchSuppressionReleaseThreshold", AiBehaviorTuningCore.DefaultCrouchSuppressionReleaseThreshold,
@@ -445,17 +448,17 @@ internal static class Settings
             new ConfigDescription("Minimum time between explosive-grenade throws by one AI soldier. The recommended baseline is centered on this slider.", new AcceptableValueRange<float>(5f, 21.07f)));
 
         TankTacticsEnabled = config.Bind("AI - Vehicle tactics", "Enabled", true,
-            "Makes AI tanks establish standoff and reverse when too close to an enemy tank or badly damaged, while tanks on attack orders keep pressure against infantry.");
+            "Makes AI tanks establish standoff and reverse when too close to enemy armor or a crewed anti-tank gun, while tanks on attack orders keep pressure against infantry.");
         TankStandoffDistance = config.Bind("AI - Vehicle tactics", "StopAndEngageDistanceMeters", 180f,
-            new ConfigDescription("AI tanks stop advancing and rotate to engage enemy tanks inside this distance.", new AcceptableValueRange<float>(30f, 250f)));
+            new ConfigDescription("AI tanks stop advancing and turn their frontal armor toward visible enemy armor or crewed anti-tank guns inside this distance.", new AcceptableValueRange<float>(30f, 250f)));
         TankReverseDistance = config.Bind("AI - Vehicle tactics", "ReverseDistanceMeters", 100f,
-            new ConfigDescription("AI tanks reverse when an enemy tank is closer than this distance.", new AcceptableValueRange<float>(15f, 120f)));
+            new ConfigDescription("AI tanks reverse after facing a visible tank-killing threat closer than this distance.", new AcceptableValueRange<float>(15f, 120f)));
         TankReverseSeconds = config.Bind("AI - Vehicle tactics", "ReverseDurationSeconds", 3.5f,
             new ConfigDescription("Length of a tactical reverse.", new AcceptableValueRange<float>(1f, 10f)));
         TankDamagedThreshold = config.Bind("AI - Vehicle tactics", "DamagedLifeFraction", 0.45f,
             new ConfigDescription("AI tanks may reverse while under threat below this fraction of hull life.", new AcceptableValueRange<float>(0.1f, 0.9f)));
         TankMaximumHullFacingAngle = config.Bind("AI - Vehicle tactics", "MaximumHullFacingAngleDegrees", 30f,
-            new ConfigDescription("Tank is considered frontally aligned when its hull points within this angle of an enemy tank; retreats preserve hull orientation and drive straight backward.", new AcceptableValueRange<float>(10f, 60f)));
+            new ConfigDescription("Tank is considered frontally aligned when its hull points within this angle of a visible tank-killing threat; retreats preserve hull orientation and drive straight backward.", new AcceptableValueRange<float>(10f, 60f)));
         TankInfantryHoldDistance = config.Bind("AI - Vehicle tactics", "HoldPositionAgainstInfantryMeters", 124.159f,
             new ConfigDescription("AI tanks without a forward attack order stop to engage visible infantry inside this range. Attacking tanks retain native fire-and-move behavior. The recommended baseline is centered on this slider.", new AcceptableValueRange<float>(40f, 208.318f)));
         TankAccelerationMultiplier = config.Bind("4a. Tank physics", "AccelerationMultiplier", 0.302f,
@@ -550,9 +553,7 @@ internal static class Settings
             new ConfigDescription("Outer-ring injury and suppression retained when terrain or a structure obstructs the blast.", new AcceptableValueRange<float>(0f, 1f)));
 
         AircraftFlightPhysicsEnabled = config.Bind("6c. Aircraft flight physics", "Enabled", true,
-            "Keeps Easy Red 2's native Realistic aircraft model for lift, stalls, damage, and attitude while applying one coherent player-aircraft power and energy envelope: gravity wins in a vertical climb, glides retain momentum, and flight-path turns cost energy. Aircraft Speed, Engine Power, Aerodynamic Drag, and separate Pitch, Roll, and Rudder Authority controls are the only visible flight-model tuning. Direct controls and mouse aim feed the same native control-surface filter. Enabled by default for the locally controlled human aircraft offline and in multiplayer; AI aircraft remain native unless the separate experimental AI option is enabled, and remote-player aircraft always remain native.");
-        AircraftAiFlightModelExperimentalEnabled = config.Bind("6c. Aircraft flight physics", "ExperimentalAiFlightModel", false,
-            "<b>EXPERIMENTAL: May cause unforeseen issues, including AI planes crashing.</b> Applies this page's advanced flight-model tuning to AI-controlled aircraft while leaving their native mission and steering logic intact. Disabled by default. In multiplayer, only the authoritative host simulates it.");
+            "Keeps Easy Red 2's native Realistic aircraft model for lift, stalls, damage, and attitude while applying one coherent player-aircraft power and energy envelope: gravity wins in a vertical climb, glides retain momentum, and flight-path turns cost energy. Aircraft Speed, Engine Power, Aerodynamic Drag, and separate Pitch, Roll, and Rudder Authority controls are the only visible flight-model tuning. Direct controls and mouse aim feed the same native control-surface filter. Enabled by default for the locally controlled human aircraft offline and in multiplayer; AI and remote-player aircraft always remain native.");
         AircraftPhysicsApplyToOfflinePlayers = config.Bind("6c. Aircraft flight physics", "ApplyToPlayerAircraftOffline", true,
             "Legacy compatibility setting. The master Enabled control now applies consistently to the local human aircraft offline and multiplayer, so this hidden value no longer changes flight-model scope.");
         AircraftPhysicsApplyToMultiplayerPlayers = config.Bind("6c. Aircraft flight physics", "ApplyToPlayerAircraftMultiplayer", true,
@@ -716,6 +717,10 @@ internal static class Settings
             "Makes unsupported standing and crouched aim accumulate fatigue unless the native hold-breath input is used, increasing weapon sway until the weapon is lowered and the soldier recovers.");
         UnsupportedAimFatigueSeconds = config.Bind("7e. First-person view", "UnsupportedAimFatigueSeconds", 4.5f,
             new ConfigDescription("Approximate continuous standing aim time before unsupported aiming becomes fatigued. Crouching lasts longer and prone aiming is supported.", new AcceptableValueRange<float>(2f, 12f)));
+        PlayerStaminaMultiplier = config.Bind("7e. First-person view", "PlayerStaminaMultiplier", 1f,
+            new ConfigDescription("Scales the locally controlled soldier's stamina endurance. One preserves the base game; higher values allow longer sprinting and breath holding, while lower values exhaust the player sooner. Jump stamina cost follows the same scale.", new AcceptableValueRange<float>(0.5f, 3f)));
+        PlayerStaminaBarEnabled = config.Bind("7e. First-person view", "PlayerStaminaBarEnabled", true,
+            "Shows a slim stamina bar near the bottom center of the screen while the locally controlled soldier is alive and on foot. Disable it to keep the native HUD unchanged.");
         HoldBreathZoomMultiplier = config.Bind("7e. First-person view", "HoldBreathZoomMultiplier", 1.646f,
             new ConfigDescription("Strength of the extra first-person zoom while the hold-breath input is active (Shift by default). One preserves the base game, values above one zoom farther in, and values below one zoom less.", new AcceptableValueRange<float>(0.5f, 2f)));
         DirectTurretAimingEnabled = config.Bind("7g. Vehicle aiming", "DirectTurretAimingEnabled", true,
@@ -762,6 +767,11 @@ internal static class Settings
             "Hides AI squadmate and allied multiplayer player names in first- and third-person views only while they occupy the same vehicle as the local player. Names return as soon as either soldier leaves; world and tactical-map marker icons are unchanged.");
         LeaveSquadRedeployEnabled = config.Bind("7f. Multiplayer nameplates", "LeaveSquadRedeployEnabled", true,
             "Adds a Change Squad button while dead on the squad-selection screen, returning to deployment to choose a new squad.");
+
+        SpectatorHudEnabled = config.Bind("7k. Spectator view", "SpectatorHudEnabled", true,
+            "Lets the cinematic spectator camera show the full native gameplay HUD, including squad and unit markers, squad status, player status, objectives, and the battle phase bar. The base game's individual HUD preferences are still respected.");
+        SpectatorHudToggleKey = config.Bind("7k. Spectator view", "SpectatorHudToggleKey", KeyCode.F,
+            "Key that shows or hides all spectator HUD elements while the cinematic spectator camera is active.");
 
         KeepHighQualityDistantAnimations = config.Bind("7h. Animation quality", "KeepHighQualityDistantAnimations", true,
             "Keeps visible distant soldiers at the full animation refresh rate instead of using distance-based animation throttling. This can reduce performance in large battles.");

@@ -130,7 +130,8 @@ internal static class WorldAllyMarkerPatch
     [HarmonyPrefix]
     private static bool Prefix(ref Sprite __result)
     {
-        if (!Settings.ImmersiveWorldHudEnabled.Value ||
+        if (SpectatorHudVisibility.ShouldShow() ||
+            !Settings.ImmersiveWorldHudEnabled.Value ||
             !WorldHudDrawContext.InsidePlayerWorldHud)
         {
             return true;
@@ -147,7 +148,8 @@ internal static class WorldUnitMarkerPatch
     [HarmonyPrefix]
     private static bool Prefix(ref Sprite __result)
     {
-        if (!Settings.ImmersiveWorldHudEnabled.Value ||
+        if (SpectatorHudVisibility.ShouldShow() ||
+            !Settings.ImmersiveWorldHudEnabled.Value ||
             !WorldHudDrawContext.InsidePlayerWorldHud)
         {
             return true;
@@ -170,6 +172,9 @@ internal static class NativeContextualSquadNamePatch
     [HarmonyPrefix]
     private static bool Prefix(string __1, float __2)
     {
+        if (SpectatorHudVisibility.ShouldShow())
+            return true;
+
         if (ShouldSuppressSameVehicleName(__1))
             return false;
 
@@ -295,6 +300,9 @@ internal static class NativeSimpleSquadNamePatch
     [HarmonyPrefix]
     private static bool Prefix(string __1)
     {
+        if (SpectatorHudVisibility.ShouldShow())
+            return true;
+
         return !NativeContextualSquadNamePatch.ShouldSuppressSameVehicleName(__1);
     }
 }
@@ -311,6 +319,9 @@ internal static class NativeStyledSquadNamePatch
     [HarmonyPrefix]
     private static bool Prefix(string __1)
     {
+        if (SpectatorHudVisibility.ShouldShow())
+            return true;
+
         return !NativeContextualSquadNamePatch.ShouldSuppressSameVehicleName(__1);
     }
 }

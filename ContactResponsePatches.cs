@@ -402,7 +402,7 @@ internal static class SoldierTacticalSprintPatch
         // ownership as MoveOptimized; otherwise it can raise the soldier back to
         // a fighting crouch between reload frames.
         ModTimeProbe.Stage(TacticalStage.ReloadPosture);
-        if (ExposedReloadPosture.TryMaintain(soldier, now))
+        if (ReloadPosture.TryMaintain(soldier, now))
         {
             sprint = false;
             return false;

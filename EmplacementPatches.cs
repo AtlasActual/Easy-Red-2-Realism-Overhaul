@@ -138,10 +138,22 @@ internal static class StaticAntiTankStaffing
         foreach (var faction in factions)
         {
             var revision = GroundAiDirector.CurrentObjectiveRevision(faction);
-            RefreshAssignments(faction, revision, now);
-            var pendingSquads = defensiveSquads
+            var factionSquads = defensiveSquads
                 .Where(squad => SameFaction(squad.Leader?.faction ?? string.Empty, faction))
                 .ToList();
+            var activeAreas = new List<DefensiveAreaBounds>(factionSquads.Count);
+            foreach (var factionSquad in factionSquads)
+            {
+                if (TryGetDefensiveArea(factionSquad, out var activeCenter, out var activeRadius))
+                {
+                    activeAreas.Add(new DefensiveAreaBounds(
+                        new MapPoint(activeCenter.x, activeCenter.z),
+                        activeRadius));
+                }
+            }
+
+            RefreshAssignments(faction, revision, activeAreas, now);
+            var pendingSquads = factionSquads.ToList();
             while (pendingSquads.Count > 0)
             {
                 var anchor = pendingSquads[0];
@@ -149,26 +161,31 @@ internal static class StaticAntiTankStaffing
                 if (!TryGetDefensiveArea(anchor, out var center, out var radius))
                     continue;
 
-                // Squads holding nearby sectors share one gun inventory and crew pool.
-                // Remove them from the pending list so the global cadence visits every
-                // distinct position once instead of repeatedly servicing whichever
-                // squad leader happens to update first.
+                // Nearby defensive sectors share a gun inventory and crew pool.
+                // Retain every sector boundary so unique outer portions are scanned
+                // instead of collapsing the group to the anchor's circle.
                 var squads = new List<Squad> { anchor };
+                var areas = new List<DefensiveAreaBounds>
+                {
+                    new(new MapPoint(center.x, center.z), radius)
+                };
                 for (var index = pendingSquads.Count - 1; index >= 0; index--)
                 {
                     var candidate = pendingSquads[index];
                     if (!TryGetDefensiveArea(candidate, out var candidateCenter, out var candidateRadius) ||
-                        HorizontalDistance(candidateCenter, center) >
-                        Mathf.Max(radius, candidateRadius))
+                        HorizontalDistance(candidateCenter, center) > Mathf.Max(radius, candidateRadius))
                     {
                         continue;
                     }
 
                     squads.Add(candidate);
+                    areas.Add(new DefensiveAreaBounds(
+                        new MapPoint(candidateCenter.x, candidateCenter.z),
+                        candidateRadius));
                     pendingSquads.RemoveAt(index);
                 }
 
-                AllocateDefensiveArea(faction, revision, center, radius, squads, now);
+                AllocateDefensiveArea(faction, revision, areas, squads, now);
             }
         }
     }
@@ -176,13 +193,12 @@ internal static class StaticAntiTankStaffing
     private static void AllocateDefensiveArea(
         string faction,
         int revision,
-        Vector3 center,
-        float radius,
+        IReadOnlyList<DefensiveAreaBounds> areas,
         IReadOnlyList<Squad> squads,
         float now)
     {
-        var armor = CollectReportedArmor(faction, center);
-        var runtimeWeapons = CollectWeapons(faction, center, radius, armor);
+        var armor = CollectReportedArmor(faction, areas);
+        var runtimeWeapons = CollectWeapons(faction, areas, armor);
         if (runtimeWeapons.Count == 0)
             return;
 
@@ -215,7 +231,7 @@ internal static class StaticAntiTankStaffing
                     member.IsMedic(),
                     member.IsRadioman(),
                     member.IsATUnit(),
-                    ReachableForAssignment(member, center, radius)));
+                    ReachableForAssignment(member, areas)));
             }
 
             squadCandidates.Add(new DefenderSquadCandidate(
@@ -312,8 +328,7 @@ internal static class StaticAntiTankStaffing
 
     private static List<RuntimeWeapon> CollectWeapons(
         string faction,
-        Vector3 center,
-        float radius,
+        IReadOnlyList<DefensiveAreaBounds> areas,
         IReadOnlyList<Vehicle> reportedArmor)
     {
         var result = new List<RuntimeWeapon>();
@@ -325,7 +340,7 @@ internal static class StaticAntiTankStaffing
         {
             var weapon = vehicles[index];
             if (weapon == null || PlayerOverridesByWeapon.ContainsKey(weapon.GetInstanceID()) ||
-                !TryDescribeViableWeapon(weapon, faction, center, radius, reportedArmor, out var info) ||
+                !TryDescribeViableWeapon(weapon, faction, areas, reportedArmor, out var info) ||
                 AssignmentsByWeapon.ContainsKey(info.Id))
             {
                 continue;
@@ -339,8 +354,7 @@ internal static class StaticAntiTankStaffing
     private static bool TryDescribeViableWeapon(
         Vehicle weapon,
         string faction,
-        Vector3 center,
-        float radius,
+        IReadOnlyList<DefensiveAreaBounds> areas,
         IReadOnlyList<Vehicle> reportedArmor,
         out RuntimeWeapon info)
     {
@@ -370,10 +384,8 @@ internal static class StaticAntiTankStaffing
             return false;
 
         var position = weapon.GetCenterOfUnit();
-        if (!IsFinite(position) || !DefensivePositioningCore.IsInsideArea(
-                new MapPoint(position.x, position.z),
-                new MapPoint(center.x, center.z),
-                radius))
+        if (!IsFinite(position) || !DefensivePositioningCore.IsInsideAnyArea(
+                new MapPoint(position.x, position.z), areas))
         {
             return false;
         }
@@ -411,7 +423,9 @@ internal static class StaticAntiTankStaffing
                vehicle.IsTransportVehicle() && vehicle.IsEmpty();
     }
 
-    private static List<Vehicle> CollectReportedArmor(string faction, Vector3 center)
+    private static List<Vehicle> CollectReportedArmor(
+        string faction,
+        IReadOnlyList<DefensiveAreaBounds> areas)
     {
         var result = new List<Vehicle>();
         var vehicles = Vehicle.allVehicles;
@@ -422,8 +436,15 @@ internal static class StaticAntiTankStaffing
         {
             var vehicle = vehicles[index];
             if (vehicle == null || vehicle.life <= 0 || vehicle.GetComponent<VehicleTank>() == null ||
-                !ResourcesManager.IsEnemyFaction(faction, vehicle.GetVehicleFaction()) ||
-                HorizontalDistance(center, vehicle.GetCenterOfUnit()) > maximum)
+                !ResourcesManager.IsEnemyFaction(faction, vehicle.GetVehicleFaction()))
+            {
+                continue;
+            }
+
+            var position = vehicle.GetCenterOfUnit();
+            if (!IsFinite(position) || areas.All(area =>
+                    !DefensivePositioningCore.IsInsideArea(
+                        new MapPoint(position.x, position.z), area.Center, maximum)))
             {
                 continue;
             }
@@ -432,7 +453,11 @@ internal static class StaticAntiTankStaffing
         return result;
     }
 
-    private static void RefreshAssignments(string faction, int revision, float now)
+    private static void RefreshAssignments(
+        string faction,
+        int revision,
+        IReadOnlyList<DefensiveAreaBounds> activeAreas,
+        float now)
     {
         foreach (var assignment in AssignmentsByWeapon.Values.Where(assignment =>
                      SameFaction(assignment.Faction, faction)).ToArray())
@@ -442,9 +467,10 @@ internal static class StaticAntiTankStaffing
                 !SoldierStillHoldingDefense(assignment.Soldier) ||
                 assignment.Weapon == null || assignment.Weapon.life <= 0 ||
                 !WeaponStillHasAmmunition(assignment.Weapon) ||
+                !WeaponInsideActiveDefense(assignment.Weapon, activeAreas) ||
                 GroundAiDirector.IsExternallyControlledSquad(assignment.Soldier.joinedSquad))
             {
-                Release(assignment, "invalid, empty, dead, or externally owned");
+                Release(assignment, "invalid, empty, outside active defense, dead, or externally owned");
                 continue;
             }
 
@@ -597,6 +623,22 @@ internal static class StaticAntiTankStaffing
         return primary || armorPiercing || secondary || special;
     }
 
+    private static bool WeaponInsideActiveDefense(
+        Vehicle weapon,
+        IReadOnlyList<DefensiveAreaBounds> activeAreas)
+    {
+        try
+        {
+            var position = weapon.GetCenterOfUnit();
+            return IsFinite(position) && DefensivePositioningCore.IsInsideAnyArea(
+                new MapPoint(position.x, position.z), activeAreas);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static bool TryGetDefensiveArea(Squad squad, out Vector3 center, out float radius)
     {
         center = default;
@@ -619,9 +661,14 @@ internal static class StaticAntiTankStaffing
         }
     }
 
-    private static bool ReachableForAssignment(Soldier soldier, Vector3 center, float radius)
+    private static bool ReachableForAssignment(
+        Soldier soldier,
+        IReadOnlyList<DefensiveAreaBounds> areas)
         => soldier != null && IsFinite(soldier.transform.position) &&
-           HorizontalDistance(soldier.transform.position, center) <= radius + 35f;
+           DefensivePositioningCore.IsInsideAnyArea(
+               new MapPoint(soldier.transform.position.x, soldier.transform.position.z),
+               areas,
+               35f);
 
     private static bool SoldierStillHoldingDefense(Soldier soldier)
     {

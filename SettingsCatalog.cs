@@ -45,9 +45,10 @@ internal sealed class MenuSetting
             "RudderAuthority" => "Rudder Authority",
             "EnginePowerMultiplier" => "Engine Power",
             "AerodynamicDrag" => "Aerodynamic Drag",
-            "ExperimentalAiFlightModel" => "EXPERIMENTAL: AI Flight Model",
             "HidePlayerNamesInSameVehicle" => "Hide Squadmate Names In Same Vehicle",
             "LauncherAccuracySpreadMultiplier" => "AT Launcher Accuracy",
+            "PlayerStaminaMultiplier" => "Player Stamina",
+            "PlayerStaminaBarEnabled" => "Stamina Bar",
             _ => SettingsCatalog.Humanize(entry.Definition.Key)
         };
         Description = entry.Description.Description ?? string.Empty;
@@ -86,8 +87,9 @@ internal static class SettingsCatalog
 {
     private static readonly HashSet<string> NonSystemSwitchIds = new(StringComparer.Ordinal)
     {
-        // These govern menu availability, diagnostic output, or presentation format;
-        // they are not overhaul systems and must remain usable after Disable All.
+        // These govern menu availability, diagnostic output, or presentation
+        // format. They are not ordinary overhaul systems
+        // and must never be flattened by Disable All / Enable All.
         "6c. Aircraft flight physics\u001fTelemetryLogging",
         "6d. Aircraft instruments\u001fUseKnotsAndFeet",
         "6d. Aircraft instruments\u001fShowAltitudeAboveGround",
@@ -229,7 +231,6 @@ internal static class SettingsCatalog
         "6c. Aircraft flight physics\u001fAircraftFreeLookZoom",
         "6c. Aircraft flight physics\u001fFreeLookSteering",
         "6c. Aircraft flight physics\u001fEnabled",
-        "6c. Aircraft flight physics\u001fExperimentalAiFlightModel",
         "6c. Aircraft flight physics\u001fWorldSpeedScale",
         "6c. Aircraft flight physics\u001fPitchAuthority",
         "6c. Aircraft flight physics\u001fRollAuthority",
@@ -281,6 +282,8 @@ internal static class SettingsCatalog
         "7e. First-person view\u001fPlayerShadowEnabled",
         "7e. First-person view\u001fRealisticAimFatigueEnabled",
         "7e. First-person view\u001fUnsupportedAimFatigueSeconds",
+        "7e. First-person view\u001fPlayerStaminaMultiplier",
+        "7e. First-person view\u001fPlayerStaminaBarEnabled",
         "7e. First-person view\u001fHoldBreathZoomMultiplier",
         "7e. First-person view\u001fBinocularsEnabled",
         "7e. First-person view\u001fBinocularsKey",
@@ -306,6 +309,9 @@ internal static class SettingsCatalog
         "7f. Multiplayer nameplates\u001fContextualSquadNameRangeMeters",
         "7f. Multiplayer nameplates\u001fHidePlayerNamesInSameVehicle",
         "7f. Multiplayer nameplates\u001fLeaveSquadRedeployEnabled",
+
+        "7k. Spectator view\u001fSpectatorHudEnabled",
+        "7k. Spectator view\u001fSpectatorHudToggleKey",
 
         "7h. Animation quality\u001fRagdollMomentumEnabled",
         "7h. Animation quality\u001fRagdollMomentumMultiplier",
@@ -635,6 +641,7 @@ internal static class SettingsCatalog
         "TankGunVolumeMultiplier" => ("quieter tank guns", "louder tank guns"),
         "PlayerFootstepVolumeMultiplier" => ("quieter player footsteps", "louder player footsteps"),
         "UnsupportedAimFatigueSeconds" => ("fatigue sooner", "fatigue later"),
+        "PlayerStaminaMultiplier" => ("less player stamina", "more player stamina"),
         "HoldBreathZoomMultiplier" => ("weaker hold-breath zoom", "stronger hold-breath zoom"),
         "OpticsZoom" => ("weaker optics zoom", "stronger optics zoom"),
         "ThirdPersonZoom" => ("weaker third-person aim zoom", "stronger third-person aim zoom"),
@@ -686,6 +693,7 @@ internal static class SettingsCatalog
             section.StartsWith("7f.", StringComparison.Ordinal) ||
             section.StartsWith("7g.", StringComparison.Ordinal) ||
             section.StartsWith("7j.", StringComparison.Ordinal) ||
+            section.StartsWith("7k.", StringComparison.Ordinal) ||
             section.StartsWith("7i.", StringComparison.Ordinal))
             return SettingsMenuCategory.PlayerExperience;
         if (section.StartsWith("7", StringComparison.Ordinal))

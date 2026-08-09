@@ -294,13 +294,18 @@ internal enum PoseOwner
     // where the two ladders meet: see PoseMovementContractCore.
     MovementPose = 7,
 
+    // c1: an accepted reload that began in occupied cover keeps the cover-derived
+    // crouched/prone low posture selected from that cover. This owns only the pose, not
+    // locomotion or fire, and therefore sits above transient movement-pose evidence.
+    CoverReload = 8,
+
     // b: pinned / on-fire safety. These reactions may halt or crouch a soldier, but
     // they cannot manufacture a prone request.
-    Suppression = 8,
+    Suppression = 9,
 
     // a2: a moving soldier has visually acquired a new contact and deliberately dived
     // to fire. This is the only non-cover owner permitted to request Prone.
-    ContactDive = 9
+    ContactDive = 10
 }
 
 /// <summary>
@@ -343,9 +348,10 @@ internal static class FinalPoseAuthorityCore
 /// soldier.
 ///
 /// The invariant that keeps the two ladders consistent, verified rank by rank:
-/// the one non-cover owner ABOVE <see cref="PoseOwner.MovementPose"/> that can demand Prone
-/// is ContactDive, whose FSM commitment also owns a fighting halt. Pinned, burning, reload,
-/// and bandage reactions may halt movement, but no longer create their own prone intent.
+/// the only owner above <see cref="PoseOwner.MovementPose"/> that can demand a new
+/// non-cover Prone is ContactDive, whose FSM commitment also owns a fighting halt. A
+/// covered reload can preserve Prone only when the occupied cover selected it; pinned,
+/// burning, exposed-reload, and bandage reactions do not create their own prone intent.
 /// </summary>
 internal static class PoseMovementContractCore
 {
@@ -478,6 +484,13 @@ internal static class PoseArbiterCore
         // Same committed stance, only the owner label changes: no visible motion, so
         // relabel at once (keeps the owner comparison current for the next proposal).
         if (currentStance == proposedStance)
+            return true;
+
+        // A covered reload is action-scoped, not a general posture commitment. If the
+        // resolver stops proposing it, the reload ended or a higher survival action is
+        // temporarily yielding the pose channel. Do not let this action's anti-flicker
+        // hold delay flame escape or the return to normal cover/movement posture.
+        if (currentOwner == PoseOwner.CoverReload && proposedOwner != PoseOwner.CoverReload)
             return true;
 
         // A more protective (more covered) stance is always safe to adopt immediately;
@@ -693,6 +706,11 @@ internal static class HaltSpacingCore
     // Roughly two body widths plus a rifle: closer than this and two men share a doorway.
     internal const float MinimumSpacingMeters = 2.5f;
     internal const float LateralStepMeters = 2.5f;
+    // A target exactly MinimumSpacingMeters from a co-located neighbour is still inside
+    // the occupancy test's inclusive boundary. This small margin puts the destination
+    // unambiguously outside it without turning the correction into a formation move.
+    internal const float DestinationClearanceMeters = 0.15f;
+    internal const int CandidateDirectionCount = 4;
     internal const float RearmTravelMeters = 0.35f;
 
     // The step is granted for a bounded window. Runtime state allows it only once per
@@ -702,6 +720,13 @@ internal static class HaltSpacingCore
     internal static bool ShouldAttempt(bool attemptedThisEpisode, MovementOwner owner)
         => !attemptedThisEpisode &&
            owner is MovementOwner.EngagementHold or MovementOwner.CoverHold;
+
+    internal static bool RelocationAllowsAttempt(
+        bool relocating,
+        MovementOwner owner,
+        bool contactMovementInhibited)
+        => !relocating ||
+           owner == MovementOwner.EngagementHold && contactMovementInhibited;
 
     internal static bool EndsEpisode(MovementOwner owner)
         => owner is MovementOwner.Free or MovementOwner.HazardEscape or
@@ -804,6 +829,106 @@ internal static class HaltSpacingCore
         var awayX = self.X - neighbour.X;
         var awayZ = self.Z - neighbour.Z;
         return step.X * awayX + step.Z * awayZ >= -0.001f;
+    }
+
+    /// <summary>
+    /// Resolves one member of a tiny, fixed target fan for a crowded fighting halt.
+    /// The first two options are the threat-lateral sides; the remaining two are
+    /// rear-lateral. Four co-located soldiers can therefore claim different short
+    /// destinations without any persistent formation or slot manager.
+    /// </summary>
+    internal static bool TryResolveCandidateStep(
+        MapPoint self,
+        MapPoint neighbour,
+        MapPoint threat,
+        bool hasThreat,
+        float minimumSpacingMeters,
+        int candidateIndex,
+        out MapPoint step)
+    {
+        step = default;
+        if (candidateIndex < 0 || candidateIndex >= CandidateDirectionCount ||
+            !TryResolveStep(
+                self,
+                neighbour,
+                threat,
+                hasThreat,
+                minimumSpacingMeters,
+                out var preferred))
+        {
+            return false;
+        }
+
+        var preferredLength = MathF.Sqrt(
+            preferred.X * preferred.X + preferred.Z * preferred.Z);
+        if (!float.IsFinite(preferredLength) || preferredLength <= 0.01f)
+            return false;
+
+        var preferredX = preferred.X / preferredLength;
+        var preferredZ = preferred.Z / preferredLength;
+        var dirX = preferredX;
+        var dirZ = preferredZ;
+
+        if (candidateIndex == 1)
+        {
+            dirX = -preferredX;
+            dirZ = -preferredZ;
+        }
+        else if (candidateIndex >= 2)
+        {
+            var threatX = threat.X - self.X;
+            var threatZ = threat.Z - self.Z;
+            var threatLength = hasThreat && threat.IsFinite
+                ? MathF.Sqrt(threatX * threatX + threatZ * threatZ)
+                : 0f;
+            if (threatLength > 0.01f)
+            {
+                // Sixty degrees from the preferred lateral side, biased rearward so
+                // no fallback candidate advances a firing soldier toward the threat.
+                var lateralSign = candidateIndex == 2 ? 0.5f : -0.5f;
+                dirX = lateralSign * preferredX - 0.8660254f * threatX / threatLength;
+                dirZ = lateralSign * preferredZ - 0.8660254f * threatZ / threatLength;
+            }
+            else
+            {
+                // Without a usable threat axis, the two perpendicular options preserve
+                // the current neighbour gap while still providing distinct destinations.
+                var sideSign = candidateIndex == 2 ? 1f : -1f;
+                dirX = -preferredZ * sideSign;
+                dirZ = preferredX * sideSign;
+            }
+        }
+
+        var directionLength = MathF.Sqrt(dirX * dirX + dirZ * dirZ);
+        if (!float.IsFinite(directionLength) || directionLength <= 0.01f)
+            return false;
+
+        var targetDistance = minimumSpacingMeters + DestinationClearanceMeters;
+        var candidate = new MapPoint(
+            dirX / directionLength * targetDistance,
+            dirZ / directionLength * targetDistance);
+        var destination = new MapPoint(self.X + candidate.X, self.Z + candidate.Z);
+        if (DestinationsConflict(destination, neighbour, minimumSpacingMeters))
+            return false;
+
+        step = candidate;
+        return true;
+    }
+
+    internal static bool DestinationsConflict(
+        MapPoint first,
+        MapPoint second,
+        float minimumSpacingMeters)
+    {
+        if (!first.IsFinite || !second.IsFinite ||
+            !float.IsFinite(minimumSpacingMeters) || minimumSpacingMeters <= 0f)
+        {
+            return true;
+        }
+
+        var dx = first.X - second.X;
+        var dz = first.Z - second.Z;
+        return dx * dx + dz * dz <= minimumSpacingMeters * minimumSpacingMeters;
     }
 }
 
@@ -1311,11 +1436,20 @@ internal static class CombatMovementPolicyCore
     internal const float MinimumAttackFiringHoldSeconds = 5f;
     internal const float DefaultAttackFiringHoldSeconds = 7f;
     internal const float MaximumAttackFiringHoldSeconds = 15f;
+    // Covered attackers get a longer firing opportunity, but the ceiling remains
+    // the original 30 seconds even when the configurable off-cover halt is raised.
+    internal const float OnCoverAttackHaltMultiplier = 2.5f;
+    internal const float MaximumOnCoverAttackHaltSeconds = 30f;
 
     internal static float ResolveAttackFiringHoldSeconds(float configuredSeconds)
         => Math.Clamp(configuredSeconds,
             MinimumAttackFiringHoldSeconds,
             MaximumAttackFiringHoldSeconds);
+
+    internal static float ResolveOnCoverAttackHaltSeconds(float configuredSeconds)
+        => Math.Min(
+            configuredSeconds * OnCoverAttackHaltMultiplier,
+            MaximumOnCoverAttackHaltSeconds);
 
     /// <summary>
     /// Starts the stationary half of a new contact episode exactly once. A positive expired
@@ -1470,6 +1604,67 @@ internal static class SquadOrderMovementCore
     /// </summary>
     internal static bool ShouldTreatAsMoving(bool isDefendOrder, bool isInsideDefendArea)
         => !isDefendOrder || !isInsideDefendArea;
+}
+
+internal readonly record struct ObjectiveDefenseArea(MapPoint Center, float HoldRadius);
+
+internal static class ObjectiveDefenseAreaCore
+{
+    internal const float MinimumObjectiveRadiusMeters = 12f;
+    internal const float MinimumHoldRadiusMeters = 12f;
+    internal const float MaximumHoldRadiusMeters = 32f;
+
+    /// <summary>
+    /// Keeps one squad centered on the actual capture point and clamps every
+    /// surplus sector so its native HoldArea circle remains inside the
+    /// objective. Cover selection remains free inside that circle, but a dense
+    /// building behind the point can no longer pull the entire defense away.
+    /// </summary>
+    internal static ObjectiveDefenseArea Build(
+        MapPoint objectiveCenter,
+        float objectiveRadius,
+        MapPoint preferredCenter,
+        bool coreGarrison)
+    {
+        if (!objectiveCenter.IsFinite || !preferredCenter.IsFinite ||
+            !float.IsFinite(objectiveRadius))
+        {
+            return new ObjectiveDefenseArea(objectiveCenter, MinimumHoldRadiusMeters);
+        }
+
+        var effectiveRadius = Math.Max(MinimumObjectiveRadiusMeters, objectiveRadius);
+        var holdRadius = Math.Clamp(
+            effectiveRadius * 0.60f,
+            MinimumHoldRadiusMeters,
+            MaximumHoldRadiusMeters);
+        if (coreGarrison)
+            return new ObjectiveDefenseArea(objectiveCenter, holdRadius);
+
+        var dx = preferredCenter.X - objectiveCenter.X;
+        var dz = preferredCenter.Z - objectiveCenter.Z;
+        var distance = MathF.Sqrt(dx * dx + dz * dz);
+        var maximumOffset = Math.Max(0f, effectiveRadius - holdRadius);
+        if (distance <= maximumOffset || distance <= 0.001f)
+            return new ObjectiveDefenseArea(preferredCenter, holdRadius);
+
+        var scale = maximumOffset / distance;
+        return new ObjectiveDefenseArea(
+            new MapPoint(
+                objectiveCenter.X + dx * scale,
+                objectiveCenter.Z + dz * scale),
+            holdRadius);
+    }
+
+    internal static float MaximumAnchorOffset(float objectiveRadius, float holdRadius)
+    {
+        if (!float.IsFinite(objectiveRadius) || !float.IsFinite(holdRadius))
+            return 0f;
+
+        return Math.Max(
+            0f,
+            Math.Max(MinimumObjectiveRadiusMeters, objectiveRadius) -
+            Math.Max(0f, holdRadius));
+    }
 }
 
 internal readonly record struct PinnedReleaseDecision(bool Released, bool GrantsImmunity);
@@ -2067,6 +2262,8 @@ internal static class FortifiedPositionCore
     }
 }
 
+internal readonly record struct DefensiveAreaBounds(MapPoint Center, float Radius);
+
 /// <summary>
 /// Was defined alongside the commander planner; relocated here (the pure-core
 /// home for the surviving tactical/defensive logic) because
@@ -2075,6 +2272,18 @@ internal static class FortifiedPositionCore
 /// </summary>
 internal static class DefensivePositioningCore
 {
+    internal static bool IsInsideAnyArea(
+        MapPoint position,
+        IReadOnlyList<DefensiveAreaBounds>? areas,
+        float tolerance = 0f)
+    {
+        if (areas == null)
+            return false;
+
+        return areas.Any(area => IsInsideArea(
+            position, area.Center, area.Radius, tolerance));
+    }
+
     internal static bool IsInsideArea(
         MapPoint position,
         MapPoint center,

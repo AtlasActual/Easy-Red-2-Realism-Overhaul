@@ -33,8 +33,16 @@ internal static class CoverOccupancy
                     !other.IsAlive || other.IsOnVehicle() || !other.gameObject.activeInHierarchy)
                     continue;
 
-                if (HorizontalDistanceSqr(other.transform.position, coverPosition) <= radius * radius)
+                var otherPosition = other.transform.position;
+                if (InfantryCoverDecisionCore.CoverPositionsConflict(
+                        new MapPoint(otherPosition.x, otherPosition.z),
+                        otherPosition.y,
+                        new MapPoint(coverPosition.x, coverPosition.z),
+                        coverPosition.y,
+                        radius))
+                {
                     return true;
+                }
             }
 
             return false;
@@ -80,7 +88,19 @@ internal static class CoverOccupancy
                 }
 
                 var otherPosition = other.transform.position;
-                var distanceSqr = HorizontalDistanceSqr(otherPosition, position);
+                if (!InfantryCoverDecisionCore.CoverPositionsConflict(
+                        new MapPoint(otherPosition.x, otherPosition.z),
+                        otherPosition.y,
+                        new MapPoint(position.x, position.z),
+                        position.y,
+                        radius))
+                {
+                    continue;
+                }
+
+                var deltaX = otherPosition.x - position.x;
+                var deltaZ = otherPosition.z - position.z;
+                var distanceSqr = deltaX * deltaX + deltaZ * deltaZ;
                 if (distanceSqr > nearestSqr)
                     continue;
 
@@ -128,12 +148,6 @@ internal static class CoverOccupancy
         return complete;
     }
 
-    private static float HorizontalDistanceSqr(Vector3 first, Vector3 second)
-    {
-        var deltaX = first.x - second.x;
-        var deltaZ = first.z - second.z;
-        return deltaX * deltaX + deltaZ * deltaZ;
-    }
 }
 
 internal static partial class ContactResponse

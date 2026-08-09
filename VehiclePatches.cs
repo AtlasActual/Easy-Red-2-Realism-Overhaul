@@ -65,23 +65,67 @@ internal static class TankTactics
         return hasTurret;
     }
 
-    internal static bool TryGetVisibleArmoredThreat(
+    internal static bool TryResolveTankKillingThreat(
+        Spottable? target,
+        out Vehicle threatVehicle)
+    {
+        threatVehicle = null!;
+        if (target == null)
+            return false;
+
+        Vehicle? candidateVehicle = target.TryCast<Vehicle>();
+        if (candidateVehicle == null)
+        {
+            var mountedSoldier = target.TryCast<Soldier>();
+            if (mountedSoldier == null || !mountedSoldier.IsOnVehicle())
+                return false;
+            candidateVehicle = mountedSoldier.GetCurrentVehicle();
+        }
+
+        if (candidateVehicle == null || candidateVehicle.life <= 0)
+            return false;
+
+        threatVehicle = candidateVehicle;
+
+        var isArmoredVehicle = IsArmoredVehicle(threatVehicle);
+        if (isArmoredVehicle)
+            return true;
+
+        var gun = threatVehicle.GetMainTurret(false)?.TryCast<TurretGun>();
+        var turretAi = gun?.GetTurretAI();
+        var gunner = gun?.GetSittedUnit();
+        if (gun == null || turretAi == null)
+            return false;
+
+        gun.CheckBullets(out _, out var hasArmorPiercing, out _, out _);
+        var targetsVehicles = turretAi.targets == AITargets.vehicles ||
+                              turretAi.targets == AITargets.infantryAndVehicles;
+        return TankEngagementDecisionCore.IsTankKillingThreat(
+            isArmoredVehicle: false,
+            isStaticWeapon: threatVehicle.IsStatic(),
+            hasLivingGunner: gunner != null && gunner.CanFight(),
+            targetsVehicles: targetsVehicles,
+            hasArmorPiercingAmmo: hasArmorPiercing);
+    }
+
+    internal static bool TryGetVisibleTankKillingThreat(
         AIVehicle ai,
         out Vehicle vehicle,
+        out Vehicle threatVehicle,
         out float distance,
         out float signedHullAngle)
     {
         vehicle = ai.veh;
         var target = vehicle?.CurrentVisibleTarget;
+        threatVehicle = null!;
         distance = float.MaxValue;
         signedHullAngle = 0f;
 
-        if (vehicle == null || vehicle.GetComponent<VehicleTank>() == null ||
-            !vehicle.IsLocalAIDriving() || !ai.hasEnemy || target == null ||
-            !IsArmoredVehicle(target))
+        if (!TryGetLocalAiTank(ai, out vehicle) || !ai.hasEnemy ||
+            !TryResolveTankKillingThreat(target, out threatVehicle))
             return false;
 
-        var towardEnemy = target.GetCenterOfUnit() - vehicle.GetCenterOfUnit();
+        var towardEnemy = threatVehicle.GetCenterOfUnit() - vehicle.GetCenterOfUnit();
         towardEnemy.y = 0f;
         if (towardEnemy.sqrMagnitude < 0.01f)
             return false;
@@ -93,6 +137,29 @@ internal static class TankTactics
 
     internal static bool HullFacesThreat(float signedHullAngle)
         => Mathf.Abs(signedHullAngle) <= Settings.TankMaximumHullFacingAngle.Value;
+
+    internal static void OrientHullTowardThreat(
+        AIVehicle ai,
+        Vehicle vehicle,
+        float signedHullAngle)
+    {
+        var steering = TankEngagementDecisionCore.HullOrientationSteering(
+            signedHullAngle, Settings.TankMaximumHullFacingAngle.Value);
+        if (steering == 0f)
+        {
+            StopWithoutHullTurn(vehicle);
+            return;
+        }
+
+        // This runs after the native vehicle update while Hold owns locomotion, so
+        // path following cannot overwrite the differential-track turn and strand
+        // the tank broadside. The turret remains independently free to engage.
+        // Move() only eases movingDir toward the request. Native path steering can
+        // make an equal opposite eased write earlier in the frame and cancel that
+        // correction forever, so the final owner must assign the command directly.
+        vehicle.SetMoveDir(new Vector2(steering, 0f));
+        ai.lastDriveThrottle = 0f;
+    }
 
     internal static bool HasForwardAttackOrder(Vehicle vehicle)
     {
@@ -120,10 +187,10 @@ internal static class TankTactics
 
     internal static void StopWithoutHullTurn(Vehicle vehicle)
     {
-        // Brake() does not clear Vehicle.movingDir. Explicitly neutralize the
-        // previous drive command so a stale steering value cannot keep applying
-        // differential track torque while the tank is meant to hold position.
-        vehicle.Move(Vector2.zero);
+        // Brake() does not clear Vehicle.movingDir, and Move(Vector2.zero) only
+        // eases toward neutral. Clear it authoritatively so a stale steering value
+        // cannot keep applying differential track torque during a hold.
+        vehicle.SetMoveDir(Vector2.zero);
         vehicle.Brake();
     }
 
@@ -207,12 +274,11 @@ internal static class TankTactics
 
     /// <summary>
     /// Evaluates the persistent engagement state machine for a vehicle in (or
-    /// recently in) armored contact and acts only on transitions: brake once on
-    /// entering Hold, force straight reverse once on entering Reverse. This is
-    /// what stops the previous per-frame brake fighting per-frame path
-    /// resumption (the reported yo-yo around the reverse line).
+    /// recently in) contact with enemy armor or a crewed anti-tank gun. Reverse
+    /// remains transition-driven, while Hold owns the final steering command each
+    /// update so native pathing cannot overwrite a required hull-facing turn.
     /// </summary>
-    internal static void UpdateArmoredEngagement(
+    internal static void UpdateAntiArmorEngagement(
         AIVehicle ai,
         Vehicle vehicle,
         Vehicle? visibleTarget,
@@ -223,6 +289,7 @@ internal static class TankTactics
         var visibleNow = false;
         var distance = runtime.LastKnownDistance;
         var hullFacesThreat = runtime.LastKnownHullFacesThreat;
+        var signedHullAngle = 0f;
 
         if (visibleTarget != null)
         {
@@ -231,19 +298,19 @@ internal static class TankTactics
             if (towardEnemy.sqrMagnitude >= 0.01f)
             {
                 distance = towardEnemy.magnitude;
-                var signedAngle = Vector3.SignedAngle(vehicle.transform.forward, towardEnemy, Vector3.up);
-                hullFacesThreat = HullFacesThreat(signedAngle);
-                runtime.LastArmoredTargetSeenAt = now;
+                signedHullAngle = Vector3.SignedAngle(vehicle.transform.forward, towardEnemy, Vector3.up);
+                hullFacesThreat = HullFacesThreat(signedHullAngle);
+                runtime.LastAntiArmorThreatSeenAt = now;
                 runtime.LastKnownDistance = distance;
                 runtime.LastKnownHullFacesThreat = hullFacesThreat;
                 visibleNow = true;
             }
         }
 
-        var timeSinceVisible = visibleNow ? 0f : now - runtime.LastArmoredTargetSeenAt;
+        var timeSinceVisible = visibleNow ? 0f : now - runtime.LastAntiArmorThreatSeenAt;
         var previousState = runtime.State;
-        var hasArmoredTarget = visibleNow || previousState != TankEngagementState.Follow;
-        if (!hasArmoredTarget)
+        var hasAntiArmorThreat = visibleNow || previousState != TankEngagementState.Follow;
+        if (!hasAntiArmorThreat)
         {
             runtime.State = TankEngagementState.Follow;
             return;
@@ -266,7 +333,7 @@ internal static class TankTactics
         var rearBlocked = wouldConsiderReverse && IsRearBlocked(ai, vehicle);
 
         var input = new TankEngagementInput(
-            hasArmoredTarget,
+            hasAntiArmorThreat,
             distance,
             timeSinceVisible,
             lifeFraction,
@@ -310,14 +377,36 @@ internal static class TankTactics
                         Settings.TankReverseSeconds.Value, AIVehicle.RetroBehaviour.backward);
             }
         }
-        else if (nextState == TankEngagementState.Hold && previousState != TankEngagementState.Hold)
+        else if (nextState == TankEngagementState.Hold)
         {
-            StopWithoutHullTurn(vehicle);
-            AiState.Trace($"Tank tactics: vehicle {id} holding to engage at {distance:0}m");
+            if (HasRotatingTurret(vehicle))
+            {
+                if (TankEngagementDecisionCore.ShouldOrientHull(visibleNow, hullFacesThreat))
+                    OrientHullTowardThreat(ai, vehicle, signedHullAngle);
+                else
+                    StopWithoutHullTurn(vehicle);
+            }
+            else if (previousState != TankEngagementState.Hold)
+            {
+                // Fixed-gun vehicles need the native enemy-facing routine to keep
+                // steering their hull as their weapon mount. Preserve the old
+                // transition-only stop instead of erasing that aim every postfix.
+                StopWithoutHullTurn(vehicle);
+            }
+
+            if (previousState != TankEngagementState.Hold)
+                AiState.Trace($"Tank tactics: vehicle {id} holding to engage at {distance:0}m");
         }
-        else if (nextState == TankEngagementState.Follow && previousState != TankEngagementState.Follow)
+        else if (nextState == TankEngagementState.Follow)
         {
-            AiState.Trace($"Tank tactics: vehicle {id} resuming path");
+            if (previousState != TankEngagementState.Follow)
+                AiState.Trace($"Tank tactics: vehicle {id} resuming path");
+
+            // A parked tank still presents its strongest armor to a visible distant
+            // threat; an en-route tank keeps its native route until standoff range.
+            if (visibleNow && HasRotatingTurret(vehicle) &&
+                (!ai.destinationActive || ai.DestinationReached))
+                OrientHullTowardThreat(ai, vehicle, signedHullAngle);
         }
     }
 
@@ -426,31 +515,31 @@ internal static class AiTankPivotProtectionPatch
                     return false;
                 }
 
-                var hasVisibleArmoredTarget = TankTactics.TryGetVisibleArmoredThreat(
-                    __instance, out _, out _, out var signedHullAngle);
-                var hullFacesTarget = hasVisibleArmoredTarget &&
+                var hasVisibleTankKillingThreat = TankTactics.TryGetVisibleTankKillingThreat(
+                    __instance, out _, out _, out _, out var signedHullAngle);
+                var hullFacesTarget = hasVisibleTankKillingThreat &&
                                       TankTactics.HullFacesThreat(signedHullAngle);
 
                 if (TankEngagementDecisionCore.ShouldOrientHull(
-                        hasVisibleArmoredTarget, hullFacesTarget))
+                        hasVisibleTankKillingThreat, hullFacesTarget))
                 {
                     // The base routine supplies the actual track steering. It owns a
-                    // stationary hull turn only while the tank it is currently seeing
-                    // remains outside the configured frontal arc.
+                    // stationary hull turn only while the tank-killing threat it is
+                    // currently seeing remains outside the configured frontal arc.
                     return true;
                 }
 
-                if (hasVisibleArmoredTarget || state == TankEngagementState.Hold)
+                if (hasVisibleTankKillingThreat || state == TankEngagementState.Hold)
                 {
-                    // The spotted tank is already inside the frontal arc, or a recent
-                    // armored contact is still inside the FSM's short hold grace.
+                    // The spotted threat is already inside the frontal arc, or a recent
+                    // anti-armor contact is still inside the FSM's short hold grace.
                     // Clear steering instead of letting target tracking keep pivoting.
                     TankTactics.StopWithoutHullTurn(vehicle);
                     return false;
                 }
 
-                // Follow: no currently visible armored target owns a stationary hull
-                // turn. Infantry tracking stays with the turret.
+                // Follow: no currently visible tank-killing threat owns a stationary
+                // hull turn. Infantry tracking stays with the turret.
                 if (__instance.destinationActive && !__instance.DestinationReached)
                 {
                     // stopToShoot routes tanks here even with a valid path. Continue
@@ -516,7 +605,7 @@ internal static class AiTankForwardTurnCommitmentPatch
 [HarmonyPatch(typeof(AIVehicle), "Update")]
 internal static class AiVehicleUpdatePatch
 {
-    [HarmonyPostfix]
+    [HarmonyPostfix, HarmonyPriority(Priority.Last)]
     private static void Postfix(AIVehicle __instance)
     {
         var __t = ModTimeProbe.Begin();
@@ -529,7 +618,8 @@ internal static class AiVehicleUpdatePatch
             {
                 var vehicle = __instance.veh;
                 if (vehicle == null || !SoldierSequentialUpdatePatch.IsTankCached(vehicle) ||
-                    !vehicle.IsLocalAIDriving())
+                    !vehicle.IsLocalAIDriving() ||
+                    AiOwnership.IsInPlayerSquad(vehicle.GetDriver()))
                 {
                     return;
                 }
@@ -538,13 +628,13 @@ internal static class AiVehicleUpdatePatch
                 var runtime = AiState.GetTankEngagementState(id);
                 var now = Time.time;
                 var target = __instance.hasEnemy ? vehicle.CurrentVisibleTarget : null;
-                var armoredVehicleTarget = target?.TryCast<Vehicle>();
-                var armoredTarget = armoredVehicleTarget != null && TankTactics.IsArmoredVehicle(armoredVehicleTarget);
+                var hasAntiArmorThreat = TankTactics.TryResolveTankKillingThreat(
+                    target, out var antiArmorThreat);
 
-                if (armoredTarget || runtime.State != TankEngagementState.Follow)
+                if (hasAntiArmorThreat || runtime.State != TankEngagementState.Follow)
                 {
-                    TankTactics.UpdateArmoredEngagement(
-                        __instance, vehicle, armoredTarget ? armoredVehicleTarget : null, runtime, id, now);
+                    TankTactics.UpdateAntiArmorEngagement(
+                        __instance, vehicle, hasAntiArmorThreat ? antiArmorThreat : null, runtime, id, now);
                 }
                 else
                 {

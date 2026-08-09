@@ -94,6 +94,9 @@ internal sealed class ContactResponseState
     internal IntPtr CoverClearanceCoverId;
     internal bool StationaryThreatFacingOwned;
     internal bool ExposedReloadSafetyOwned;
+    internal bool CoverReloadPosePending;
+    internal bool CoverReloadPoseOwned;
+    internal SoldierPose CoverReloadPose;
     internal float TacticalCrouchUntil;
     internal float EngagementHoldUntil;
     internal float ContactUntil;

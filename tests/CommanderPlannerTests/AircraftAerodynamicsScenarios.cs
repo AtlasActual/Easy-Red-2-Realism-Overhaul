@@ -11,8 +11,8 @@ internal static class AircraftAerodynamicsScenarios
         {
             (nameof(MultiplayerFlightRequiresExactLocalNetworkOwnership),
                 MultiplayerFlightRequiresExactLocalNetworkOwnership),
-            (nameof(ExperimentalAiFlightIsOptInAndHostAuthoritative),
-                ExperimentalAiFlightIsOptInAndHostAuthoritative),
+            (nameof(NativeLiftThresholdsScaleWithTheSpeedEnvelope),
+                NativeLiftThresholdsScaleWithTheSpeedEnvelope),
             (nameof(LandingGearInterlockRequiresSafeSpeedOnlyForOwnedAirbornePlane),
                 LandingGearInterlockRequiresSafeSpeedOnlyForOwnedAirbornePlane),
             (nameof(AerodynamicVectorsStayFinitePerpendicularAndPassive),
@@ -185,27 +185,32 @@ internal static class AircraftAerodynamicsScenarios
             "Invalid despawn-time kinematics trapped the landing gear closed.");
     }
 
-    private static void ExperimentalAiFlightIsOptInAndHostAuthoritative()
+    private static void NativeLiftThresholdsScaleWithTheSpeedEnvelope()
     {
-        False(CanOwnAiFlight(experimentalAiEnabled: false),
-            "AI flight must remain native by default.");
-        False(CanOwnAiFlight(enabled: false),
-            "The master flight-model switch must disable experimental AI flight.");
-        False(CanOwnAiFlight(hasAiDriver: false),
-            "An aircraft without an AI pilot must not enter experimental AI flight.");
-        True(CanOwnAiFlight(),
-            "An opted-in AI aircraft should use the flight model offline.");
-        False(CanOwnAiFlight(multiplayerIntent: true),
-            "AI flight must fail closed while a multiplayer room is joining.");
-        False(CanOwnAiFlight(
-                multiplayerIntent: true,
-                inNetworkRoom: true),
-            "A non-master client must not simulate shared AI aircraft.");
-        True(CanOwnAiFlight(
-                multiplayerIntent: true,
-                inNetworkRoom: true,
-                isMasterClient: true),
-            "The multiplayer host should simulate opted-in AI aircraft.");
+        var original = new AircraftNativeSpeedEnvelope(
+            MaximumSpeedKmh: 360f,
+            StartLiftFraction: 0.25f,
+            FullLiftFraction: 0.40f);
+        var scaled = original.Scaled(0.714f);
+
+        Near(257.04f, scaled.MaximumSpeedKmh, 0.0001f,
+            "The native maximum speed did not receive the selected scale.");
+        Near(original.StartLiftFraction, scaled.StartLiftFraction, 0.0001f,
+            "Speed scaling changed the dimensionless start-lift fraction.");
+        Near(original.FullLiftFraction, scaled.FullLiftFraction, 0.0001f,
+            "Speed scaling changed the dimensionless full-lift fraction.");
+        Near(
+            0.714f,
+            scaled.StartLiftSpeedMs / original.StartLiftSpeedMs,
+            0.0001f,
+            "The start-lift threshold did not scale with maximum speed.");
+        Near(
+            0.714f,
+            scaled.FullLiftSpeedMs / original.FullLiftSpeedMs,
+            0.0001f,
+            "The full-lift threshold did not scale with maximum speed.");
+        Near(40f, original.FullLiftSpeedMs, 0.0001f,
+            "A 144 km/h native full-lift threshold was not converted to 40 m/s.");
     }
 
     private static bool CanOwnFlight(
@@ -224,21 +229,6 @@ internal static class AircraftAerodynamicsScenarios
             multiplayerIntent,
             inNetworkRoom,
             ownsNetworkSynchronizer);
-
-    private static bool CanOwnAiFlight(
-        bool enabled = true,
-        bool experimentalAiEnabled = true,
-        bool hasAiDriver = true,
-        bool multiplayerIntent = false,
-        bool inNetworkRoom = false,
-        bool isMasterClient = false)
-        => AircraftFlightOwnershipCore.CanSimulateAi(
-            enabled,
-            experimentalAiEnabled,
-            hasAiDriver,
-            multiplayerIntent,
-            inNetworkRoom,
-            isMasterClient);
 
     private static void AerodynamicVectorsStayFinitePerpendicularAndPassive()
     {

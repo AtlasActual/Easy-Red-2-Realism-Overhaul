@@ -67,7 +67,7 @@ This is not a health or damage multiplier mod, and it does not turn the AI into 
 
 [*][b]Aircraft mouse aiming and freelook zoom.[/b] Optional mouse point aiming adds a third-person command circle and smooth chase camera. Hold the configurable vehicle-look action to freelook, then hold the hold-breath action for 0.5x-10x zoom in first or third person. The default is 4x.
 
-[*][b]Physical player-aircraft flight.[/b] Locally controlled Realistic aircraft use native aerodynamics with tuned power, drag, and control authority. Defaults are 0.714x speed, 1x pitch, 1.225x roll, 2x rudder, 4.87/10 engine power, and 1.423x drag. [b]EXPERIMENTAL: AI Flight Model applies the same tuning to AI planes and may cause unforeseen issues, including crashes.[/b] It is off by default and host-only in multiplayer.
+[*][b]Physical player-aircraft flight.[/b] Locally controlled Realistic aircraft use native aerodynamics with tuned power, drag, and control authority. Defaults are 0.714x speed, 1x pitch, 1.225x roll, 2x rudder, 4.87/10 engine power, and 1.423x drag. AI and remote-player aircraft retain native flight physics.
 
 [*][b]Wind-driven parachutes.[/b] Parachutes drift with map wind and briefly retain momentum when the player jumps from a moving aircraft.
 
@@ -106,7 +106,7 @@ Players using the same mod version also receive the host's settings for the sess
 [*][b]War Thunder-style vehicle aiming.[/b] Third-person cameras move independently while turrets and direct-fire static weapons follow at native speed. Separate rings show commanded aim and true bore direction, while gunsights support stabilized or unstabilized control.
 [*][b]Vehicle freelook.[/b] Holding the vehicle-look key moves only the camera. The weapon keeps its aim and the camera returns smoothly on release.
 [*][b]Aircraft mouse aiming and zoom.[/b] Optional mouse point aiming adds a third-person command circle and smooth chase camera. Hold vehicle look to freelook, then hold the configured hold-breath key for 0.5x-10x zoom in first or third person; default is 4x.
-[*][b]Tuned Realistic flight.[/b] Flight settings now use the playtested defaults. [b]EXPERIMENTAL: AI Flight Model can apply them to AI planes and may cause unforeseen issues, including crashes.[/b]
+[*][b]Tuned Realistic flight.[/b] Locally controlled human aircraft use the playtested flight settings; AI and remote-player aircraft remain native.
 [*][b]Parachute drift.[/b] Parachutes follow map wind and briefly retain momentum when jumping from a moving aircraft.
 [*][b]Smarter tank facing.[/b] Tanks pivot only toward a visible enemy tank and stop once their frontal armour is within the configured facing arc.
 [/list]
@@ -143,7 +143,7 @@ To update while preserving custom settings, close the game and replace the exist
 [list]
 [*][b]Unmodded players:[/b] can join a modded host and experience synchronized gameplay results, but do not receive the F10 menu, host settings, or local HUD, audio, and first-person options.
 [*][b]Players with the same mod version:[/b] receive the host's settings for that session. Their settings menu remains read-only until they disconnect, when their personal configuration returns.
-[*][b]Aircraft:[/b] every player running the mod uses the physical flight model on the human aircraft they personally control in Realistic mode. Easy Red 2's native vehicle synchronizer carries that aircraft's motion to the room; unmodded pilots and remote aircraft retain native flight physics on that client. AI aircraft remain native by default, and only the authoritative host applies the experimental AI Flight Model when it is enabled.
+[*][b]Aircraft:[/b] every player running the mod uses the physical flight model on the human aircraft they personally control in Realistic mode. Easy Red 2's native vehicle synchronizer carries that aircraft's motion to the room; unmodded pilots, remote aircraft, and all AI aircraft retain native flight physics.
 [/list]
 
 If an unmodded player becomes host after the original host leaves, the host-authoritative overhaul systems stop running. A player with the same mod version should remain host.

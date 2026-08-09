@@ -8,12 +8,12 @@ internal enum TankEngagementState
 }
 
 internal readonly record struct TankEngagementInput(
-    bool HasArmoredTarget,
+    bool HasAntiArmorThreat,
     float Distance,
     float TimeSinceTargetVisible,
     float LifeFraction,
     bool HullFacesThreat,
-    bool ReverseAvailable,
+    bool CanStartReverse,
     bool RearBlocked,
     bool ReverseTimerElapsed,
     float StandoffDistance,
@@ -21,7 +21,7 @@ internal readonly record struct TankEngagementInput(
     float DamagedLifeFraction);
 
 /// <summary>
-/// Pure engagement state machine for a tank in direct armored contact. Replaces
+/// Pure engagement state machine for a tank in direct anti-armor contact. Replaces
 /// the previous threshold spaghetti (a one-frame brake fighting per-frame path
 /// resumption) with a persistent state and hysteresis, so distance dithering a
 /// few meters around a boundary can never flip the state every evaluation.
@@ -43,7 +43,7 @@ internal static class TankEngagementDecisionCore
         switch (current)
         {
             case TankEngagementState.Hold:
-                if (!input.HasArmoredTarget ||
+                if (!input.HasAntiArmorThreat ||
                     input.Distance > input.StandoffDistance * HoldReleaseDistanceMultiplier ||
                     input.TimeSinceTargetVisible > HoldReleaseGraceSeconds)
                 {
@@ -53,7 +53,7 @@ internal static class TankEngagementDecisionCore
                 if ((input.Distance <= input.ReverseDistance ||
                      input.LifeFraction <= input.DamagedLifeFraction) &&
                     input.HullFacesThreat &&
-                    input.ReverseAvailable && !input.RearBlocked)
+                    input.CanStartReverse && !input.RearBlocked)
                 {
                     return TankEngagementState.Reverse;
                 }
@@ -65,19 +65,19 @@ internal static class TankEngagementDecisionCore
                 // retreating from nothing and resume native pathing. Mirrors the
                 // Hold release so a Reverse state can never outlive its target and
                 // strand the tank backing up forever.
-                if (!input.HasArmoredTarget ||
+                if (!input.HasAntiArmorThreat ||
                     input.TimeSinceTargetVisible > HoldReleaseGraceSeconds)
                 {
                     return TankEngagementState.Follow;
                 }
 
-                // A blind reverse must never loop forever: losing the ability to
-                // reverse, or discovering the rear is blocked, ends the retreat and
-                // falls back to holding and fighting instead.
-                if (!input.HullFacesThreat ||
-                    input.RearBlocked || !input.ReverseAvailable ||
+                // A blind reverse must never loop forever. A blocked rear ends it
+                // immediately; once its active window lapses, it also ends unless
+                // it can be re-armed safely inside the reverse-distance band.
+                if (!input.HullFacesThreat || input.RearBlocked ||
                     (input.ReverseTimerElapsed &&
-                     input.Distance >= input.ReverseDistance * ReverseReleaseDistanceMultiplier))
+                     (!input.CanStartReverse ||
+                      input.Distance >= input.ReverseDistance * ReverseReleaseDistanceMultiplier)))
                 {
                     return TankEngagementState.Hold;
                 }
@@ -85,7 +85,7 @@ internal static class TankEngagementDecisionCore
                 return TankEngagementState.Reverse;
 
             default:
-                return input.HasArmoredTarget && input.Distance <= input.StandoffDistance
+                return input.HasAntiArmorThreat && input.Distance <= input.StandoffDistance
                     ? TankEngagementState.Hold
                     : TankEngagementState.Follow;
         }
@@ -98,14 +98,45 @@ internal static class TankEngagementDecisionCore
         => state == TankEngagementState.Hold;
 
     /// <summary>
-    /// A stationary hull turn belongs only to a currently visible armored target.
-    /// Distance and remembered engagement state cannot authorize a pivot, and the
-    /// turn ends as soon as the configured frontal arc contains the target.
+    /// A stationary hull turn belongs only to a currently visible tank-killing
+    /// threat. Distance and remembered engagement state cannot authorize a pivot,
+    /// and the turn ends as soon as the configured frontal arc contains the target.
     /// </summary>
     internal static bool ShouldOrientHull(
-        bool hasVisibleArmoredTarget,
+        bool hasVisibleTankKillingThreat,
         bool hullFacesThreat)
-        => hasVisibleArmoredTarget && !hullFacesThreat;
+        => hasVisibleTankKillingThreat && !hullFacesThreat;
+
+    /// <summary>
+    /// Keeps runtime object inspection out of the decision: armor always counts,
+    /// while an emplacement must be a live, crewed static gun that is
+    /// configured to fight vehicles and still has armor-piercing ammunition.
+    /// </summary>
+    internal static bool IsTankKillingThreat(
+        bool isArmoredVehicle,
+        bool isStaticWeapon,
+        bool hasLivingGunner,
+        bool targetsVehicles,
+        bool hasArmorPiercingAmmo)
+        => isArmoredVehicle ||
+           (isStaticWeapon && hasLivingGunner && targetsVehicles &&
+            hasArmorPiercingAmmo);
+
+    /// <summary>
+    /// Returns a full-strength differential-track steering command until the
+    /// threat enters the configured frontal arc. A discrete command is deliberate:
+    /// low fractional steering can be swallowed by heavy tracked-vehicle torque.
+    /// </summary>
+    internal static float HullOrientationSteering(float signedHullAngle, float maximumFacingAngle)
+    {
+        if (!IsFinite(signedHullAngle) || !IsFinite(maximumFacingAngle) || maximumFacingAngle < 0f ||
+            MathF.Abs(signedHullAngle) <= maximumFacingAngle)
+        {
+            return 0f;
+        }
+
+        return signedHullAngle > 0f ? 1f : -1f;
+    }
 
     private static bool IsFinite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
 }

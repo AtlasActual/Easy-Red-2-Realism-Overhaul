@@ -173,7 +173,11 @@ internal static class AircraftFlightPhysics
                 ? Mathf.Clamp(plane.maxKmhSpeed / 3.6f, 42f, 240f)
                 : profile.Name == "bomber" ? 112f : 155f;
 
-            var nativeFullLiftSpeed = plane.totalLiftVelocity;
+            var nativeEnvelope = new AircraftNativeSpeedEnvelope(
+                plane.maxKmhSpeed,
+                plane.startLiftMult,
+                plane.endLiftMult);
+            var nativeFullLiftSpeed = nativeEnvelope.FullLiftSpeedMs;
             var baseStallSpeed =
                 ValidPositive(nativeFullLiftSpeed) &&
                 nativeFullLiftSpeed < baseMaximumSpeed * 0.72f
@@ -506,8 +510,6 @@ internal static class AircraftFlightPhysics
             Settings.AircraftWorldSpeedScale.Value,
             0.65f,
             1.35f);
-        var inverseSpeedSquared =
-            1f / Mathf.Max(0.25f, speedScale * speedScale);
         var engineParameters = new AircraftEngineParameters(
             state.Profile.StaticThrustToWeightAtOne,
             state.Profile.StaticThrustToWeightAtTen,
@@ -536,12 +538,18 @@ internal static class AircraftFlightPhysics
             state.StallSpeedMs * 1.85f,
             state.MaximumSpeedMs * 0.58f);
 
-        plane.maxKmhSpeed =
-            state.OriginalMaximumSpeedKmh * speedScale;
-        plane.startLiftMult =
-            state.OriginalStartLiftMultiplier * inverseSpeedSquared;
-        plane.endLiftMult =
-            state.OriginalEndLiftMultiplier * inverseSpeedSquared;
+        var speedEnvelope = new AircraftNativeSpeedEnvelope(
+                state.OriginalMaximumSpeedKmh,
+                state.OriginalStartLiftMultiplier,
+                state.OriginalEndLiftMultiplier)
+            .Scaled(speedScale);
+        plane.maxKmhSpeed = speedEnvelope.MaximumSpeedKmh;
+        // These are dimensionless fractions of maxKmhSpeed, not force
+        // multipliers. Keeping the authored fractions makes the start/full-lift
+        // thresholds scale with max speed. Inverse-square scaling made the
+        // default 0.714x envelope require about 1.4x the stock speed for lift.
+        plane.startLiftMult = speedEnvelope.StartLiftFraction;
+        plane.endLiftMult = speedEnvelope.FullLiftFraction;
         var rigidbody = plane.GetRigidbody();
         if (rigidbody != null)
         {
@@ -756,6 +764,7 @@ internal static class AircraftFlightPhysics
             originalRoll = plane.r_roll;
             capturedOriginal = true;
             if (UseReplacementFlightModel ||
+                !IsLocallyControlledHumanRealisticPlane(plane) ||
                 !TryGetOwnedState(plane, out var state) ||
                 state.Faulted)
             {
@@ -852,7 +861,7 @@ internal static class AircraftFlightPhysics
 
         try
         {
-            if (!ShouldApply(plane) ||
+            if (!IsLocallyControlledHumanRealisticPlane(plane) ||
                 plane.hasMissingParts ||
                 !plane.engineStarted ||
                 plane.isGrounded ||
@@ -892,7 +901,9 @@ internal static class AircraftFlightPhysics
 
     internal static bool AllowLandingGearExtension(VehiclePlane plane)
     {
-        if (plane == null || !ShouldApply(plane) || plane.isGrounded)
+        if (plane == null ||
+            !IsLocallyControlledHumanRealisticPlane(plane) ||
+            plane.isGrounded)
             return true;
 
         try
@@ -977,33 +988,7 @@ internal static class AircraftFlightPhysics
 
     internal static bool ShouldApply(VehiclePlane plane)
         => Settings.AircraftFlightPhysicsEnabled.Value &&
-           (IsLocallyControlledHumanRealisticPlane(plane) ||
-            IsAuthoritativeAiPlane(plane));
-
-    private static bool IsAuthoritativeAiPlane(VehiclePlane plane)
-    {
-        if (plane == null)
-            return false;
-
-        try
-        {
-            var driver = plane.GetDriver();
-            var multiplayerIntent =
-                MatchData.data != null &&
-                MatchData.data.isMultiplayer;
-            return AircraftFlightOwnershipCore.CanSimulateAi(
-                enabled: true,
-                Settings.AircraftAiFlightModelExperimentalEnabled.Value,
-                driver != null && AiOwnership.IsAiControlled(driver),
-                multiplayerIntent,
-                Photon.Pun.PhotonNetwork.InRoom,
-                Photon.Pun.PhotonNetwork.IsMasterClient);
-        }
-        catch
-        {
-            return false;
-        }
-    }
+           IsLocallyControlledHumanRealisticPlane(plane);
 
     internal static bool IsLocallyControlledHumanRealisticPlane(
         VehiclePlane plane)

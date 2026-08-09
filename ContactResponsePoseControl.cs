@@ -28,7 +28,7 @@ internal static partial class ContactResponse
     /// the pose is decided. Every writer applies this result instead of proposing its
     /// own pose, so two systems can no longer disagree through the shared latch (the
     /// structural generator of the prone&lt;-&gt;crouch loops and blocked-upgrade stalls of
-    /// plans 004/008/012/013). The safety owners (required action, pinned/fire)
+    /// plans 004/008/012/013). The immediate owners (covered reload, pinned/fire)
     /// are always recomputed; the interop-heavy DECISION tail (cover clearance/evaluation,
     /// suppression recovery, crouch owners) is resolved fresh when
     /// <paramref name="resolveDecisionTail"/> is true and otherwise reused from the
@@ -49,6 +49,12 @@ internal static partial class ContactResponse
         // A flame escape is the lethal-hazard movement grant. No stationary posture owns
         // a soldier while that escape is active.
         var flameEvading = AiState.IsFlameEvading(id, now);
+        if (state.CoverReloadPoseOwned &&
+            (!Settings.DangerReactionsEnabled.Value || !soldier.IsAlive ||
+             !soldier.IsReloading || soldier.IsOnVehicle()))
+        {
+            state.CoverReloadPoseOwned = false;
+        }
 
         // a. A moving soldier's first visual acquisition owns one deliberate dive and
         // firing commitment. Cover evaluation below is the only other Prone author.
@@ -68,6 +74,17 @@ internal static partial class ContactResponse
         {
             owner = PoseOwner.Suppression;
             return SoldierPose.Crouch;
+        }
+
+        // A soldier who began reloading in occupied cover ducks below the cover's
+        // firing height. The pose was selected once from that cover when the reload
+        // began, so alternating threats or a transient cover-wrapper gap cannot make
+        // the soldier oscillate mid-action. This pose-only owner does not cancel a
+        // movement order; suppression and lethal-hazard escape above still take over.
+        if (state.CoverReloadPoseOwned && !flameEvading && !soldier.IsOnFire)
+        {
+            owner = PoseOwner.CoverReload;
+            return state.CoverReloadPose;
         }
 
         // c. The movement contract (plan 019). The committed movement decision from the
@@ -221,6 +238,7 @@ internal static partial class ContactResponse
         {
             PoseOwner.ContactDive => "contact-dive",
             PoseOwner.Suppression => "pinned-fire",
+            PoseOwner.CoverReload => "cover-reload",
             PoseOwner.MovementPose => "movement",
             PoseOwner.CoverClearance => "cover-clearance",
             PoseOwner.CoverEvaluation => "cover-eval",
@@ -230,6 +248,44 @@ internal static partial class ContactResponse
             PoseOwner.HaltFallback => "halt-fallback",
             _ => "native"
         };
+
+    internal static SoldierPose SelectReloadCoverPose(
+        Soldier soldier,
+        ContactResponseState state,
+        float now)
+    {
+        var coverPose = SoldierPose.Crouch;
+        if (state.HasThreatPosition &&
+            TryGetCurrentCoverEvaluation(
+                soldier, state, state.LastThreatPosition, now, out var evaluation))
+        {
+            coverPose = evaluation.Pose;
+        }
+        else
+        {
+            try
+            {
+                var cover = soldier.targetDestination;
+                if (cover != null && !cover.WasCollected && cover.Pointer != IntPtr.Zero)
+                    coverPose = SafeGetCoverPose(cover);
+            }
+            catch (NullReferenceException)
+            {
+                coverPose = SoldierPose.Crouch;
+            }
+            catch (Il2CppException)
+            {
+                coverPose = SoldierPose.Crouch;
+            }
+            catch (ObjectCollectedException)
+            {
+                coverPose = SoldierPose.Crouch;
+            }
+        }
+
+        return ToSoldierPose(InfantryCoverDecisionCore.SelectReloadPosture(
+            ToCoverPostureChoice(coverPose)));
+    }
 
     internal static SoldierPose StationaryHoldPose(Soldier soldier)
     {
@@ -787,9 +843,12 @@ internal static partial class ContactResponse
         var id = soldier.GetInstanceID();
         var state = AiState.GetContactState(id);
 
-        // Exposed reload owns its safety halt and fire inhibition until the magazine
-        // seats; keep its lifecycle (the release path lives here). It does not author Prone.
-        if (ExposedReloadPosture.TryMaintain(soldier, now))
+        // An exposed reload owns its safety halt and fire inhibition until the magazine
+        // seats; keep its lifecycle (the release path lives here). This call also retries
+        // a cover-pose claim when native cover status missed the Reload postfix; a
+        // successful cover claim returns false so the central arbiter writes it below.
+        // Only the separate cover-derived reload owner is allowed to retain Prone.
+        if (ReloadPosture.TryMaintain(soldier, now))
             return;
 
         // Lifecycle: a stale contact-crouch ownership must lapse so rank g does not hold

@@ -31,8 +31,8 @@ internal static class AircraftCameraScenarios
                 ForwardHemisphereAllowsEveryVisibleScreenEdgeAndCorner),
             (nameof(ForwardHemispherePreventsRearwardAimAndSaturatesSmoothly),
                 ForwardHemispherePreventsRearwardAimAndSaturatesSmoothly),
-            (nameof(RearCameraOrbitDoesNotMoveTheHeldFlightCommand),
-                RearCameraOrbitDoesNotMoveTheHeldFlightCommand),
+            (nameof(RearCameraOrbitAdvancesTheBoundedFlightCommand),
+                RearCameraOrbitAdvancesTheBoundedFlightCommand),
             (nameof(ForwardHemisphereTravelsWithTheAircraftThroughACompleteLoop),
                 ForwardHemisphereTravelsWithTheAircraftThroughACompleteLoop),
             (nameof(PointAimCameraSmoothlyFollowsWithoutSnappingTheCircle),
@@ -541,7 +541,7 @@ internal static class AircraftCameraScenarios
             "Saturated outward input retained false instructor feed-forward.");
     }
 
-    private static void RearCameraOrbitDoesNotMoveTheHeldFlightCommand()
+    private static void RearCameraOrbitAdvancesTheBoundedFlightCommand()
     {
         var limit = AircraftCameraCore.MaximumPointAimConeRadians;
         var state = AircraftCameraCore.Initialize(
@@ -598,35 +598,47 @@ internal static class AircraftCameraScenarios
         Near(heldFlightCommand, state.Aim.Direction, 0.00001f,
             "Camera pursuit of a rearward target leaked into flight guidance.");
 
-        // Turning the aircraft must not reconnect the rear camera on its own.
-        var turnedForward = Vector3.Transform(
-            Vector3.UnitZ,
-            Quaternion.CreateFromAxisAngle(
+        // The camera target is now 200 degrees around the established positive
+        // yaw route. As the aircraft follows, its bounded command must keep
+        // advancing on that route instead of freezing at the original 89-degree
+        // world direction or reversing at the 180-degree antipode.
+        var previousCommandYaw = SignedYawDegrees(state.Aim.Direction);
+        for (var aircraftYaw = 1; aircraftYaw <= 200; aircraftYaw++)
+        {
+            var aircraftRotation = Quaternion.CreateFromAxisAngle(
                 Vector3.UnitY,
-                140f * DegreesToRadians));
-        state = AircraftCameraCore.ConstrainPointAimToAircraftCone(
-            state,
-            turnedForward,
-            Vector3.UnitY,
-            limit);
-        Near(heldFlightCommand, state.Aim.Direction, 0.00001f,
-            "Aircraft rotation reconnected the rear camera without fresh mouse input.");
+                aircraftYaw * DegreesToRadians);
+            var aircraftForward = Vector3.Transform(
+                Vector3.UnitZ,
+                aircraftRotation);
+            var aircraftUp = Vector3.Transform(
+                Vector3.UnitY,
+                aircraftRotation);
+            state = AircraftCameraCore.ConstrainPointAimToAircraftCone(
+                state,
+                aircraftForward,
+                aircraftUp,
+                limit);
 
-        // Fresh input that returns the view to the now-forward hemisphere may
-        // deliberately reconnect it to flight control.
-        state = AircraftCameraCore.UpdatePointAim(
-            state,
-            0f,
-            -80f * DegreesToRadians);
-        state = AircraftCameraCore.ConstrainPointAimToAircraftCone(
-            state,
-            turnedForward,
-            Vector3.UnitY,
-            limit);
+            var commandYaw = UnwrapDegrees(
+                previousCommandYaw,
+                SignedYawDegrees(state.Aim.Direction));
+            True(commandYaw >= previousCommandYaw - 0.001f,
+                $"The bounded flight command reversed at aircraft yaw {aircraftYaw} degrees.");
+            True(commandYaw - previousCommandYaw <= 1.01f,
+                $"The bounded flight command snapped at aircraft yaw {aircraftYaw} degrees.");
+            True(DirectionAngle(aircraftForward, state.Aim.Direction) <=
+                 limit + 0.00001f,
+                $"The moving flight command escaped its legal cone at aircraft yaw {aircraftYaw} degrees.");
+            previousCommandYaw = commandYaw;
+        }
+
         False(state.CameraTarget.IsOutsideFlightCone,
-            "Returning the camera to the forward hemisphere did not reconnect flight aim.");
+            "Aircraft pursuit did not reconnect a rear camera target after it became forward.");
         Near(state.CameraTarget.Direction, state.Aim.Direction, 0.00001f,
             "Reconnected flight aim did not adopt the legal camera target.");
+        Near(200f, previousCommandYaw, 0.001f,
+            "The flight command did not continue through the full rear-camera orbit.");
     }
 
     private static void ForwardHemisphereTravelsWithTheAircraftThroughACompleteLoop()
@@ -1605,6 +1617,18 @@ internal static class AircraftCameraScenarios
         var cosine = Math.Clamp(
             Vector3.Dot(fromForward, toForward), -1f, 1f);
         return MathF.Atan2(sine, cosine);
+    }
+
+    private static float SignedYawDegrees(Vector3 direction) =>
+        MathF.Atan2(direction.X, direction.Z) / DegreesToRadians;
+
+    private static float UnwrapDegrees(float previous, float wrapped)
+    {
+        var previousWrapped =
+            (previous + 180f) % 360f - 180f;
+        var delta =
+            (wrapped - previousWrapped + 540f) % 360f - 180f;
+        return previous + delta;
     }
 
     private static float QuaternionAngle(Quaternion left, Quaternion right)

@@ -70,6 +70,20 @@ internal readonly record struct CoverPostureInput(
 
 internal static class InfantryCoverDecisionCore
 {
+    internal const float SameFloorVerticalToleranceMeters = 1.75f;
+
+    internal static CoverPostureChoice SelectReloadPosture(
+        CoverPostureChoice coverPosture)
+        => coverPosture == CoverPostureChoice.Prone
+            ? CoverPostureChoice.Prone
+            : CoverPostureChoice.Crouched;
+
+    internal static bool ShouldAcquireReloadPosture(
+        bool isReloading,
+        bool alreadyOwned,
+        bool onUsableCover)
+        => isReloading && !alreadyOwned && onUsableCover;
+
     internal static bool ShouldTreatCurrentCoverAsUsable(
         bool onUsableNativeCover,
         bool insideDefensiveArea,
@@ -456,6 +470,23 @@ internal static class InfantryCoverDecisionCore
         var deltaX = first.X - second.X;
         var deltaZ = first.Z - second.Z;
         return deltaX * deltaX + deltaZ * deltaZ <= minimumSpacing * minimumSpacing;
+    }
+
+    internal static bool CoverPositionsConflict(
+        MapPoint first,
+        float firstElevation,
+        MapPoint second,
+        float secondElevation,
+        float minimumSpacing)
+    {
+        if (!IsFinite(firstElevation) || !IsFinite(secondElevation) ||
+            MathF.Abs(firstElevation - secondElevation) >
+            SameFloorVerticalToleranceMeters)
+        {
+            return false;
+        }
+
+        return CoverPositionsConflict(first, second, minimumSpacing);
     }
 
     private static bool IsFinite(float value)

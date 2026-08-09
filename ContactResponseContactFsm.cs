@@ -18,12 +18,6 @@ internal static partial class ContactResponse
 
     private const float UrgentCoverReassessmentSeconds = 4f;
 
-    // D1 (plan 015): the on-cover halt cap is a multiple of the off-cover one so
-    // real cover is still strongly preferred, but a soldier pinned in place by
-    // sustained direct fire is guaranteed to eventually bound instead of waiting
-    // forever for covering fire that may never come.
-    private const float OnCoverAttackHaltMultiplier = 2.5f;
-
     internal const float TacticalCrouchPersistenceSeconds = 1.5f;
 
     private static int _coverAssignmentExecutorSoldierId;
@@ -1329,6 +1323,9 @@ internal static partial class ContactResponse
         state.SuppressionFireInhibited = false;
         state.SuppressionMovementOwned = false;
         state.SuppressionPoseOwned = false;
+        state.ExposedReloadSafetyOwned = false;
+        state.CoverReloadPosePending = false;
+        state.CoverReloadPoseOwned = false;
         state.SuppressionCrouchUntil = 0f;
         state.Pinned = false;
         state.PinnedUntil = 0f;
@@ -1611,7 +1608,8 @@ internal static partial class ContactResponse
             hasDestination: true,
             state.AttackHaltStartedAt,
             now,
-            AiBehaviorTuning.MaximumAttackCombatHaltSeconds * OnCoverAttackHaltMultiplier);
+            CombatMovementPolicyCore.ResolveOnCoverAttackHaltSeconds(
+                AiBehaviorTuning.MaximumAttackCombatHaltSeconds));
         return (maximumHaltReached, maximumOnCoverHaltReached);
     }
 

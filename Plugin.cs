@@ -16,7 +16,7 @@ public sealed class Plugin : BasePlugin
 {
     public const string PluginGuid = "ca.antoi.er2.tacticalai";
     public const string PluginName = "Easy Red 2 Realism Overhaul";
-    public const string PluginVersion = "1.1.1";
+    public const string PluginVersion = "1.1.2";
 
     internal static ManualLogSource LogSource { get; private set; } = null!;
     private bool _modEnabled;
@@ -34,6 +34,7 @@ public sealed class Plugin : BasePlugin
     private MultiplayerSharedSquadController? _multiplayerSharedSquadController;
     private ImmersiveWorldHudController? _immersiveWorldHudController;
     private LeaveSquadRedeployController? _leaveSquadRedeployController;
+    private SpectatorHudController? _spectatorHudController;
     private BulletPenetrationController? _bulletPenetrationController;
     private AiDebugOverlayController? _aiDebugOverlayController;
 
@@ -80,6 +81,7 @@ public sealed class Plugin : BasePlugin
         _multiplayerSharedSquadController = AddComponent<MultiplayerSharedSquadController>();
         _immersiveWorldHudController = AddComponent<ImmersiveWorldHudController>();
         _leaveSquadRedeployController = AddComponent<LeaveSquadRedeployController>();
+        _spectatorHudController = AddComponent<SpectatorHudController>();
         _bulletPenetrationController = AddComponent<BulletPenetrationController>();
         _aiDebugOverlayController = AddComponent<AiDebugOverlayController>();
 
@@ -106,7 +108,7 @@ public sealed class Plugin : BasePlugin
                     $"largeCraters={Settings.HeavyOrdnanceCratersEnabled.Value}, " +
                     $"layeredBlast={Settings.LayeredBlastEffectsEnabled.Value}, " +
                     $"fragmentation={Settings.EnhancedFragmentationEnabled.Value}, " +
-                    $"aircraftPhysics={Settings.AircraftFlightPhysicsEnabled.Value}, aircraftAiFlightExperimental={Settings.AircraftAiFlightModelExperimentalEnabled.Value}, aircraftMousePointAim={Settings.AircraftMousePointAimingEnabled.Value}, aircraftSimplifiedManualRoll={Settings.AircraftSimplifiedManualRollEnabled.Value}, " +
+            $"aircraftPhysics={Settings.AircraftFlightPhysicsEnabled.Value}, aircraftMousePointAim={Settings.AircraftMousePointAimingEnabled.Value}, aircraftSimplifiedManualRoll={Settings.AircraftSimplifiedManualRollEnabled.Value}, " +
                     $"bulletPenetration={Settings.BulletPenetrationEnabled.Value}, " +
                     $"addedRicochets={Settings.AddedSmallArmsRicochetsEnabled.Value}, " +
                     $"tracers={Settings.TracerReductionEnabled.Value}, tracerRetention={Settings.MachineGunTracerRetention.Value:F2}, tracerBrightness={Settings.TracerBrightness.Value:F2}x, tracerSize={Settings.TracerSizeMultiplier.Value:F2}x, tracerLength={Settings.TracerLengthMultiplier.Value:F2}x, chatter={Settings.BattleChatterEnabled.Value}, " +
@@ -135,6 +137,7 @@ public sealed class Plugin : BasePlugin
                     $"immersiveWorldHud={Settings.ImmersiveWorldHudEnabled.Value}, " +
                     $"hidePlayerNamesInSameVehicle={Settings.HidePlayerNamesInSameVehicle.Value}, " +
                     $"leaveSquadRedeploy={Settings.LeaveSquadRedeployEnabled.Value}, " +
+                    $"spectatorHud={Settings.SpectatorHudEnabled.Value}, spectatorHudKey={Settings.SpectatorHudToggleKey.Value}, " +
                     $"ragdollMomentum={Settings.RagdollMomentumEnabled.Value}, " +
                     $"highQualityDistantAnimations={Settings.KeepHighQualityDistantAnimations.Value}, " +
                     $"audioBalance={Settings.AudioBalanceEnabled.Value}");

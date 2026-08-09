@@ -174,7 +174,9 @@ internal static class AiState
             if (pair.Key == coverId ||
                 InfantryCoverDecisionCore.CoverPositionsConflict(
                     new MapPoint(coverPosition.x, coverPosition.z),
+                    coverPosition.y,
                     new MapPoint(reservation.Position.x, reservation.Position.z),
+                    reservation.Position.y,
                     minimumSpacing))
             {
                 reservedByOther = true;
@@ -210,7 +212,9 @@ internal static class AiState
 
             if (InfantryCoverDecisionCore.CoverPositionsConflict(
                     new MapPoint(coverPosition.x, coverPosition.z),
+                    coverPosition.y,
                     new MapPoint(reservation.Position.x, reservation.Position.z),
+                    reservation.Position.y,
                     radius))
             {
                 count++;
@@ -218,6 +222,34 @@ internal static class AiState
         }
 
         return count;
+    }
+
+    internal static bool HaltSpacingTargetReservedByOther(
+        Vector3 target,
+        int soldierId,
+        float now,
+        float minimumSpacing)
+    {
+        var targetPoint = new MapPoint(target.x, target.z);
+        foreach (var pair in ContactStates)
+        {
+            if (pair.Key == soldierId)
+                continue;
+
+            var other = pair.Value;
+            if (!other.HasHaltSpacingTarget || other.HaltSpacingMoveUntil <= now)
+                continue;
+
+            if (HaltSpacingCore.DestinationsConflict(
+                    targetPoint,
+                    new MapPoint(other.HaltSpacingTarget.x, other.HaltSpacingTarget.z),
+                    minimumSpacing))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static void ReserveCover(
@@ -396,7 +428,7 @@ internal sealed class TargetCandidateState
 internal sealed class TankEngagementRuntimeState
 {
     internal TankEngagementState State = TankEngagementState.Follow;
-    internal float LastArmoredTargetSeenAt;
+    internal float LastAntiArmorThreatSeenAt;
     internal float LastKnownDistance;
     internal bool LastKnownHullFacesThreat;
 

@@ -26,6 +26,9 @@ internal static class PlayerAimingInput
 [HarmonyPatch(typeof(Soldier), nameof(Soldier.Update))]
 internal static class PlayerAimFatiguePatch
 {
+    private const float NativeStaminaEmptyThreshold = 1f;
+    private const float NativeStaminaRecoveryThreshold = 50f;
+
     private static int _trackedSoldierId;
     private static float _fatigueSeconds;
     private static bool _ownsExhaustion;
@@ -74,16 +77,39 @@ internal static class PlayerAimFatiguePatch
                 _fatigueSeconds = Mathf.Max(0f, _fatigueSeconds - Time.deltaTime * recoveryRate);
             }
 
-            if (_fatigueSeconds >= threshold || player.staminaCount <= 1f)
+            // Native stamina exhaustion owns this flag once stamina is empty.
+            // Do not claim it here or the mod can later clear/reassert native state.
+            if (player.staminaCount <= NativeStaminaEmptyThreshold)
             {
-                player.out_of_stamina = true;
-                _ownsExhaustion = true;
+                _ownsExhaustion = false;
+                return;
+            }
+
+            var fatigueShouldExhaust = !supported && _fatigueSeconds >= threshold;
+            if (fatigueShouldExhaust)
+            {
+                // If native stamina already owns exhaustion, leave it alone.
+                if (_ownsExhaustion || !player.out_of_stamina)
+                {
+                    player.out_of_stamina = true;
+                    _ownsExhaustion = true;
+                }
             }
             else if (_ownsExhaustion)
             {
+                // Supporting the weapon must immediately release mod-owned fatigue;
+                // otherwise the shared flag prevents hold breath from activating.
+                if (supported)
+                {
+                    player.out_of_stamina = false;
+                    _ownsExhaustion = false;
+                    return;
+                }
+
                 // Reassert while tired because the native stamina update can clear
                 // the flag between frames. Once rested, hand ownership back.
-                if (_fatigueSeconds > threshold * 0.2f || player.staminaCount <= 10f)
+                if (_fatigueSeconds > threshold * 0.2f ||
+                    player.staminaCount <= NativeStaminaRecoveryThreshold)
                 {
                     player.out_of_stamina = true;
                 }
@@ -104,9 +130,10 @@ internal static class PlayerAimFatiguePatch
         if (!_ownsExhaustion)
             return;
 
-        if (player.staminaCount > 10f)
-            player.out_of_stamina = false;
+        if (player.staminaCount <= NativeStaminaRecoveryThreshold)
+            return;
 
+        player.out_of_stamina = false;
         _ownsExhaustion = false;
     }
 
@@ -119,5 +146,43 @@ internal static class PlayerAimFatiguePatch
         _lastErrorSignature = signature;
         Plugin.LogSource.LogWarning(
             $"Player aim fatigue failed (further identical errors suppressed): {exception.Message}");
+    }
+}
+
+/// <summary>
+/// Scales native stamina costs for the locally controlled soldier only.
+/// This covers sprinting, breath holding, and jumps without replacing the
+/// game's own exhaustion and recovery rules.
+/// </summary>
+[HarmonyPatch(typeof(Soldier), nameof(Soldier.DecreaseStamina))]
+internal static class PlayerStaminaDrainPatch
+{
+    private static string _lastErrorSignature = string.Empty;
+
+    [HarmonyPrefix]
+    private static void Prefix(Soldier __instance, ref int decreaseAmount)
+    {
+        try
+        {
+            if (decreaseAmount <= 0)
+                return;
+
+            var player = Soldier.CurrentControlledSoldierOrNull();
+            if (player == null || __instance.GetInstanceID() != player.GetInstanceID())
+                return;
+
+            var multiplier = Mathf.Clamp(Settings.PlayerStaminaMultiplier.Value, 0.5f, 3f);
+            decreaseAmount = Mathf.Max(1, Mathf.RoundToInt(decreaseAmount / multiplier));
+        }
+        catch (Exception ex)
+        {
+            var signature = ex.GetType().FullName + ": " + ex.Message;
+            if (string.Equals(signature, _lastErrorSignature, StringComparison.Ordinal))
+                return;
+
+            _lastErrorSignature = signature;
+            Plugin.LogSource.LogWarning(
+                $"Player stamina scaling failed (further identical errors suppressed): {ex.Message}");
+        }
     }
 }

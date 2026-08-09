@@ -24,7 +24,9 @@ internal static class Program
             (nameof(DeliberateCoverValuesFiringQualityMoreThanUrgency), DeliberateCoverValuesFiringQualityMoreThanUrgency),
             (nameof(DefensiveCoverValuesProtectionOverImmediateFireLine), DefensiveCoverValuesProtectionOverImmediateFireLine),
             (nameof(SpatialCoverReservationsRejectOverlappingSlots), SpatialCoverReservationsRejectOverlappingSlots),
+            (nameof(SpatialCoverReservationsDistinguishBuildingFloors), SpatialCoverReservationsDistinguishBuildingFloors),
             (nameof(CoverPostureRequiresWholeBodyProtection), CoverPostureRequiresWholeBodyProtection),
+            (nameof(CoverReloadsUseTheCoverDerivedLowPosture), CoverReloadsUseTheCoverDerivedLowPosture),
             (nameof(BallisticCoverRatesMaterialAndThickness), BallisticCoverRatesMaterialAndThickness),
             (nameof(VisualObstructionAloneIsNotProtectiveCover), VisualObstructionAloneIsNotProtectiveCover),
             (nameof(BarbedWireIsNeverBallisticCover), BarbedWireIsNeverBallisticCover),
@@ -33,8 +35,12 @@ internal static class Program
             (nameof(CoverScoringSpreadsSoldiersWithoutOverridingProtection), CoverScoringSpreadsSoldiersWithoutOverridingProtection),
             (nameof(DispersionDegradesInsteadOfBlockingNearbyCover), DispersionDegradesInsteadOfBlockingNearbyCover),
             (nameof(AttackProgressHasMaximumCombatHalt), AttackProgressHasMaximumCombatHalt),
+            (nameof(CoveredAttackHaltRemainsBounded), CoveredAttackHaltRemainsBounded),
             (nameof(AttackAdvanceAlternatesBoundAndFiringPhases), AttackAdvanceAlternatesBoundAndFiringPhases),
             (nameof(DefendingReinforcementsKeepTheirMovementOrderUntilArrival), DefendingReinforcementsKeepTheirMovementOrderUntilArrival),
+            (nameof(ObjectiveDefenseKeepsACoreGarrisonOnTheCapturePoint), ObjectiveDefenseKeepsACoreGarrisonOnTheCapturePoint),
+            (nameof(ObjectiveDefenseClampsSurplusSectorsInsideTheCaptureRadius), ObjectiveDefenseClampsSurplusSectorsInsideTheCaptureRadius),
+            (nameof(ObjectiveAttackKeepsOnePressureSquadAndAlternatesWideFlanks), ObjectiveAttackKeepsOnePressureSquadAndAlternatesWideFlanks),
             (nameof(UnchangedSquadIntentDoesNotRestartNativeMovement), UnchangedSquadIntentDoesNotRestartNativeMovement),
             (nameof(IdleSoldiersRemainUnderNativeControl), IdleSoldiersRemainUnderNativeControl),
             (nameof(ArrivedDefendersStayUnderPositionControl), ArrivedDefendersStayUnderPositionControl),
@@ -77,6 +83,7 @@ internal static class Program
             (nameof(CommittedCoverMoveSurvivesATransientContact), CommittedCoverMoveSurvivesATransientContact),
             (nameof(LapsedHoldsReturnTheSoldierToNativeMovement), LapsedHoldsReturnTheSoldierToNativeMovement),
             (nameof(HaltSpacingStepsOffTheThreatAxisOnlyWhenStacked), HaltSpacingStepsOffTheThreatAxisOnlyWhenStacked),
+            (nameof(FourSimultaneousFiringHaltsChooseDistinctSpacingTargets), FourSimultaneousFiringHaltsChooseDistinctSpacingTargets),
             (nameof(MovingPostureTracksContactFire), MovingPostureTracksContactFire),
             (nameof(HaltSpacingMicroMovementNeverRaisesFightingPose), HaltSpacingMicroMovementNeverRaisesFightingPose),
             (nameof(SettledPositionCorrectionsPreserveFightingPosture), SettledPositionCorrectionsPreserveFightingPosture),
@@ -140,7 +147,7 @@ internal static class Program
             (nameof(TankEngagementLosFlickerGrantsGraceBeforeReleasingHold), TankEngagementLosFlickerGrantsGraceBeforeReleasingHold),
             (nameof(TankEngagementHoldAndReverseNeverDitherAroundTheirBoundaries), TankEngagementHoldAndReverseNeverDitherAroundTheirBoundaries),
             (nameof(TankEngagementDamagedReverseDoesNotLoopWhenRearIsBlocked), TankEngagementDamagedReverseDoesNotLoopWhenRearIsBlocked),
-            (nameof(TankHullOrientationRequiresAVisibleArmoredTarget), TankHullOrientationRequiresAVisibleArmoredTarget),
+            (nameof(TankHullOrientationRecognizesVisibleTankKillingThreats), TankHullOrientationRecognizesVisibleTankKillingThreats),
             (nameof(TankStallWatchdogRecoversResetsAndGivesUp), TankStallWatchdogRecoversResetsAndGivesUp)
         };
 
@@ -916,8 +923,8 @@ internal static class Program
     }
 
     // Mirrors the ordering of ContactResponse.ResolvePose across the ranks the pose/movement
-    // contract touches: the single non-cover prone intent, then suppression crouch, the
-    // movement rank, and finally the evaluated fighting pose.
+    // contract touches: the single non-cover prone intent, suppression crouch, the
+    // cover-derived reload pose, the movement rank, and finally the evaluated fighting pose.
     private static TacticalStance ResolvePoseWithMovementContract(
         MovementOwner committedMovement,
         bool movementHalted,
@@ -931,7 +938,9 @@ internal static class Program
         bool hasSettledTacticalHold = false,
         bool relocating = false,
         bool hasSettledPose = false,
-        TacticalStance settledPose = TacticalStance.Crouched)
+        TacticalStance settledPose = TacticalStance.Crouched,
+        bool coverReload = false,
+        TacticalStance coverReloadPose = TacticalStance.Crouched)
     {
         if (contactDive && !flameEvading)
         {
@@ -942,6 +951,11 @@ internal static class Program
         {
             owner = PoseOwner.Suppression;
             return TacticalStance.Crouched;
+        }
+        if (coverReload && !flameEvading)
+        {
+            owner = PoseOwner.CoverReload;
+            return coverReloadPose;
         }
         if (PoseMovementContractCore.MovementOwnsPose(
                 committedMovement, movementHalted, locomotionConfirmed))
@@ -1545,6 +1559,21 @@ internal static class Program
             "The same fighting halt repeatedly restarted its spacing step.");
         False(HaltSpacingCore.ShouldAttempt(false, MovementOwner.PinnedHold),
             "A pinned halt was incorrectly treated as a spacing episode.");
+        True(HaltSpacingCore.RelocationAllowsAttempt(
+                relocating: true,
+                MovementOwner.EngagementHold,
+                contactMovementInhibited: true),
+            "A cover route paused for stationary close-contact fire could not separate.");
+        False(HaltSpacingCore.RelocationAllowsAttempt(
+                relocating: true,
+                MovementOwner.EngagementHold,
+                contactMovementInhibited: false),
+            "An active cover run was interrupted without a contact-owned halt.");
+        False(HaltSpacingCore.RelocationAllowsAttempt(
+                relocating: true,
+                MovementOwner.CoverHold,
+                contactMovementInhibited: true),
+            "A relocating soldier used a non-contact cover hold to replace his route.");
         False(HaltSpacingCore.EndsEpisode(MovementOwner.CoverHold),
             "A handoff between fighting halts rearmed spacing and could create a loop.");
         True(HaltSpacingCore.EndsEpisode(MovementOwner.OrderedMove),
@@ -1559,6 +1588,109 @@ internal static class Program
                 MovementOwner.OrderedMove,
                 HaltSpacingCore.RearmTravelMeters),
             "Physical movement did not rearm spacing for a later fighting halt.");
+    }
+
+    private static void FourSimultaneousFiringHaltsChooseDistinctSpacingTargets()
+    {
+        const float configuredSeparation = 3.02f;
+        var self = new MapPoint(20f, 20f);
+        var threat = new MapPoint(20f, 50f);
+        var selectedTargets = new List<MapPoint>();
+
+        // Model four co-located soldiers resolving their halt in one decision pass.
+        // Each already-selected destination is the pure-core equivalent of an active
+        // runtime HaltSpacingTarget claim.
+        for (var soldierIndex = 0; soldierIndex < 4; soldierIndex++)
+        {
+            var assigned = false;
+            for (var candidateIndex = 0;
+                 candidateIndex < HaltSpacingCore.CandidateDirectionCount;
+                 candidateIndex++)
+            {
+                if (!HaltSpacingCore.TryResolveCandidateStep(
+                        self,
+                        self,
+                        threat,
+                        true,
+                        configuredSeparation,
+                        candidateIndex,
+                        out var step))
+                {
+                    continue;
+                }
+
+                var target = new MapPoint(self.X + step.X, self.Z + step.Z);
+                var conflicts = false;
+                foreach (var selected in selectedTargets)
+                {
+                    if (HaltSpacingCore.DestinationsConflict(
+                            target, selected, configuredSeparation))
+                    {
+                        conflicts = true;
+                        break;
+                    }
+                }
+
+                if (conflicts)
+                    continue;
+
+                selectedTargets.Add(target);
+                assigned = true;
+                break;
+            }
+
+            True(assigned,
+                $"Co-located firing soldier {soldierIndex + 1} could not claim a distinct spacing target.");
+        }
+
+        Equal(4, selectedTargets.Count,
+            "Four simultaneous firing halts did not produce four distinct targets.");
+        foreach (var target in selectedTargets)
+        {
+            var stepDistance = Distance(self, target);
+            True(stepDistance > configuredSeparation,
+                "A spacing target remained on the inclusive occupancy boundary.");
+            True(stepDistance <= configuredSeparation + HaltSpacingCore.DestinationClearanceMeters + 0.001f,
+                "A spacing correction exceeded its bounded clearance step.");
+            True(target.Z <= self.Z + 0.001f,
+                "A spacing fallback moved a firing soldier toward the visible threat.");
+        }
+
+        for (var first = 0; first < selectedTargets.Count; first++)
+        {
+            for (var second = first + 1; second < selectedTargets.Count; second++)
+            {
+                False(HaltSpacingCore.DestinationsConflict(
+                        selectedTargets[first],
+                        selectedTargets[second],
+                        configuredSeparation),
+                    "Two simultaneous firing halts claimed overlapping destinations.");
+            }
+        }
+
+        // Real transforms are seldom bit-identical. A rear-side candidate may initially
+        // angle a few centimetres toward the nearest body yet still finish beyond the
+        // required gap; judge the destination rather than rejecting it from that first dot.
+        var nearNeighbour = new MapPoint(self.X, self.Z - 0.1f);
+        for (var candidateIndex = 0;
+             candidateIndex < HaltSpacingCore.CandidateDirectionCount;
+             candidateIndex++)
+        {
+            True(HaltSpacingCore.TryResolveCandidateStep(
+                    self,
+                    nearNeighbour,
+                    threat,
+                    true,
+                    configuredSeparation,
+                    candidateIndex,
+                    out var nearStep),
+                $"Near-coincident firing halt rejected safe candidate {candidateIndex + 1}.");
+            False(HaltSpacingCore.DestinationsConflict(
+                    new MapPoint(self.X + nearStep.X, self.Z + nearStep.Z),
+                    nearNeighbour,
+                    configuredSeparation),
+                $"Near-coincident candidate {candidateIndex + 1} ended inside the required gap.");
+        }
     }
 
     private static void AuthoredCoverRemainsAFallbackWhenBallisticsCannotClassifyIt()
@@ -2499,6 +2631,115 @@ internal static class Program
             "Cover that only protected a prone soldier selected a higher posture.");
     }
 
+    private static void CoverReloadsUseTheCoverDerivedLowPosture()
+    {
+        Equal(CoverPostureChoice.Crouched,
+            InfantryCoverDecisionCore.SelectReloadPosture(CoverPostureChoice.Standing),
+            "A standing firing-height cover pose left a reloading soldier exposed.");
+        Equal(CoverPostureChoice.Crouched,
+            InfantryCoverDecisionCore.SelectReloadPosture(CoverPostureChoice.Crouched),
+            "A crouched cover pose changed during reload.");
+        Equal(CoverPostureChoice.Prone,
+            InfantryCoverDecisionCore.SelectReloadPosture(CoverPostureChoice.Prone),
+            "A prone-only cover pose raised a reloading soldier out of protection.");
+        Equal(CoverPostureChoice.Crouched,
+            InfantryCoverDecisionCore.SelectReloadPosture((CoverPostureChoice)int.MaxValue),
+            "An unknown cover pose did not fail safe to crouch during reload.");
+
+        var acquiredAfterRetry = InfantryCoverDecisionCore.ShouldAcquireReloadPosture(
+            isReloading: true,
+            alreadyOwned: false,
+            onUsableCover: false);
+        False(acquiredAfterRetry,
+            "A reload claimed cover posture before the soldier reached usable cover.");
+        acquiredAfterRetry |= InfantryCoverDecisionCore.ShouldAcquireReloadPosture(
+            isReloading: true,
+            alreadyOwned: acquiredAfterRetry,
+            onUsableCover: true);
+        True(acquiredAfterRetry,
+            "An active reload was not allowed to recover after cover status missed its first frame.");
+        True(InfantryCoverDecisionCore.ShouldAcquireReloadPosture(
+                isReloading: true,
+                alreadyOwned: false,
+                onUsableCover: true),
+            "A valid pre-reload cover snapshot was not accepted after Reload confirmed the action.");
+        False(InfantryCoverDecisionCore.ShouldAcquireReloadPosture(
+                isReloading: false,
+                alreadyOwned: false,
+                onUsableCover: true),
+            "A completed reload acquired a new cover posture.");
+        False(InfantryCoverDecisionCore.ShouldAcquireReloadPosture(
+                isReloading: true,
+                alreadyOwned: true,
+                onUsableCover: true),
+            "An acquired reload posture was needlessly re-evaluated.");
+
+        True((int)PoseOwner.CoverReload > (int)PoseOwner.MovementPose,
+            "A transient movement-pose lease delayed the covered reload posture.");
+        True((int)PoseOwner.CoverReload < (int)PoseOwner.Suppression,
+            "The covered reload posture outranked suppression safety.");
+        True((int)PoseOwner.CoverReload < (int)PoseOwner.ContactDive,
+            "The covered reload posture outranked the committed contact dive.");
+
+        Equal(TacticalStance.Prone,
+            ResolvePoseWithMovementContract(
+                MovementOwner.OrderedMove, movementHalted: false, TacticalStance.Standing,
+                out var reloadOwner, coverReload: true,
+                coverReloadPose: TacticalStance.Prone),
+            "Movement raised a prone-cover reloader before the magazine was seated.");
+        Equal(PoseOwner.CoverReload, reloadOwner,
+            "The covered reload did not own its latched protective pose.");
+        Equal(TacticalStance.Crouched,
+            ResolvePoseWithMovementContract(
+                MovementOwner.OrderedMove, movementHalted: false, TacticalStance.Standing,
+                out var pinnedOwner, pinnedOrBurning: true, coverReload: true,
+                coverReloadPose: TacticalStance.Prone),
+            "A covered reload blocked the pinned safety posture.");
+        Equal(PoseOwner.Suppression, pinnedOwner,
+            "Suppression lost ownership during a covered reload.");
+        Equal(TacticalStance.Prone,
+            ResolvePoseWithMovementContract(
+                MovementOwner.OrderedMove, movementHalted: false, TacticalStance.Standing,
+                out var diveOwner, contactDive: true, coverReload: true),
+            "A covered reload blocked the committed contact dive.");
+        Equal(PoseOwner.ContactDive, diveOwner,
+            "The contact dive lost ownership during a covered reload.");
+        Equal(TacticalStance.Standing,
+            ResolvePoseWithMovementContract(
+                MovementOwner.HazardEscape, movementHalted: false, TacticalStance.Prone,
+                out var hazardOwner, flameEvading: true, coverReload: true,
+                coverReloadPose: TacticalStance.Prone),
+            "A covered reload prevented a soldier from escaping flame.");
+        Equal(PoseOwner.MovementPose, hazardOwner,
+            "Flame escape did not regain pose ownership during a covered reload.");
+
+        var latchedOwner = PoseOwner.CoverReload;
+        var latchedStance = TacticalStance.Prone;
+        var latchHoldUntil = 100f;
+        True(StepLatch(
+                ref latchedOwner, ref latchedStance, ref latchHoldUntil,
+                PoseOwner.MovementPose, TacticalStance.Standing,
+                measuredStand: false, t: 1f),
+            "The reload pose latch delayed a standing flame escape.");
+        Equal(PoseOwner.MovementPose, latchedOwner,
+            "The flame escape did not take the committed reload pose latch.");
+        Equal(TacticalStance.Standing, latchedStance,
+            "The committed reload pose kept a flame-evading soldier prone.");
+
+        latchedOwner = PoseOwner.CoverReload;
+        latchedStance = TacticalStance.Prone;
+        latchHoldUntil = 100f;
+        True(StepLatch(
+                ref latchedOwner, ref latchedStance, ref latchHoldUntil,
+                PoseOwner.CoverEvaluation, TacticalStance.Crouched,
+                measuredStand: false, t: 1f),
+            "The reload pose latch delayed normal cover posture after reload completion.");
+        Equal(PoseOwner.CoverEvaluation, latchedOwner,
+            "Normal cover ownership did not resume when the reload ended.");
+        Equal(TacticalStance.Crouched, latchedStance,
+            "The completed reload retained a stale prone posture.");
+    }
+
     private static void BallisticCoverRatesMaterialAndThickness()
     {
         var budget = BallisticCoverDecisionCore.RepresentativeOrdinaryRoundBudget;
@@ -2730,6 +2971,18 @@ internal static class Program
             "An attacker without an objective route was forced to wander.");
     }
 
+    private static void CoveredAttackHaltRemainsBounded()
+    {
+        Equal(15f, CombatMovementPolicyCore.ResolveOnCoverAttackHaltSeconds(6f),
+            "A short configured halt lost the longer covered firing opportunity.");
+        Equal(30f, CombatMovementPolicyCore.ResolveOnCoverAttackHaltSeconds(12f),
+            "The original covered attack-halt ceiling changed.");
+        Equal(30f, CombatMovementPolicyCore.ResolveOnCoverAttackHaltSeconds(22.538f),
+            "The recommended setting allowed covered attackers to stand idle for nearly a minute.");
+        Equal(30f, CombatMovementPolicyCore.ResolveOnCoverAttackHaltSeconds(30f),
+            "The maximum setting bypassed the covered attack-halt ceiling.");
+    }
+
     private static void AttackAdvanceAlternatesBoundAndFiringPhases()
     {
         Equal(7f, CombatMovementPolicyCore.ResolveAttackFiringHoldSeconds(
@@ -2821,6 +3074,62 @@ internal static class Program
                 isDefendOrder: false,
                 isInsideDefendArea: true),
             "A non-defend squad order lost its ordinary movement behavior.");
+    }
+
+    private static void ObjectiveDefenseKeepsACoreGarrisonOnTheCapturePoint()
+    {
+        var objective = new MapPoint(100f, 200f);
+        var area = ObjectiveDefenseAreaCore.Build(
+            objective,
+            objectiveRadius: 30f,
+            preferredCenter: new MapPoint(145f, 200f),
+            coreGarrison: true);
+
+        Equal(objective, area.Center,
+            "Dense cover behind an objective displaced its core garrison.");
+        True(area.HoldRadius > 0f && area.HoldRadius <= 30f,
+            "The core garrison received an invalid hold radius.");
+    }
+
+    private static void ObjectiveDefenseClampsSurplusSectorsInsideTheCaptureRadius()
+    {
+        var objective = new MapPoint(0f, 0f);
+        const float objectiveRadius = 30f;
+        var area = ObjectiveDefenseAreaCore.Build(
+            objective,
+            objectiveRadius,
+            preferredCenter: new MapPoint(100f, 0f),
+            coreGarrison: false);
+        var dx = area.Center.X - objective.X;
+        var dz = area.Center.Z - objective.Z;
+        var centerOffset = MathF.Sqrt(dx * dx + dz * dz);
+
+        True(centerOffset + area.HoldRadius <= objectiveRadius + 0.001f,
+            "A surplus defensive sector extended beyond the capture radius.");
+        Equal(
+            objectiveRadius - area.HoldRadius,
+            ObjectiveDefenseAreaCore.MaximumAnchorOffset(objectiveRadius, area.HoldRadius),
+            "Cover-anchor eligibility did not use the same objective boundary.");
+    }
+
+    private static void ObjectiveAttackKeepsOnePressureSquadAndAlternatesWideFlanks()
+    {
+        var roles = Enumerable.Range(0, 5)
+            .Select(index => ObjectiveAttackPlanCore.SelectRole(index, 5, objectiveId: 20))
+            .ToArray();
+
+        Equal(1, roles.Count(role => !role.IsFlank),
+            "An attack group received more than one direct pressure role.");
+        False(roles[0].IsFlank,
+            "The first squad did not retain the direct pressure role.");
+        SequenceEqual(new[] { -1, 1, -1, 1 }, roles.Skip(1).Select(role => role.Side),
+            "Flanking squads did not alternate sides.");
+        True(roles.Skip(1).All(role => role.AngleDegrees == 58f),
+            "A flanking squad did not receive the wider approach angle.");
+
+        var oppositeObjective = ObjectiveAttackPlanCore.SelectRole(1, 2, objectiveId: 21);
+        Equal(1, oppositeObjective.Side,
+            "Neighboring objective groups always opened their flank on the same side.");
     }
 
     private static void UnchangedSquadIntentDoesNotRestartNativeMovement()
@@ -3141,6 +3450,25 @@ internal static class Program
         False(DefensivePositioningCore.IsInsideArea(
                 new MapPoint(float.NaN, 0f), center, 25f, 10f),
             "Invalid defensive geometry was accepted.");
+
+        var anchor = new MapPoint(0f, 0f);
+        var neighboringSector = new MapPoint(90f, 0f);
+        var groupedAreas = new[]
+        {
+            new DefensiveAreaBounds(anchor, 96f),
+            new DefensiveAreaBounds(neighboringSector, 96f)
+        };
+        var gunInNeighboringOuterArea = new MapPoint(180f, 0f);
+        False(DefensivePositioningCore.IsInsideArea(
+                gunInNeighboringOuterArea, anchor, 96f),
+            "The regression gun unexpectedly fell inside the anchor sector.");
+        True(DefensivePositioningCore.IsInsideAnyArea(
+                gunInNeighboringOuterArea, groupedAreas),
+            "A gun in the neighboring sector's unique outer area was omitted from the grouped inventory.");
+        False(DefensivePositioningCore.IsInsideAnyArea(
+                gunInNeighboringOuterArea,
+                new[] { new DefensiveAreaBounds(new MapPoint(400f, 0f), 96f) }),
+            "A gun outside the relocated hold-area union kept an obsolete defensive lease.");
     }
 
     private static void DefendersRequireProtectionBeforeAnchoringCover()
@@ -3617,21 +3945,35 @@ internal static class Program
             "Invalid cover coordinates conflicted with a valid reservation.");
     }
 
+    private static void SpatialCoverReservationsDistinguishBuildingFloors()
+    {
+        var position = new MapPoint(10f, -5f);
+        True(InfantryCoverDecisionCore.CoverPositionsConflict(
+                position, 0f, position, 1.5f, 2.5f),
+            "Minor terrain elevation let two soldiers occupy the same cover slot.");
+        False(InfantryCoverDecisionCore.CoverPositionsConflict(
+                position, 0f, position, 3f, 2.5f),
+            "A ground-floor soldier blocked the second-floor cover slot above him.");
+        False(InfantryCoverDecisionCore.CoverPositionsConflict(
+                position, float.NaN, position, 3f, 2.5f),
+            "An invalid elevation created a false cross-floor reservation conflict.");
+    }
+
     private static TankEngagementInput TankInput(
-        bool hasArmoredTarget = true,
+        bool hasAntiArmorThreat = true,
         float distance = 150f,
         float timeSinceVisible = 0f,
         float lifeFraction = 1f,
         bool hullFacesThreat = true,
-        bool reverseAvailable = true,
+        bool canStartReverse = true,
         bool rearBlocked = false,
         bool reverseTimerElapsed = true,
         float standoff = 180f,
         float reverseDistance = 100f,
         float damagedThreshold = 0.45f)
         => new(
-            hasArmoredTarget, distance, timeSinceVisible, lifeFraction, hullFacesThreat,
-            reverseAvailable, rearBlocked, reverseTimerElapsed, standoff, reverseDistance,
+            hasAntiArmorThreat, distance, timeSinceVisible, lifeFraction, hullFacesThreat,
+            canStartReverse, rearBlocked, reverseTimerElapsed, standoff, reverseDistance,
             damagedThreshold);
 
     private static void TankEngagementEntersAndReleasesHoldWithHysteresis()
@@ -3715,18 +4057,23 @@ internal static class Program
                     rearBlocked: false)),
             "A side-on tank reversed before orienting its frontal armor to the threat.");
 
-        // Once reversing, a blocked rear (or lost reverse capability) must end the
-        // retreat immediately rather than loop a blind reverse forever.
+        // Once reversing, a blocked rear must end the retreat immediately rather
+        // than loop a blind reverse forever.
         Equal(TankEngagementState.Hold,
             TankEngagementDecisionCore.NextState(
                 TankEngagementState.Reverse,
                 TankInput(distance: 90f, reverseTimerElapsed: false, rearBlocked: true)),
             "Reverse kept looping after its rear became blocked.");
+        Equal(TankEngagementState.Reverse,
+            TankEngagementDecisionCore.NextState(
+                TankEngagementState.Reverse,
+                TankInput(distance: 90f, reverseTimerElapsed: false, canStartReverse: false)),
+            "An active forced reverse ended merely because its start cooldown was in use.");
         Equal(TankEngagementState.Hold,
             TankEngagementDecisionCore.NextState(
                 TankEngagementState.Reverse,
-                TankInput(distance: 90f, reverseTimerElapsed: false, reverseAvailable: false)),
-            "Reverse kept looping after reverse capability was lost.");
+                TankInput(distance: 90f, reverseTimerElapsed: true, canStartReverse: false)),
+            "A lapsed reverse stayed active when it could not be re-armed.");
         Equal(TankEngagementState.Hold,
             TankEngagementDecisionCore.NextState(
                 TankEngagementState.Reverse,
@@ -3744,21 +4091,91 @@ internal static class Program
         Equal(TankEngagementState.Follow,
             TankEngagementDecisionCore.NextState(
                 TankEngagementState.Reverse,
-                TankInput(hasArmoredTarget: false, distance: 90f, reverseTimerElapsed: false)),
+                TankInput(hasAntiArmorThreat: false, distance: 90f, reverseTimerElapsed: false)),
             "Reverse outlived a target that no longer exists.");
     }
 
-    private static void TankHullOrientationRequiresAVisibleArmoredTarget()
+    private static void TankHullOrientationRecognizesVisibleTankKillingThreats()
     {
         False(TankEngagementDecisionCore.ShouldOrientHull(
-                hasVisibleArmoredTarget: false, hullFacesThreat: false),
-            "Remembered engagement state authorized a hull pivot without a visible tank.");
+                hasVisibleTankKillingThreat: false, hullFacesThreat: false),
+            "Remembered engagement state authorized a hull pivot without a visible threat.");
         False(TankEngagementDecisionCore.ShouldOrientHull(
-                hasVisibleArmoredTarget: true, hullFacesThreat: true),
+                hasVisibleTankKillingThreat: true, hullFacesThreat: true),
             "Hull rotation was requested while already facing the threat.");
         True(TankEngagementDecisionCore.ShouldOrientHull(
-                hasVisibleArmoredTarget: true, hullFacesThreat: false),
-            "A spotted tank outside the frontal arc did not authorize hull orientation.");
+                hasVisibleTankKillingThreat: true, hullFacesThreat: false),
+            "A spotted tank-killing threat outside the frontal arc did not authorize hull orientation.");
+
+        True(TankEngagementDecisionCore.IsTankKillingThreat(
+                isArmoredVehicle: true,
+                isStaticWeapon: false,
+                hasLivingGunner: false,
+                targetsVehicles: false,
+                hasArmorPiercingAmmo: false),
+            "An enemy tank was not classified as a hull-facing threat.");
+        var crewedAtThreat = TankEngagementDecisionCore.IsTankKillingThreat(
+                isArmoredVehicle: false,
+                isStaticWeapon: true,
+                hasLivingGunner: true,
+                targetsVehicles: true,
+                hasArmorPiercingAmmo: true);
+        True(crewedAtThreat,
+            "A crewed AP anti-tank emplacement was not classified as a hull-facing threat.");
+        True(TankEngagementDecisionCore.ShouldOrientHull(
+                hasVisibleTankKillingThreat: crewedAtThreat, hullFacesThreat: false),
+            "A side-on crewed AP anti-tank emplacement did not authorize hull orientation.");
+        False(TankEngagementDecisionCore.IsTankKillingThreat(
+                isArmoredVehicle: false,
+                isStaticWeapon: true,
+                hasLivingGunner: true,
+                targetsVehicles: true,
+                hasArmorPiercingAmmo: false),
+            "A static gun without armor-piercing ammunition triggered tank survival tactics.");
+        False(TankEngagementDecisionCore.IsTankKillingThreat(
+                isArmoredVehicle: false,
+                isStaticWeapon: true,
+                hasLivingGunner: false,
+                targetsVehicles: true,
+                hasArmorPiercingAmmo: true),
+            "An abandoned anti-tank gun triggered tank survival tactics.");
+        False(TankEngagementDecisionCore.IsTankKillingThreat(
+                isArmoredVehicle: false,
+                isStaticWeapon: true,
+                hasLivingGunner: true,
+                targetsVehicles: false,
+                hasArmorPiercingAmmo: true),
+            "A plane-only static gun was misclassified as a tank-killing threat.");
+        False(TankEngagementDecisionCore.IsTankKillingThreat(
+                isArmoredVehicle: false,
+                isStaticWeapon: false,
+                hasLivingGunner: true,
+                targetsVehicles: true,
+                hasArmorPiercingAmmo: true),
+            "An armed truck was misclassified as a static anti-tank emplacement.");
+
+        Equal(TankEngagementState.Hold,
+            TankEngagementDecisionCore.NextState(
+                TankEngagementState.Follow,
+                TankInput(hasAntiArmorThreat: crewedAtThreat, distance: 90f, hullFacesThreat: false)),
+            "A close side-on anti-armor threat did not enter Hold before turning.");
+        Equal(TankEngagementState.Hold,
+            TankEngagementDecisionCore.NextState(
+                TankEngagementState.Hold,
+                TankInput(hasAntiArmorThreat: crewedAtThreat, distance: 90f, hullFacesThreat: false)),
+            "A close side-on tank reversed before its frontal armor faced the threat.");
+        Equal(TankEngagementState.Reverse,
+            TankEngagementDecisionCore.NextState(
+                TankEngagementState.Hold,
+                TankInput(hasAntiArmorThreat: crewedAtThreat, distance: 90f, hullFacesThreat: true)),
+            "A close tank could not reverse straight back after completing its hull turn.");
+
+        Near(1f, TankEngagementDecisionCore.HullOrientationSteering(90f, 30f), 0.001f,
+            "A threat to the right did not receive a decisive right steering command.");
+        Near(-1f, TankEngagementDecisionCore.HullOrientationSteering(-90f, 30f), 0.001f,
+            "A threat to the left did not receive a decisive left steering command.");
+        Near(0f, TankEngagementDecisionCore.HullOrientationSteering(30f, 30f), 0.001f,
+            "Hull steering continued on the configured frontal-arc boundary.");
     }
 
     private static void TankStallWatchdogRecoversResetsAndGivesUp()

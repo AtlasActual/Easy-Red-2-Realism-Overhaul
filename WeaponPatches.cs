@@ -6,20 +6,36 @@ namespace ER2RealismOverhaul;
 [HarmonyPatch(typeof(GenericGun), nameof(GenericGun.UseTracers))]
 internal static class GenericGunTracerPatch
 {
+    private static bool _loggedFailure;
+
     [HarmonyPostfix]
     private static void Postfix(GenericGun __instance, ref bool __result)
     {
-        if (!__result || !Settings.TracerReductionEnabled.Value ||
-            !MultiplayerAuthority.CanMutateGameplay())
+        var nativeResult = __result;
+        try
         {
-            return;
-        }
+            if (!__result || !Settings.TracerReductionEnabled.Value ||
+                !MultiplayerAuthority.CanMutateGameplay())
+            {
+                return;
+            }
 
-        __result = TracerRetentionCore.ShouldKeep(
-            __result,
-            HandheldWeaponClassifier.IsMachineGun(__instance, true),
-            Settings.MachineGunTracerRetention.Value,
-            UnityEngine.Random.value);
+            __result = TracerRetentionCore.ShouldKeep(
+                __result,
+                HandheldWeaponClassifier.IsMachineGun(__instance, true),
+                Settings.MachineGunTracerRetention.Value,
+                UnityEngine.Random.value);
+        }
+        catch (Exception ex)
+        {
+            __result = nativeResult;
+            if (!_loggedFailure)
+            {
+                _loggedFailure = true;
+                Plugin.LogSource.LogWarning(
+                    $"Handheld tracer classification failed open so weapon fire can continue: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
     }
 }
 

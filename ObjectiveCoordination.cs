@@ -8,8 +8,8 @@ namespace ER2RealismOverhaul;
 
 /// <summary>
 /// A deliberately small objective-order layer. It spreads autonomous infantry
-/// squads across active objectives, gives part of each attacking group a distinct
-/// approach angle, and keeps at least one defending squad on every objective when
+/// squads across active objectives, keeps one squad on each attack's pressure axis
+/// while the others alternate wide flanks, and keeps at least one defending squad on every objective when
 /// enough squads exist. It does not stage attacks, reserve units, claim command
 /// channels, or suppress Easy Red 2's native squad-leader routine.
 /// </summary>
@@ -18,9 +18,7 @@ internal static class ObjectiveCoordination
     private const float PlanningIntervalSeconds = 24f;
     private const float PressureChangeThreshold = 0.02f;
     private const float PressureMemorySeconds = 45f;
-    private const float FlankAngleDegrees = 38f;
     private const int DefensiveCoverCandidateLimit = 64;
-    private const float DefensiveCoverObjectiveToleranceMeters = 8f;
     private const float DefensiveCoverAnchorSpacingMeters = 22f;
 
     private static readonly Dictionary<int, OrderStamp> LastOrders = new();
@@ -266,9 +264,10 @@ internal static class ObjectiveCoordination
             {
                 if (attacking)
                 {
-                    var flank = assigned.Count >= 2 && index % 2 == 1;
-                    IssueAttack(assigned[index], target, flank, index / 2);
-                    if (flank)
+                    var role = ObjectiveAttackPlanCore.SelectRole(
+                        index, assigned.Count, target.Id);
+                    IssueAttack(assigned[index], target, role);
+                    if (role.IsFlank)
                         flankCount++;
                 }
                 else
@@ -361,8 +360,7 @@ internal static class ObjectiveCoordination
     private static void IssueAttack(
         SquadInfo squad,
         ObjectiveInfo objective,
-        bool flank,
-        int flankOrdinal)
+        ObjectiveAttackRole role)
     {
         var direction = Flatten(objective.Position - squad.Position);
         if (direction.sqrMagnitude < 1f)
@@ -370,15 +368,14 @@ internal static class ObjectiveCoordination
         else
             direction.Normalize();
 
-        if (flank)
-        {
-            var side = flankOrdinal % 2 == 0 ? -1f : 1f;
-            direction = RotateHorizontal(direction, side * FlankAngleDegrees);
-        }
+        if (role.IsFlank)
+            direction = RotateHorizontal(direction, role.Side * role.AngleDegrees);
 
         var proposed = new OrderStamp(
             objective.Id,
-            flank ? CoordinatedOrder.Flank : CoordinatedOrder.DirectAttack,
+            role.IsFlank
+                ? role.Side < 0 ? CoordinatedOrder.FlankLeft : CoordinatedOrder.FlankRight
+                : CoordinatedOrder.DirectAttack,
             objective.Position,
             objective.Radius,
             Vector3.zero);
@@ -393,7 +390,9 @@ internal static class ObjectiveCoordination
                 NativeDestination = squad.Squad.moveOrderPosition
             };
             AiState.Trace(
-                $"Objective order: squad {squad.Id} {(flank ? "flank" : "attack")} -> {objective.Id}");
+                $"Objective order: squad {squad.Id} " +
+                $"{(role.IsFlank ? $"flank {(role.Side < 0 ? "left" : "right")} {role.AngleDegrees:0}°" : "attack")} " +
+                $"-> {objective.Id}");
         }
         catch (ObjectCollectedException)
         {
@@ -408,16 +407,24 @@ internal static class ObjectiveCoordination
         int sectorCount,
         List<Vector3> existingAnchors)
     {
-        var destination = objective.Position;
-        if (sectorCount > 1)
+        var coreGarrison = sectorIndex == 0;
+        var preferredDestination = objective.Position;
+        if (!coreGarrison && sectorCount > 1)
         {
             var ringRadius = Mathf.Min(55f, objective.Radius * 0.45f);
             var angle = (2f * Mathf.PI * sectorIndex / sectorCount) +
                         StableAngleOffset(objective.Id);
-            destination += new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * ringRadius;
+            preferredDestination +=
+                new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * ringRadius;
         }
 
-        var holdRadius = Mathf.Clamp(objective.Radius * 0.45f, 16f, 35f);
+        var area = ObjectiveDefenseAreaCore.Build(
+            new MapPoint(objective.Position.x, objective.Position.z),
+            objective.Radius,
+            new MapPoint(preferredDestination.x, preferredDestination.z),
+            coreGarrison);
+        var destination = new Vector3(area.Center.X, objective.Position.y, area.Center.Z);
+        var holdRadius = area.HoldRadius;
         var towardExpectedThreat = Flatten(destination - objective.Position);
         if (towardExpectedThreat.sqrMagnitude < 1f)
         {
@@ -429,17 +436,28 @@ internal static class ObjectiveCoordination
             towardExpectedThreat.Normalize();
         }
 
-        var coverAnchored = TryFindDefensiveCoverAnchor(
+        // The core garrison deliberately remains centered on the capture point.
+        // Native HoldArea and the soldier-level defensive inventory still place
+        // its members in authored cover inside that area; only the squad's center
+        // is protected from being dragged behind a dense building or trench line.
+        var coverAnchor = destination;
+        var coverAnchored = !coreGarrison && TryFindDefensiveCoverAnchor(
                 squad.Faction,
                 objective,
                 destination,
                 towardExpectedThreat,
                 holdRadius,
                 existingAnchors,
-                out var coverAnchor);
+                out coverAnchor);
         if (coverAnchored)
         {
-            destination = coverAnchor;
+            area = ObjectiveDefenseAreaCore.Build(
+                new MapPoint(objective.Position.x, objective.Position.z),
+                objective.Radius,
+                new MapPoint(coverAnchor.x, coverAnchor.z),
+                coreGarrison: false);
+            destination = new Vector3(area.Center.X, objective.Position.y, area.Center.Z);
+            holdRadius = area.HoldRadius;
         }
 
         existingAnchors.Add(destination);
@@ -497,9 +515,9 @@ internal static class ObjectiveCoordination
             if (covers == null)
                 return false;
 
-            var objectiveLimit =
-                objective.Radius + DefensiveCoverObjectiveToleranceMeters;
-            var objectiveLimitSqr = objectiveLimit * objectiveLimit;
+            var maximumAnchorOffset = ObjectiveDefenseAreaCore.MaximumAnchorOffset(
+                objective.Radius, holdRadius);
+            var maximumAnchorOffsetSqr = maximumAnchorOffset * maximumAnchorOffset;
             var candidates = new List<DefensiveCoverCandidate>();
             var examined = 0;
             foreach (var rawCover in covers)
@@ -517,7 +535,7 @@ internal static class ObjectiveCoordination
                             cover, out var position) ||
                         !IsFinite(position) ||
                         HorizontalDistanceSquared(position, objective.Position) >
-                        objectiveLimitSqr)
+                        maximumAnchorOffsetSqr)
                     {
                         continue;
                     }
@@ -715,7 +733,8 @@ internal static class ObjectiveCoordination
     private enum CoordinatedOrder
     {
         DirectAttack,
-        Flank,
+        FlankLeft,
+        FlankRight,
         Defend
     }
 }

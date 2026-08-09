@@ -17,6 +17,7 @@ internal sealed class PlayerViewFeaturesController : MonoBehaviour
     private const float CompassBackgroundAlpha = 0.62f;
     private const int CompassBackgroundFadeSteps = 20;
     private const float MilsPerCircle = 6400f;
+    private const float NativeStaminaMaximum = 100f;
 
     private static PlayerViewFeaturesController? _instance;
 
@@ -35,6 +36,7 @@ internal sealed class PlayerViewFeaturesController : MonoBehaviour
     private int _lastRotationCaptureFrame = -1;
     private string _lastErrorSignature = string.Empty;
     private GUIStyle? _compassLabelStyle;
+    private GUIStyle? _staminaLabelStyle;
 
     internal static bool BinocularsActive => _instance != null && _instance._binocularsActive;
 
@@ -94,18 +96,24 @@ internal sealed class PlayerViewFeaturesController : MonoBehaviour
 
     private void OnGUI()
     {
-        if ((!_binocularsActive && !_compassVisible) ||
-            Event.current == null ||
+        if (Event.current == null ||
             Event.current.type != EventType.Repaint)
             return;
 
         try
         {
+            var staminaBarVisible = CanShowStaminaBar();
+            if (!_binocularsActive && !_compassVisible && !staminaBarVisible)
+                return;
+
             if (_binocularsActive)
                 DrawBinocularOverlay();
 
             if (_compassVisible)
                 DrawCompass();
+
+            if (staminaBarVisible)
+                DrawStaminaBar();
         }
         catch (Exception ex)
         {
@@ -275,6 +283,19 @@ internal sealed class PlayerViewFeaturesController : MonoBehaviour
     }
 
     [HideFromIl2Cpp]
+    private static bool CanShowStaminaBar()
+    {
+        if (!Settings.PlayerStaminaBarEnabled.Value ||
+            ResourcesManager.UsingGUIExceptEndBattle())
+            return false;
+
+        var soldier = Soldier.CurrentControlledSoldierOrNull();
+        return soldier != null &&
+               soldier.NotDeadAndSurrendered() &&
+               !soldier.IsOnVehicle();
+    }
+
+    [HideFromIl2Cpp]
     private static bool IsFreeLookKeyHeld() =>
         Input.GetKey(Settings.FreeLookKey.Value) ||
         (Settings.FreeLookKey.Value == KeyCode.LeftAlt && Input.GetKey(KeyCode.RightAlt));
@@ -369,6 +390,47 @@ internal sealed class PlayerViewFeaturesController : MonoBehaviour
 
         GUI.color = new Color(1f, 0.84f, 0.25f, 1f);
         GUI.DrawTexture(new Rect(centerX - 1.5f, top, 3f, height), Texture2D.whiteTexture);
+        GUI.color = previousColor;
+    }
+
+    [HideFromIl2Cpp]
+    private void DrawStaminaBar()
+    {
+        var soldier = Soldier.CurrentControlledSoldierOrNull();
+        if (soldier == null)
+            return;
+
+        var screenWidth = (float)Screen.width;
+        var screenHeight = (float)Screen.height;
+        if (screenWidth <= 0f || screenHeight <= 0f)
+            return;
+
+        var width = Mathf.Clamp(screenWidth * 0.18f, 180f, 260f);
+        const float height = 10f;
+        var left = (screenWidth - width) * 0.5f;
+        var top = screenHeight - 112f;
+        var staminaFraction = Mathf.Clamp01(soldier.staminaCount / NativeStaminaMaximum);
+        var previousColor = GUI.color;
+
+        GUI.color = new Color(0f, 0f, 0f, 0.76f);
+        GUI.DrawTexture(new Rect(left - 2f, top - 2f, width + 4f, height + 4f), Texture2D.whiteTexture);
+        GUI.color = new Color(0.16f, 0.16f, 0.14f, 0.82f);
+        GUI.DrawTexture(new Rect(left, top, width, height), Texture2D.whiteTexture);
+
+        if (staminaFraction > 0f)
+        {
+            GUI.color = Color.Lerp(
+                new Color(0.78f, 0.16f, 0.10f, 0.96f),
+                new Color(0.96f, 0.78f, 0.22f, 0.96f),
+                staminaFraction);
+            GUI.DrawTexture(
+                new Rect(left, top, width * staminaFraction, height),
+                Texture2D.whiteTexture);
+        }
+
+        EnsureStaminaStyle();
+        GUI.color = Color.white;
+        GUI.Label(new Rect(left, top - 20f, width, 18f), "STAMINA", _staminaLabelStyle!);
         GUI.color = previousColor;
     }
 
@@ -570,6 +632,20 @@ internal sealed class PlayerViewFeaturesController : MonoBehaviour
     }
 
     [HideFromIl2Cpp]
+    private void EnsureStaminaStyle()
+    {
+        if (_staminaLabelStyle != null)
+            return;
+
+        _staminaLabelStyle = new GUIStyle();
+        GUIStyle.Internal_Copy(_staminaLabelStyle, GUI.skin.label);
+        _staminaLabelStyle.alignment = TextAnchor.MiddleCenter;
+        _staminaLabelStyle.fontSize = 11;
+        _staminaLabelStyle.fontStyle = FontStyle.Bold;
+        _staminaLabelStyle.normal.textColor = new Color(1f, 1f, 1f, 0.86f);
+    }
+
+    [HideFromIl2Cpp]
     private static string CardinalLabel(int heading) => heading switch
     {
         0 => "N",
@@ -693,7 +769,7 @@ internal sealed class PlayerViewFeaturesController : MonoBehaviour
 
         _lastErrorSignature = signature;
         Plugin.LogSource.LogWarning(
-            $"Player binocular/freelook controller failed (further identical errors suppressed): {exception.Message}");
+            $"Player view features controller failed (further identical errors suppressed): {exception.Message}");
     }
 }
 

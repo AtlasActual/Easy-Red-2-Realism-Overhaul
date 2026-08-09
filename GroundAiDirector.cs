@@ -447,7 +447,8 @@ internal static class GroundAiDirector
         Squad? squad)
     {
         var position = soldier.GetCenterOfUnit();
-        var threat = AiState.GetContactState(soldier.GetInstanceID()).LastThreatPosition;
+        var state = AiState.GetContactState(soldier.GetInstanceID());
+        var threat = state.LastThreatPosition;
         var playerLed = false;
         var scriptOwned = false;
         if (squad != null && Leases.TryGet(
@@ -471,7 +472,7 @@ internal static class GroundAiDirector
             soldier.IsAlive,
             mounted,
             soldier.GetSuppressionValue() >= AiBehaviorTuning.CrouchSuppressionThreshold,
-            soldier.IsReloading,
+            state.ExposedReloadSafetyOwned,
             lethalHazard,
             new MapPoint(position.x, position.z),
             new MapPoint(threat.x, threat.z),
