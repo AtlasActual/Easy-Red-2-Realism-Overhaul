@@ -16,11 +16,15 @@ internal static class CoverOccupancy
     private static Collider[]? _nearbyColliders;
 
     internal static bool IsOccupiedByOther(Vector3 coverPosition, Soldier soldier)
+        => IsOccupiedByOther(
+            coverPosition, soldier, InfantryCoverPolicy.OccupancyRadiusMeters);
+
+    internal static bool IsOccupiedByOther(
+        Vector3 coverPosition, Soldier soldier, float radius)
     {
         var __t = ModTimeProbe.Begin();
         try
         {
-            var radius = InfantryCoverPolicy.OccupancyRadiusMeters;
             var nearby = GetNearbyColliders(coverPosition, radius, out var count);
             for (var index = 0; index < count; index++)
             {
@@ -994,6 +998,17 @@ internal static partial class ContactResponse
                     soldier.GetInstanceID(),
                     now,
                     InfantryCoverPolicy.CoverDispersionSpacingMeters);
+                // Defensive occupation is different from ordinary maneuver cover:
+                // a position must both protect the defender and provide at least one
+                // usable firing posture toward the attacker. Without this hard gate,
+                // an authored building/interior slot can be considered safe while
+                // leaving the occupant unable to engage the attacking force.
+                var defensiveFiringLane = assignedPoseCanFire || standingCanFire;
+                if (defensiveOccupation && !defensiveFiringLane)
+                {
+                    continue;
+                }
+
                 var scoreInput = new CoverScoreInput(
                     distanceSqr,
                     posePenalty,
@@ -1007,6 +1022,33 @@ internal static partial class ContactResponse
                     PreferProtectionOverFiringLine: defensiveOccupation,
                     NearbyReservationCount: nearbyReservations);
                 var score = InfantryCoverDecisionCore.Score(selectionMode, scoreInput);
+
+                if (defensiveOccupation && enforceDefensiveArea)
+                {
+                    // Softly favor a genuine outer defensive line instead of the
+                    // geometric center of the objective. The attacker bearing is
+                    // represented by targetPosition. This is deliberately a score
+                    // preference rather than a hard radius cutoff so unusual maps can
+                    // still use an excellent protected firing position.
+                    var radial = HorizontalDistance(coverPosition, defensiveCenter);
+                    var normalizedRadial = defensiveRadius > 0.1f
+                        ? Mathf.Clamp01(radial / defensiveRadius)
+                        : 1f;
+                    score += Mathf.Abs(normalizedRadial - 0.82f) * 85f;
+
+                    var candidateFromCenter = coverPosition - defensiveCenter;
+                    candidateFromCenter.y = 0f;
+                    var threatFromCenter = targetPosition - defensiveCenter;
+                    threatFromCenter.y = 0f;
+                    if (candidateFromCenter.sqrMagnitude > 0.01f &&
+                        threatFromCenter.sqrMagnitude > 0.01f)
+                    {
+                        candidateFromCenter.Normalize();
+                        threatFromCenter.Normalize();
+                        var facingDot = Vector3.Dot(candidateFromCenter, threatFromCenter);
+                        score += Mathf.Max(0f, 0.55f - facingDot) * 110f;
+                    }
+                }
                 if (!InfantryCoverDecisionCore.IsRouteAcceptable(selectionMode, scoreInput))
                 {
                     // A native cover node that is valid for the threat direction is
@@ -1018,6 +1060,16 @@ internal static partial class ContactResponse
                             geometry.Standing.HasClassifiedObstruction,
                             geometry.Crouched.HasClassifiedObstruction,
                             geometry.Prone.HasClassifiedObstruction))
+                    {
+                        continue;
+                    }
+
+                    // The authored fallback is useful elsewhere in the mod when the
+                    // material sampler cannot classify a native cover node. For
+                    // defensive occupation it is intentionally not allowed when there
+                    // is no verified firing lane: that is the exact blind-building case
+                    // this defensive layer is meant to eliminate.
+                    if (defensiveOccupation && !defensiveFiringLane)
                     {
                         continue;
                     }

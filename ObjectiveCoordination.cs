@@ -20,12 +20,24 @@ internal static class ObjectiveCoordination
     private const float PressureMemorySeconds = 45f;
     private const int DefensiveCoverCandidateLimit = 64;
     private const float DefensiveCoverAnchorSpacingMeters = 22f;
+    // Counter-attack decision gate (plan 041) caller-side thresholds. The shared
+    // assessment radius itself lives on ObjectiveCounterAttackPlanCore so this
+    // caller and the deterministic tests cannot drift apart on that value.
+    private const float CounterAttackNearbyPressureRadiusMeters = 180f;
+    private const float CounterAttackRecentLossSeconds = 30f;
 
     private static readonly Dictionary<int, OrderStamp> LastOrders = new();
     private static readonly Dictionary<int, float> ObjectiveProgress = new();
     private static readonly Dictionary<int, float> ObjectivePressureUntil = new();
     private static readonly Dictionary<string, int> LastPlanSignatures =
         new(StringComparer.Ordinal);
+    // Ownership bookkeeping for the counter-attack gate's "lost recently" rule.
+    // Keyed by objective id; the securing faction ("" when contested/neutral)
+    // and the time it last actually changed. CollectObjectives updates both
+    // idempotently so a defender's and an attacker's pass over the same
+    // objective in one planning cycle do not double-stamp the change time.
+    private static readonly Dictionary<int, string> ObjectiveOwnerFaction = new();
+    private static readonly Dictionary<int, float> ObjectiveOwnerChangedAt = new();
 
     private static float _nextPlanAt;
     private static bool _failedThisBattle;
@@ -60,6 +72,8 @@ internal static class ObjectiveCoordination
         ObjectiveProgress.Clear();
         ObjectivePressureUntil.Clear();
         LastPlanSignatures.Clear();
+        ObjectiveOwnerFaction.Clear();
+        ObjectiveOwnerChangedAt.Clear();
         _nextPlanAt = 0f;
         _failedThisBattle = false;
     }
@@ -89,7 +103,7 @@ internal static class ObjectiveCoordination
             if (objectives.Count == 0)
                 continue;
 
-            PlanFaction(pair.Key, pair.Value, objectives, attacking, now);
+            PlanFaction(pair.Key, pair.Value, objectives, attacking, now, battle, squadsByFaction);
         }
 
         foreach (var staleId in LastOrders.Keys.Where(id => !activeSquadIds.Contains(id)).ToArray())
@@ -151,7 +165,14 @@ internal static class ObjectiveCoordination
             if (!IsFinite(position))
                 return false;
 
-            info = new SquadInfo(SquadIdentity.GetSquadId(squad), squad, faction, position);
+            // Read once at snapshot time (not inside the per-objective planning
+            // loops) so the counter-attack gate's "free to maneuver" count stays
+            // allocation-light. Actively fighting, pinned, or mid-relocation all
+            // count as unavailable to redirect toward a fresh recapture.
+            var contact = AiState.GetContactState(leader.GetInstanceID());
+            var engaged = contact.ContactResponseActive || contact.Pinned || contact.Relocating;
+
+            info = new SquadInfo(SquadIdentity.GetSquadId(squad), squad, faction, position, leader, engaged);
             return true;
         }
         catch (ObjectCollectedException)
@@ -181,23 +202,37 @@ internal static class ObjectiveCoordination
 
             var id = manager.GetObjectiveUniqueId(objective);
             var friendlySecured = false;
+            var enemySecured = false;
+            var securedFaction = string.Empty;
             if (objective.IsSecured())
             {
-                var securedFaction = objective.GetSecuredFaction();
-                friendlySecured =
-                    (!string.IsNullOrWhiteSpace(securedFaction) &&
-                     battle.IsInvaderFaction(faction) &&
-                     battle.IsInvaderFaction(securedFaction)) ||
-                    (!string.IsNullOrWhiteSpace(securedFaction) &&
-                     battle.IsDefenderFaction(faction) &&
-                     battle.IsDefenderFaction(securedFaction));
+                securedFaction = objective.GetSecuredFaction() ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(securedFaction))
+                {
+                    var factionIsInvader = battle.IsInvaderFaction(faction);
+                    var factionIsDefender = battle.IsDefenderFaction(faction);
+                    var securedIsInvader = battle.IsInvaderFaction(securedFaction);
+                    var securedIsDefender = battle.IsDefenderFaction(securedFaction);
+                    friendlySecured =
+                        (factionIsInvader && securedIsInvader) ||
+                        (factionIsDefender && securedIsDefender);
+                    enemySecured =
+                        (factionIsInvader && securedIsDefender) ||
+                        (factionIsDefender && securedIsInvader);
+                }
             }
+
+            // The securing faction is a property of the objective itself, not of
+            // the faction currently planning, so both factions observe the same
+            // value in the same cycle and TrackObjectiveOwnership's own equality
+            // check makes the second faction's call this cycle a no-op.
+            TrackObjectiveOwnership(id, securedFaction, now);
 
             var pressured = SampleObjectivePressure(objective, id, now);
             var radius = float.IsFinite(objective.objectiveRadius)
                 ? Mathf.Max(12f, objective.objectiveRadius)
                 : 30f;
-            result.Add(new ObjectiveInfo(id, position, radius, friendlySecured, pressured));
+            result.Add(new ObjectiveInfo(id, position, radius, friendlySecured, enemySecured, pressured));
         }
 
         return result;
@@ -227,12 +262,38 @@ internal static class ObjectiveCoordination
         return ObjectivePressureUntil.TryGetValue(id, out var until) && now < until;
     }
 
+    /// <summary>
+    /// Records when an objective's securing faction actually changes, so the
+    /// counter-attack gate can tell a fresh repulse from a point that has sat
+    /// enemy-secured for a while. Idempotent: called once per faction per
+    /// CollectObjectives pass, but only the first call in a cycle observes a
+    /// real change, so a second faction's identical observation is a no-op. The
+    /// first-ever sighting of an objective records its owner without stamping a
+    /// change time, since there is no prior baseline to compare against.
+    /// </summary>
+    private static void TrackObjectiveOwnership(int objectiveId, string securedFaction, float now)
+    {
+        if (ObjectiveOwnerFaction.TryGetValue(objectiveId, out var previous))
+        {
+            if (string.Equals(previous, securedFaction, StringComparison.Ordinal))
+                return;
+
+            ObjectiveOwnerFaction[objectiveId] = securedFaction;
+            ObjectiveOwnerChangedAt[objectiveId] = now;
+            return;
+        }
+
+        ObjectiveOwnerFaction[objectiveId] = securedFaction;
+    }
+
     private static void PlanFaction(
         string faction,
         List<SquadInfo> squads,
         List<ObjectiveInfo> objectives,
         bool attacking,
-        float now)
+        float now,
+        BattleData battle,
+        Dictionary<string, List<SquadInfo>> squadsByFaction)
     {
         if (squads.Count == 0)
             return;
@@ -245,40 +306,201 @@ internal static class ObjectiveCoordination
             return distanceComparison != 0 ? distanceComparison : left.Id.CompareTo(right.Id);
         });
 
+        // Moved above target selection (plan 041): the defender branch below
+        // needs the hostile squad list to assess the counter-attack gate before
+        // targets are finalized, not just afterward for threat-direction facing.
+        var hostileSquads = CollectHostileSquads(battle, faction, squadsByFaction);
+
         var targetCount = attacking
             ? Math.Min(objectives.Count, Math.Max(1, (squads.Count + 1) / 2))
             : Math.Min(objectives.Count, squads.Count);
         var targets = objectives.Take(targetCount).ToList();
+        if (!attacking)
+            targets = ApplyCounterAttackGate(squads, targets, objectives, hostileSquads, now);
+
         var capacities = BuildCapacities(squads.Count, targets, attacking);
         var assignments = AssignSquads(squads, targets, capacities);
 
         var flankCount = 0;
+
+        void IssueAttackWave(List<SquadInfo> assigned, ObjectiveInfo target)
+        {
+            for (var index = 0; index < assigned.Count; index++)
+            {
+                var role = ObjectiveAttackPlanCore.SelectRole(index, assigned.Count, target.Id);
+                IssueAttack(assigned[index], target, role);
+                if (role.IsFlank)
+                    flankCount++;
+            }
+        }
+
         foreach (var target in targets)
         {
             if (!assignments.TryGetValue(target.Id, out var assigned))
                 continue;
 
             assigned.Sort((left, right) => left.Id.CompareTo(right.Id));
+
+            if (ObjectiveCounterAttackPlanCore.ShouldIssueAttackOrder(attacking, target.EnemySecured))
+            {
+                IssueAttackWave(assigned, target);
+                continue;
+            }
+
             var defenseAnchors = new List<Vector3>();
+            var threatDirection = ComputeThreatDirection(target.Position, hostileSquads);
             for (var index = 0; index < assigned.Count; index++)
             {
-                if (attacking)
-                {
-                    var role = ObjectiveAttackPlanCore.SelectRole(
-                        index, assigned.Count, target.Id);
-                    IssueAttack(assigned[index], target, role);
-                    if (role.IsFlank)
-                        flankCount++;
-                }
-                else
-                {
-                    IssueDefense(
-                        assigned[index], target, index, assigned.Count, defenseAnchors);
-                }
+                IssueDefense(
+                    assigned[index], target, index, assigned.Count, defenseAnchors, threatDirection);
             }
         }
 
         TracePlanChange(faction, attacking, squads.Count, targets.Count, flankCount, assignments);
+    }
+
+    private static List<SquadInfo> CollectHostileSquads(
+        BattleData battle,
+        string faction,
+        Dictionary<string, List<SquadInfo>> squadsByFaction)
+    {
+        var factionIsInvader = battle.IsInvaderFaction(faction);
+        var hostile = new List<SquadInfo>();
+        foreach (var pair in squadsByFaction)
+        {
+            if (string.Equals(pair.Key, faction, StringComparison.Ordinal))
+                continue;
+
+            // Every key in squadsByFaction is guaranteed invader or defender
+            // (TryDescribeSquad rejects anything else), so a side mismatch
+            // here is exactly "hostile to the planning faction".
+            if (battle.IsInvaderFaction(pair.Key) == factionIsInvader)
+                continue;
+
+            hostile.AddRange(pair.Value);
+        }
+
+        return hostile;
+    }
+
+    /// <summary>
+    /// Defender-only (plan 041): gates each EnemySecured candidate objective
+    /// through <see cref="ObjectiveCounterAttackPlanCore.ShouldCounterAttack"/>
+    /// and drops the ones it rejects. Friendly-secured and neutral candidates
+    /// are never gated. Rejected objectives simply stop being targets, so
+    /// AssignSquads redistributes those squads across the objectives still
+    /// held - the "consolidate and try again next cycle" behavior. If gating
+    /// would leave no targets at all, every candidate is kept instead so
+    /// defenders never freeze when everything active is lost.
+    /// </summary>
+    private static List<ObjectiveInfo> ApplyCounterAttackGate(
+        List<SquadInfo> squads,
+        List<ObjectiveInfo> targets,
+        List<ObjectiveInfo> allObjectives,
+        List<SquadInfo> hostileSquads,
+        float now)
+    {
+        var candidates = new List<CounterAttackCandidate>(targets.Count);
+        foreach (var target in targets)
+        {
+            var passesGate = !target.EnemySecured ||
+                AssessCounterAttack(squads, target, allObjectives, hostileSquads, now);
+            candidates.Add(new CounterAttackCandidate(target.Id, target.EnemySecured, passesGate));
+        }
+
+        var keptIds = ObjectiveCounterAttackPlanCore.SelectCounterAttackTargets(candidates);
+        if (keptIds.Count == targets.Count)
+            return targets;
+
+        var keptSet = new HashSet<int>(keptIds);
+        return targets.Where(target => keptSet.Contains(target.Id)).ToList();
+    }
+
+    /// <summary>
+    /// Counts nearby defenders/free defenders/hostiles within the shared
+    /// counter-attack radius, checks for nearby friendly-secured pressure and a
+    /// recent loss with hostiles still close, then hands the plain-data result
+    /// to the deterministic gate.
+    /// </summary>
+    private static bool AssessCounterAttack(
+        List<SquadInfo> squads,
+        ObjectiveInfo target,
+        List<ObjectiveInfo> allObjectives,
+        List<SquadInfo> hostileSquads,
+        float now)
+    {
+        var radius = ObjectiveCounterAttackPlanCore.CounterAttackAssessmentRadiusMeters;
+        var radiusSqr = radius * radius;
+
+        var nearbyDefenders = 0;
+        var freeNearbyDefenders = 0;
+        foreach (var squad in squads)
+        {
+            if (HorizontalDistanceSquared(squad.Position, target.Position) > radiusSqr)
+                continue;
+
+            nearbyDefenders++;
+            if (!squad.Engaged)
+                freeNearbyDefenders++;
+        }
+
+        var nearbyHostiles = 0;
+        foreach (var hostile in hostileSquads)
+        {
+            if (HorizontalDistanceSquared(hostile.Position, target.Position) <= radiusSqr)
+                nearbyHostiles++;
+        }
+
+        var pressureRadiusSqr =
+            CounterAttackNearbyPressureRadiusMeters * CounterAttackNearbyPressureRadiusMeters;
+        var nearbyPressure = false;
+        foreach (var candidate in allObjectives)
+        {
+            if (candidate.Id == target.Id || !candidate.FriendlySecured || !candidate.Pressured)
+                continue;
+
+            if (HorizontalDistanceSquared(candidate.Position, target.Position) <= pressureRadiusSqr)
+            {
+                nearbyPressure = true;
+                break;
+            }
+        }
+
+        var lostRecently = ObjectiveOwnerChangedAt.TryGetValue(target.Id, out var changedAt) &&
+                            now - changedAt <= CounterAttackRecentLossSeconds;
+        var lostRecentlyWithHostilesNearby =
+            ObjectiveCounterAttackPlanCore.ObjectiveLostRecentlyWithHostilesNearby(
+                lostRecently, nearbyHostiles);
+
+        return ObjectiveCounterAttackPlanCore.ShouldCounterAttack(
+            nearbyDefenders, freeNearbyDefenders, nearbyHostiles, nearbyPressure,
+            lostRecentlyWithHostilesNearby);
+    }
+
+    private const float ThreatDirectionSearchRadiusMeters = 150f;
+
+    /// <summary>
+    /// Averages the bearing of nearby hostile squads from the objective
+    /// center. Returns Vector3.zero when none qualify; callers fall back to
+    /// the existing StableAngleOffset in that case.
+    /// </summary>
+    private static Vector3 ComputeThreatDirection(
+        Vector3 objectivePosition,
+        List<SquadInfo> hostileSquads)
+    {
+        var sum = Vector3.zero;
+        var searchRadiusSqr = ThreatDirectionSearchRadiusMeters * ThreatDirectionSearchRadiusMeters;
+        foreach (var enemy in hostileSquads)
+        {
+            var offset = Flatten(enemy.Position - objectivePosition);
+            var distanceSqr = offset.sqrMagnitude;
+            if (distanceSqr < 1f || distanceSqr > searchRadiusSqr)
+                continue;
+
+            sum += offset.normalized;
+        }
+
+        return sum;
     }
 
     private static Dictionary<int, int> BuildCapacities(
@@ -286,34 +508,11 @@ internal static class ObjectiveCoordination
         List<ObjectiveInfo> targets,
         bool attacking)
     {
-        var capacities = targets.ToDictionary(objective => objective.Id, _ => 1);
-        var remaining = squadCount - targets.Count;
-        for (var index = 0; index < remaining; index++)
-            capacities[targets[index % targets.Count].Id]++;
-
-        if (attacking)
-            return capacities;
-
-        ObjectiveInfo? threatened = targets
-            .Where(objective => objective.Pressured)
-            .OrderBy(objective => objective.Id)
-            .Select(objective => (ObjectiveInfo?)objective)
-            .FirstOrDefault();
-        if (!threatened.HasValue)
-            return capacities;
-
-        ObjectiveInfo? donor = targets
-            .Where(objective => objective.Id != threatened.Value.Id && capacities[objective.Id] > 1)
-            .OrderByDescending(objective => capacities[objective.Id])
-            .ThenBy(objective => objective.Id)
-            .Select(objective => (ObjectiveInfo?)objective)
-            .FirstOrDefault();
-        if (!donor.HasValue)
-            return capacities;
-
-        capacities[donor.Value.Id]--;
-        capacities[threatened.Value.Id]++;
-        return capacities;
+        var capacityInputs = targets
+            .Select(objective => new ObjectiveCapacityInput(
+                objective.Id, objective.Pressured, objective.EnemySecured))
+            .ToList();
+        return ObjectiveCounterAttackPlanCore.BuildCapacities(squadCount, capacityInputs, attacking);
     }
 
     private static Dictionary<int, List<SquadInfo>> AssignSquads(
@@ -405,36 +604,56 @@ internal static class ObjectiveCoordination
         ObjectiveInfo objective,
         int sectorIndex,
         int sectorCount,
-        List<Vector3> existingAnchors)
+        List<Vector3> existingAnchors,
+        Vector3 threatDirection)
     {
         var coreGarrison = sectorIndex == 0;
-        var preferredDestination = objective.Position;
-        if (!coreGarrison && sectorCount > 1)
-        {
-            var ringRadius = Mathf.Min(55f, objective.Radius * 0.45f);
-            var angle = (2f * Mathf.PI * sectorIndex / sectorCount) +
-                        StableAngleOffset(objective.Id);
-            preferredDestination +=
-                new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * ringRadius;
-        }
 
-        var area = ObjectiveDefenseAreaCore.Build(
-            new MapPoint(objective.Position.x, objective.Position.z),
-            objective.Radius,
-            new MapPoint(preferredDestination.x, preferredDestination.z),
-            coreGarrison);
-        var destination = new Vector3(area.Center.X, objective.Position.y, area.Center.Z);
-        var holdRadius = area.HoldRadius;
-        var towardExpectedThreat = Flatten(destination - objective.Position);
-        if (towardExpectedThreat.sqrMagnitude < 1f)
+        // towardExpectedThreat is now the real bearing to nearby hostile
+        // squads (see ComputeThreatDirection), not derived from the sector's
+        // own placement. It falls back to the existing stable per-objective
+        // angle only when no hostile squad qualifies.
+        var towardExpectedThreat = threatDirection;
+        if (towardExpectedThreat.sqrMagnitude < 0.0001f)
         {
-            var angle = StableAngleOffset(objective.Id);
-            towardExpectedThreat = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+            var fallbackAngle = StableAngleOffset(objective.Id);
+            towardExpectedThreat = new Vector3(Mathf.Cos(fallbackAngle), 0f, Mathf.Sin(fallbackAngle));
         }
         else
         {
             towardExpectedThreat.Normalize();
         }
+
+        var preferredDestination = objective.Position;
+        if (!coreGarrison && sectorCount > 1)
+        {
+            // Placed out near the objective edge, not in a tight inner ring.
+            // Build clamps this per sector afterwards: forward sectors keep
+            // nearly all of it, flank and rear sectors are pulled back to half
+            // the objective radius. A narrower ring here would make the
+            // containment rule non-binding and leave the defense clustered.
+            var ringRadius = Mathf.Min(70f, objective.Radius * 0.9f);
+            var surplusCount = sectorCount - 1;
+            var surplusIndex = sectorIndex - 1;
+            var threatAngle = Mathf.Atan2(towardExpectedThreat.z, towardExpectedThreat.x);
+            const float arcSpanRadians = Mathf.PI; // 180-degree arc facing the threat.
+            var angle = surplusCount <= 1
+                ? threatAngle
+                : threatAngle - arcSpanRadians / 2f +
+                  arcSpanRadians * surplusIndex / (surplusCount - 1);
+            preferredDestination +=
+                new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * ringRadius;
+        }
+
+        var threatDirectionPoint = new MapPoint(towardExpectedThreat.x, towardExpectedThreat.z);
+        var area = ObjectiveDefenseAreaCore.Build(
+            new MapPoint(objective.Position.x, objective.Position.z),
+            objective.Radius,
+            new MapPoint(preferredDestination.x, preferredDestination.z),
+            coreGarrison,
+            threatDirectionPoint);
+        var destination = new Vector3(area.Center.X, objective.Position.y, area.Center.Z);
+        var holdRadius = area.HoldRadius;
 
         // The core garrison deliberately remains centered on the capture point.
         // Native HoldArea and the soldier-level defensive inventory still place
@@ -455,7 +674,8 @@ internal static class ObjectiveCoordination
                 new MapPoint(objective.Position.x, objective.Position.z),
                 objective.Radius,
                 new MapPoint(coverAnchor.x, coverAnchor.z),
-                coreGarrison: false);
+                coreGarrison: false,
+                threatDirectionPoint);
             destination = new Vector3(area.Center.X, objective.Position.y, area.Center.Z);
             holdRadius = area.HoldRadius;
         }
@@ -515,8 +735,7 @@ internal static class ObjectiveCoordination
             if (covers == null)
                 return false;
 
-            var maximumAnchorOffset = ObjectiveDefenseAreaCore.MaximumAnchorOffset(
-                objective.Radius, holdRadius);
+            var maximumAnchorOffset = ObjectiveDefenseAreaCore.MaximumAnchorOffset(objective.Radius);
             var maximumAnchorOffsetSqr = maximumAnchorOffset * maximumAnchorOffset;
             var candidates = new List<DefensiveCoverCandidate>();
             var examined = 0;
@@ -709,13 +928,16 @@ internal static class ObjectiveCoordination
         int Id,
         Squad Squad,
         string Faction,
-        Vector3 Position);
+        Vector3 Position,
+        Soldier Leader,
+        bool Engaged);
 
     private readonly record struct ObjectiveInfo(
         int Id,
         Vector3 Position,
         float Radius,
         bool FriendlySecured,
+        bool EnemySecured,
         bool Pressured);
 
     private readonly record struct DefensiveCoverCandidate(

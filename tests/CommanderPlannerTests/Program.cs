@@ -39,8 +39,17 @@ internal static class Program
             (nameof(AttackAdvanceAlternatesBoundAndFiringPhases), AttackAdvanceAlternatesBoundAndFiringPhases),
             (nameof(DefendingReinforcementsKeepTheirMovementOrderUntilArrival), DefendingReinforcementsKeepTheirMovementOrderUntilArrival),
             (nameof(ObjectiveDefenseKeepsACoreGarrisonOnTheCapturePoint), ObjectiveDefenseKeepsACoreGarrisonOnTheCapturePoint),
-            (nameof(ObjectiveDefenseClampsSurplusSectorsInsideTheCaptureRadius), ObjectiveDefenseClampsSurplusSectorsInsideTheCaptureRadius),
+            (nameof(ObjectiveDefenseCoreGarrisonIgnoresThreatDirection), ObjectiveDefenseCoreGarrisonIgnoresThreatDirection),
+            (nameof(ObjectiveDefenseForwardOffsetReachesTheObjectiveEdge), ObjectiveDefenseForwardOffsetReachesTheObjectiveEdge),
+            (nameof(ObjectiveDefenseRearOffsetStaysMoreConstrainedThanForward), ObjectiveDefenseRearOffsetStaysMoreConstrainedThanForward),
+            (nameof(ObjectiveDefenseWithoutAThreatDirectionUsesTheDeterministicFallback), ObjectiveDefenseWithoutAThreatDirectionUsesTheDeterministicFallback),
             (nameof(ObjectiveAttackKeepsOnePressureSquadAndAlternatesWideFlanks), ObjectiveAttackKeepsOnePressureSquadAndAlternatesWideFlanks),
+            (nameof(DefenderRecaptureTargetsGetAttackOrdersInsteadOfDefense), DefenderRecaptureTargetsGetAttackOrdersInsteadOfDefense),
+            (nameof(DefenderRecaptureCapacityCapsAtTwoAndProtectsEveryOtherObjective), DefenderRecaptureCapacityCapsAtTwoAndProtectsEveryOtherObjective),
+            (nameof(AttackingFactionsIgnoreTheCounterAttackCapacityCap), AttackingFactionsIgnoreTheCounterAttackCapacityCap),
+            (nameof(CounterAttackGateWeighsLocalStrengthBeforeAttacking), CounterAttackGateWeighsLocalStrengthBeforeAttacking),
+            (nameof(CounterAttackGatePenaltiesRequireActualNearbyThreats), CounterAttackGatePenaltiesRequireActualNearbyThreats),
+            (nameof(CounterAttackTargetSelectionNeverLeavesDefendersWithNoOrders), CounterAttackTargetSelectionNeverLeavesDefendersWithNoOrders),
             (nameof(UnchangedSquadIntentDoesNotRestartNativeMovement), UnchangedSquadIntentDoesNotRestartNativeMovement),
             (nameof(IdleSoldiersRemainUnderNativeControl), IdleSoldiersRemainUnderNativeControl),
             (nameof(ArrivedDefendersStayUnderPositionControl), ArrivedDefendersStayUnderPositionControl),
@@ -83,6 +92,7 @@ internal static class Program
             (nameof(CommittedCoverMoveSurvivesATransientContact), CommittedCoverMoveSurvivesATransientContact),
             (nameof(LapsedHoldsReturnTheSoldierToNativeMovement), LapsedHoldsReturnTheSoldierToNativeMovement),
             (nameof(HaltSpacingStepsOffTheThreatAxisOnlyWhenStacked), HaltSpacingStepsOffTheThreatAxisOnlyWhenStacked),
+            (nameof(HaltSpacingRetriesOnlyWhileStillClipping), HaltSpacingRetriesOnlyWhileStillClipping),
             (nameof(FourSimultaneousFiringHaltsChooseDistinctSpacingTargets), FourSimultaneousFiringHaltsChooseDistinctSpacingTargets),
             (nameof(MovingPostureTracksContactFire), MovingPostureTracksContactFire),
             (nameof(HaltSpacingMicroMovementNeverRaisesFightingPose), HaltSpacingMicroMovementNeverRaisesFightingPose),
@@ -1591,6 +1601,95 @@ internal static class Program
             "Physical movement did not rearm spacing for a later fighting halt.");
     }
 
+    private static void HaltSpacingRetriesOnlyWhileStillClipping()
+    {
+        const float retryAt = 100f;
+
+        True(HaltSpacingCore.ShouldRetry(
+                attemptedThisEpisode: true, MovementOwner.EngagementHold,
+                holdsCoverSlot: false, now: retryAt, nextRetryAt: retryAt),
+            "An attempted engagement hold past its retry deadline did not retry.");
+        False(HaltSpacingCore.ShouldRetry(
+                attemptedThisEpisode: true, MovementOwner.EngagementHold,
+                holdsCoverSlot: false, now: retryAt - 0.01f, nextRetryAt: retryAt),
+            "A retry fired before its cooldown elapsed.");
+        False(HaltSpacingCore.ShouldRetry(
+                attemptedThisEpisode: false, MovementOwner.EngagementHold,
+                holdsCoverSlot: false, now: retryAt, nextRetryAt: retryAt),
+            "A soldier who never made his rising-edge attempt retried anyway.");
+        False(HaltSpacingCore.ShouldRetry(
+                attemptedThisEpisode: true, MovementOwner.PinnedHold,
+                holdsCoverSlot: false, now: retryAt, nextRetryAt: retryAt),
+            "A pinned halt retried its spacing step.");
+        False(HaltSpacingCore.ShouldRetry(
+                attemptedThisEpisode: true, MovementOwner.SafetyHalt,
+                holdsCoverSlot: false, now: retryAt, nextRetryAt: retryAt),
+            "A safety halt retried its spacing step.");
+        False(HaltSpacingCore.ShouldRetry(
+                attemptedThisEpisode: true, MovementOwner.EngagementHold,
+                holdsCoverSlot: true, now: retryAt, nextRetryAt: retryAt),
+            "A soldier holding his reserved cover slot retried a spacing step off it.");
+
+        False(HaltSpacingCore.ShouldAttempt(
+                attemptedThisEpisode: false, MovementOwner.CoverHold, holdsCoverSlot: true),
+            "A soldier holding his reserved cover slot took a rising-edge spacing step.");
+
+        var self = new MapPoint(10f, 10f);
+        var threat = new MapPoint(10f, 40f); // due +Z, so the lateral axis is +/-X.
+
+        // Place the neighbour exactly where candidate 1 (the mirrored lateral side, which
+        // moves toward the neighbour rather than away) would land: its destination
+        // coincides with the neighbour, well inside the clipping radius, so it must be
+        // rejected even though the pair is genuinely overlapping.
+        var blockingNeighbour = new MapPoint(10f - HaltSpacingCore.ShortStepMeters, 10f);
+        False(HaltSpacingCore.TryResolveCandidateStep(
+                self, blockingNeighbour, threat, true, HaltSpacingCore.MinimumSpacingMeters,
+                1, HaltSpacingCore.ShortStepMeters, HaltSpacingCore.ClippingRadiusMeters,
+                out _),
+            "A short step landing on top of the overlapping neighbour was accepted.");
+
+        // Candidate 0 (the preferred lateral side, which opens the gap) must still be
+        // reachable: it lands exactly ShortStepMeters from self and clear of the
+        // neighbour by at least the clipping radius.
+        True(HaltSpacingCore.TryResolveCandidateStep(
+                self, blockingNeighbour, threat, true, HaltSpacingCore.MinimumSpacingMeters,
+                0, HaltSpacingCore.ShortStepMeters, HaltSpacingCore.ClippingRadiusMeters,
+                out var shortStep),
+            "No reachable short candidate existed for a genuinely clipping pair.");
+        var shortDestination = new MapPoint(self.X + shortStep.X, self.Z + shortStep.Z);
+        Equal(HaltSpacingCore.ShortStepMeters,
+            MathF.Round(Distance(self, shortDestination), 4),
+            "The short candidate step was not the bounded short-step length.");
+        True(Distance(shortDestination, blockingNeighbour) >=
+             HaltSpacingCore.ClippingRadiusMeters - 0.001f,
+            "The short candidate step landed back inside the clipping radius.");
+
+        // The full-length overload's output is byte-identical to the pre-existing 7-arg
+        // overload for the same inputs: the plan requires the rising-edge step to be
+        // behaviorally unchanged.
+        const float configuredSeparation = 3.02f;
+        var neighbour = new MapPoint(11f, 10f);
+        for (var candidateIndex = 0;
+             candidateIndex < HaltSpacingCore.CandidateDirectionCount;
+             candidateIndex++)
+        {
+            var legacyFound = HaltSpacingCore.TryResolveCandidateStep(
+                self, neighbour, threat, true, configuredSeparation, candidateIndex,
+                out var legacyStep);
+            var explicitFound = HaltSpacingCore.TryResolveCandidateStep(
+                self, neighbour, threat, true, configuredSeparation, candidateIndex,
+                configuredSeparation + HaltSpacingCore.DestinationClearanceMeters,
+                configuredSeparation,
+                out var explicitStep);
+            Equal(legacyFound, explicitFound,
+                $"Candidate {candidateIndex + 1} disagreed on reachability between " +
+                "the legacy and explicit-length overloads.");
+            Equal(legacyStep, explicitStep,
+                $"Candidate {candidateIndex + 1} produced a different step between " +
+                "the legacy and explicit-length overloads.");
+        }
+    }
+
     private static void FourSimultaneousFiringHaltsChooseDistinctSpacingTargets()
     {
         const float configuredSeparation = 3.02f;
@@ -3092,25 +3191,75 @@ internal static class Program
             "The core garrison received an invalid hold radius.");
     }
 
-    private static void ObjectiveDefenseClampsSurplusSectorsInsideTheCaptureRadius()
+    private static void ObjectiveDefenseCoreGarrisonIgnoresThreatDirection()
+    {
+        var objective = new MapPoint(100f, 200f);
+        var area = ObjectiveDefenseAreaCore.Build(
+            objective,
+            objectiveRadius: 30f,
+            preferredCenter: new MapPoint(145f, 200f),
+            coreGarrison: true,
+            threatDirection: new MapPoint(1f, 0f));
+
+        Equal(objective, area.Center,
+            "A supplied threat direction displaced the core garrison off the capture point.");
+    }
+
+    private static void ObjectiveDefenseForwardOffsetReachesTheObjectiveEdge()
     {
         var objective = new MapPoint(0f, 0f);
-        const float objectiveRadius = 30f;
+        const float objectiveRadius = 40f;
+        var threatDirection = new MapPoint(1f, 0f);
+
+        // Preferred center is far out along the threat axis itself (forward).
         var area = ObjectiveDefenseAreaCore.Build(
             objective,
             objectiveRadius,
-            preferredCenter: new MapPoint(100f, 0f),
-            coreGarrison: false);
-        var dx = area.Center.X - objective.X;
-        var dz = area.Center.Z - objective.Z;
-        var centerOffset = MathF.Sqrt(dx * dx + dz * dz);
+            preferredCenter: new MapPoint(500f, 0f),
+            coreGarrison: false,
+            threatDirection);
 
-        True(centerOffset + area.HoldRadius <= objectiveRadius + 0.001f,
-            "A surplus defensive sector extended beyond the capture radius.");
-        Equal(
-            objectiveRadius - area.HoldRadius,
-            ObjectiveDefenseAreaCore.MaximumAnchorOffset(objectiveRadius, area.HoldRadius),
-            "Cover-anchor eligibility did not use the same objective boundary.");
+        var offset = Distance(area.Center, objective);
+        Near(objectiveRadius, offset, 0.01f,
+            "A forward defensive sector was not allowed out to the objective edge.");
+        Near(ObjectiveDefenseAreaCore.MaximumAnchorOffset(objectiveRadius), offset, 0.01f,
+            "The forward containment offset disagreed with the cover-anchor search bound.");
+    }
+
+    private static void ObjectiveDefenseRearOffsetStaysMoreConstrainedThanForward()
+    {
+        var objective = new MapPoint(0f, 0f);
+        const float objectiveRadius = 40f;
+        var threatDirection = new MapPoint(1f, 0f);
+
+        // Preferred center is directly opposite the threat axis (rear).
+        var area = ObjectiveDefenseAreaCore.Build(
+            objective,
+            objectiveRadius,
+            preferredCenter: new MapPoint(-500f, 0f),
+            coreGarrison: false,
+            threatDirection);
+
+        var offset = Distance(area.Center, objective);
+        Near(objectiveRadius * 0.5f, offset, 0.01f,
+            "A rear defensive sector was not clamped to the tighter rear allowance.");
+        True(offset < ObjectiveDefenseAreaCore.MaximumAnchorOffset(objectiveRadius),
+            "A rear offset became as permissive as the forward offset.");
+    }
+
+    private static void ObjectiveDefenseWithoutAThreatDirectionUsesTheDeterministicFallback()
+    {
+        var objective = new MapPoint(0f, 0f);
+        const float objectiveRadius = 40f;
+        var area = ObjectiveDefenseAreaCore.Build(
+            objective,
+            objectiveRadius,
+            preferredCenter: new MapPoint(500f, 0f),
+            coreGarrison: false);
+
+        var offset = Distance(area.Center, objective);
+        Near(objectiveRadius * 0.75f, offset, 0.01f,
+            "The no-threat-direction fallback did not use three quarters of the objective radius.");
     }
 
     private static void ObjectiveAttackKeepsOnePressureSquadAndAlternatesWideFlanks()
@@ -3131,6 +3280,153 @@ internal static class Program
         var oppositeObjective = ObjectiveAttackPlanCore.SelectRole(1, 2, objectiveId: 21);
         Equal(1, oppositeObjective.Side,
             "Neighboring objective groups always opened their flank on the same side.");
+    }
+
+    private static void DefenderRecaptureTargetsGetAttackOrdersInsteadOfDefense()
+    {
+        True(ObjectiveCounterAttackPlanCore.ShouldIssueAttackOrder(attacking: false, enemySecured: true),
+            "A defender did not treat an enemy-secured objective as a recapture target.");
+        False(ObjectiveCounterAttackPlanCore.ShouldIssueAttackOrder(attacking: false, enemySecured: false),
+            "A defender abandoned a friendly-secured or neutral objective's defend order.");
+        True(ObjectiveCounterAttackPlanCore.ShouldIssueAttackOrder(attacking: true, enemySecured: false),
+            "An attacking faction stopped attacking a neutral or friendly-contested objective.");
+        True(ObjectiveCounterAttackPlanCore.ShouldIssueAttackOrder(attacking: true, enemySecured: true),
+            "An attacking faction's behavior changed because of the new EnemySecured flag.");
+    }
+
+    private static void DefenderRecaptureCapacityCapsAtTwoAndProtectsEveryOtherObjective()
+    {
+        var targets = new List<ObjectiveCapacityInput>
+        {
+            new(Id: 1, Pressured: false, EnemySecured: true),
+            new(Id: 2, Pressured: false, EnemySecured: false),
+            new(Id: 3, Pressured: false, EnemySecured: false),
+        };
+
+        // 9 squads across 3 targets: baseline 1 each, then 6 surplus squads
+        // round-robin (+2 each) would otherwise give the enemy-secured
+        // target 3 squads.
+        var capacities = ObjectiveCounterAttackPlanCore.BuildCapacities(
+            squadCount: 9, targets, attacking: false);
+
+        True(capacities[1] <= ObjectiveCounterAttackPlanCore.MaxCounterAttackSquadsPerObjective,
+            "A recapture target exceeded the counter-attack squad cap.");
+        True(capacities[2] >= 1 && capacities[3] >= 1,
+            "A friendly-secured or neutral objective lost its guaranteed defender.");
+        Equal(9, capacities[1] + capacities[2] + capacities[3],
+            "Capping the recapture target stranded squads instead of redistributing them.");
+    }
+
+    private static void AttackingFactionsIgnoreTheCounterAttackCapacityCap()
+    {
+        var targets = new List<ObjectiveCapacityInput>
+        {
+            new(Id: 1, Pressured: false, EnemySecured: true),
+            new(Id: 2, Pressured: false, EnemySecured: false),
+        };
+
+        var capacities = ObjectiveCounterAttackPlanCore.BuildCapacities(
+            squadCount: 7, targets, attacking: true);
+
+        Equal(7, capacities[1] + capacities[2],
+            "The attacker branch dropped squads instead of assigning all of them.");
+        True(capacities[1] > ObjectiveCounterAttackPlanCore.MaxCounterAttackSquadsPerObjective,
+            "The attacker branch applied the defender-only counter-attack cap.");
+    }
+
+    private static void CounterAttackGateWeighsLocalStrengthBeforeAttacking()
+    {
+        False(ObjectiveCounterAttackPlanCore.ShouldCounterAttack(
+                nearbyDefenderSquadCount: 5, freeNearbyDefenderSquadCount: 0,
+                nearbyHostileSquadCount: 1, nearbyFriendlySecuredObjectivePressured: false,
+                objectiveLostRecentlyWithHostilesNearby: false),
+            "A counter-attack was ordered with no free nearby defender squad to send.");
+
+        True(ObjectiveCounterAttackPlanCore.ShouldCounterAttack(
+                nearbyDefenderSquadCount: 4, freeNearbyDefenderSquadCount: 4,
+                nearbyHostileSquadCount: 1, nearbyFriendlySecuredObjectivePressured: false,
+                objectiveLostRecentlyWithHostilesNearby: false),
+            "A clear local advantage did not attack at once.");
+
+        False(ObjectiveCounterAttackPlanCore.ShouldCounterAttack(
+                nearbyDefenderSquadCount: 2, freeNearbyDefenderSquadCount: 2,
+                nearbyHostileSquadCount: 10, nearbyFriendlySecuredObjectivePressured: false,
+                objectiveLostRecentlyWithHostilesNearby: false),
+            "Overwhelming hostile presence did not reject the counter-attack.");
+
+        // Same 1.15 score both times (2 defenders, 2 hostiles): only free squad
+        // count differs, so the marginal-advantage branch is the sole variable.
+        False(ObjectiveCounterAttackPlanCore.ShouldCounterAttack(
+                nearbyDefenderSquadCount: 2, freeNearbyDefenderSquadCount: 1,
+                nearbyHostileSquadCount: 2, nearbyFriendlySecuredObjectivePressured: false,
+                objectiveLostRecentlyWithHostilesNearby: false),
+            "A marginal advantage attacked with only one free squad available.");
+        True(ObjectiveCounterAttackPlanCore.ShouldCounterAttack(
+                nearbyDefenderSquadCount: 2, freeNearbyDefenderSquadCount: 2,
+                nearbyHostileSquadCount: 2, nearbyFriendlySecuredObjectivePressured: false,
+                objectiveLostRecentlyWithHostilesNearby: false),
+            "A marginal advantage with two free squads did not attack.");
+    }
+
+    private static void CounterAttackGatePenaltiesRequireActualNearbyThreats()
+    {
+        // 5 defenders (1 free) / 4 hostiles -> score 1.4375, a strong advantage
+        // on its own. A 0.20 nearby-pressure penalty drops it under 1.35 into
+        // the marginal band, where only one free squad is not enough.
+        True(ObjectiveCounterAttackPlanCore.ShouldCounterAttack(
+                nearbyDefenderSquadCount: 5, freeNearbyDefenderSquadCount: 1,
+                nearbyHostileSquadCount: 4, nearbyFriendlySecuredObjectivePressured: false,
+                objectiveLostRecentlyWithHostilesNearby: false),
+            "The undiscounted baseline score stopped attacking.");
+        False(ObjectiveCounterAttackPlanCore.ShouldCounterAttack(
+                nearbyDefenderSquadCount: 5, freeNearbyDefenderSquadCount: 1,
+                nearbyHostileSquadCount: 4, nearbyFriendlySecuredObjectivePressured: true,
+                objectiveLostRecentlyWithHostilesNearby: false),
+            "A pressured nearby friendly-secured objective failed to hold off the attack.");
+
+        // 6 defenders (1 free) / 5 hostiles -> score 1.38, likewise a strong
+        // advantage that a 0.20 recent-repulse penalty pulls under 1.35.
+        True(ObjectiveCounterAttackPlanCore.ShouldCounterAttack(
+                nearbyDefenderSquadCount: 6, freeNearbyDefenderSquadCount: 1,
+                nearbyHostileSquadCount: 5, nearbyFriendlySecuredObjectivePressured: false,
+                objectiveLostRecentlyWithHostilesNearby: false),
+            "The undiscounted baseline score stopped attacking.");
+        False(ObjectiveCounterAttackPlanCore.ShouldCounterAttack(
+                nearbyDefenderSquadCount: 6, freeNearbyDefenderSquadCount: 1,
+                nearbyHostileSquadCount: 5, nearbyFriendlySecuredObjectivePressured: false,
+                objectiveLostRecentlyWithHostilesNearby: true),
+            "A fresh repulse with hostiles still near failed to hold off the attack.");
+
+        False(ObjectiveCounterAttackPlanCore.ObjectiveLostRecentlyWithHostilesNearby(
+                objectiveLostRecently: true, nearbyHostileSquadCount: 0),
+            "A fresh loss with no hostiles nearby incurred the repulse penalty.");
+        True(ObjectiveCounterAttackPlanCore.ObjectiveLostRecentlyWithHostilesNearby(
+                objectiveLostRecently: true, nearbyHostileSquadCount: 1),
+            "A fresh loss with hostiles still near did not trigger the repulse condition.");
+    }
+
+    private static void CounterAttackTargetSelectionNeverLeavesDefendersWithNoOrders()
+    {
+        var mixed = new List<CounterAttackCandidate>
+        {
+            new(ObjectiveId: 1, EnemySecured: false, PassesGate: true),
+            new(ObjectiveId: 2, EnemySecured: true, PassesGate: false),
+            new(ObjectiveId: 3, EnemySecured: true, PassesGate: true),
+        };
+        SequenceEqual(
+            new[] { 1, 3 },
+            ObjectiveCounterAttackPlanCore.SelectCounterAttackTargets(mixed),
+            "Selection did not keep every friendly-secured candidate and the accepted recapture target.");
+
+        var allRejected = new List<CounterAttackCandidate>
+        {
+            new(ObjectiveId: 5, EnemySecured: true, PassesGate: false),
+            new(ObjectiveId: 6, EnemySecured: true, PassesGate: false),
+        };
+        SequenceEqual(
+            new[] { 5, 6 },
+            ObjectiveCounterAttackPlanCore.SelectCounterAttackTargets(allRejected),
+            "The no-alternative bypass failed to keep every candidate when the gate rejected all of them.");
     }
 
     private static void UnchangedSquadIntentDoesNotRestartNativeMovement()

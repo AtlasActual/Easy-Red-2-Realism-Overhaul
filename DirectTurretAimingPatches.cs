@@ -258,6 +258,8 @@ internal static class DirectTurretAiming
                 var scale =
                     1f /
                     (MousePixelsPerSecondForFullTraverse * deltaTime);
+                // Mirrors the sign the game itself applies to the stick's
+                // vertical axis, so invert-Y is honored once on either device.
                 var verticalDirection =
                     SavableData.Settings?.controls?.YAxisDirection_tank ?? 1;
 
@@ -273,8 +275,15 @@ internal static class DirectTurretAiming
 
         if (GamepadsAPI.GetGamepad() != null)
         {
-            input = PlayerController.GetCameraRotationInput_Tank();
-            input.y = -input.y;
+            // GetCameraRotationInput_Tank returns (vertical, horizontal), not
+            // (horizontal, vertical): .x is the pitch axis (right stick Y,
+            // already multiplied by -YAxisDirection_tank inside the game) and
+            // .y is the yaw axis (right stick X, raw). ManualRotate takes
+            // (leftRight, upDown), so the components have to be transposed, and
+            // no extra negation belongs here -- the game applies the player's
+            // invert-Y setting itself, exactly once.
+            var stick = PlayerController.GetCameraRotationInput_Tank();
+            input = new Vector2(stick.y, stick.x);
         }
 
         return true;

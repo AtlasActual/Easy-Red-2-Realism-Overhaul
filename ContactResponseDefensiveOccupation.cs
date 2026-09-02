@@ -540,6 +540,21 @@ internal static partial class ContactResponse
             var coverKnownCompromised =
                 IsDefensiveAnchorKnownCompromised(soldier, state);
 
+            // A defensive anchor must remain a usable firing position, not merely a
+            // physically protective location. This releases a defender that ended up
+            // deep inside a building or behind a wall with no usable firing lane.
+            var anchorHasFiringLane = true;
+            if (!coverKnownCompromised && defendOrderActive && state.HasThreatPosition &&
+                now < state.ContactUntil)
+            {
+                var evaluationSucceeded = TryGetCurrentCoverEvaluation(
+                    soldier, state, state.LastThreatPosition, now, out var firingEvaluation,
+                    mayDeferFirstEval: false);
+                anchorHasFiringLane = evaluationSucceeded &&
+                                      firingEvaluation.IsProtective &&
+                                      firingEvaluation.Quality.HasFiringLane;
+            }
+
             // A defender anchored against a predicted approach axis ends up on the
             // wrong side of cover when the real attack arrives from a sustained
             // different direction. When a currently-engaged live enemy is measured to
@@ -564,6 +579,7 @@ internal static partial class ContactResponse
             }
 
             if (!anchorDefeatedByRealThreat &&
+                anchorHasFiringLane &&
                 InfantryCoverDecisionCore.ShouldKeepDefensiveCoverAnchor(
                     defendOrderActive,
                     anchorInsideArea,
@@ -639,7 +655,8 @@ internal static partial class ContactResponse
             if (cover == null || cover.WasCollected || cover.Pointer == IntPtr.Zero ||
                 !ExclusiveCoverAssignmentPatch.TryGetUsableCoverPosition(
                     cover, out var coverPosition) ||
-                !IsCurrentCoverProtective(soldier, state, threatPosition, now))
+                !IsCurrentCoverSuitableDefensiveFiringPosition(
+                    soldier, state, threatPosition, now))
             {
                 return false;
             }
@@ -663,6 +680,19 @@ internal static partial class ContactResponse
         {
             return false;
         }
+    }
+
+    private static bool IsCurrentCoverSuitableDefensiveFiringPosition(
+        Soldier soldier,
+        ContactResponseState state,
+        Vector3 threatPosition,
+        float now)
+    {
+        return TryGetCurrentCoverEvaluation(
+                   soldier, state, threatPosition, now, out var evaluation,
+                   mayDeferFirstEval: false) &&
+               evaluation.IsProtective &&
+               evaluation.Quality.HasFiringLane;
     }
 
     private static bool TryCaptureReservedDefensiveCoverAnchor(

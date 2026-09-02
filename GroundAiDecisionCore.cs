@@ -717,9 +717,39 @@ internal static class HaltSpacingCore
     // fighting-halt episode, so a soldier cannot alternate between stepping and halting.
     internal const float StepWindowSeconds = 1.25f;
 
-    internal static bool ShouldAttempt(bool attemptedThisEpisode, MovementOwner owner)
-        => !attemptedThisEpisode &&
+    // Two bodies genuinely overlapping: closer than this and they are visibly stacked,
+    // not merely sharing a crowded doorway. Retries only fire while this is true.
+    internal const float ClippingRadiusMeters = 1.0f;
+    // The bounded fallback step when the full-length separation step is blocked. Short
+    // enough to still be reachable in a compact squad, long enough to clear an overlap.
+    internal const float ShortStepMeters = 1.5f;
+    // How often an unresolved overlap may retry. Bounds the correction to "every few
+    // seconds", never a per-frame loop.
+    internal const float RetryIntervalSeconds = 4f;
+
+    internal static bool ShouldAttempt(
+        bool attemptedThisEpisode, MovementOwner owner, bool holdsCoverSlot)
+        => !attemptedThisEpisode && !holdsCoverSlot &&
            owner is MovementOwner.EngagementHold or MovementOwner.CoverHold;
+
+    internal static bool ShouldAttempt(bool attemptedThisEpisode, MovementOwner owner)
+        => ShouldAttempt(attemptedThisEpisode, owner, holdsCoverSlot: false);
+
+    /// <summary>
+    /// True only while a soldier who already took his one rising-edge attempt is still
+    /// genuinely overlapping a squadmate (the adapter checks that physically, after this
+    /// passes) and his retry cooldown has elapsed. A soldier holding his reserved cover
+    /// slot never retries - the intruder is the one who moves.
+    /// </summary>
+    internal static bool ShouldRetry(
+        bool attemptedThisEpisode,
+        MovementOwner owner,
+        bool holdsCoverSlot,
+        float now,
+        float nextRetryAt)
+        => attemptedThisEpisode && !holdsCoverSlot &&
+           owner is MovementOwner.EngagementHold or MovementOwner.CoverHold &&
+           now >= nextRetryAt;
 
     internal static bool RelocationAllowsAttempt(
         bool relocating,
@@ -845,9 +875,40 @@ internal static class HaltSpacingCore
         float minimumSpacingMeters,
         int candidateIndex,
         out MapPoint step)
+        => TryResolveCandidateStep(
+            self,
+            neighbour,
+            threat,
+            hasThreat,
+            minimumSpacingMeters,
+            candidateIndex,
+            minimumSpacingMeters + DestinationClearanceMeters,
+            minimumSpacingMeters,
+            out step);
+
+    /// <summary>
+    /// As above, but with the destination distance (<paramref name="stepMeters"/>) and
+    /// the clearance the destination must keep from the neighbour
+    /// (<paramref name="clearanceMeters"/>) taken as parameters instead of being derived
+    /// from <paramref name="minimumSpacingMeters"/>. The direction fan and the "already
+    /// adequately spaced" gate are unchanged - only the resulting step's length and its
+    /// acceptance distance differ, which is what lets a blocked full-length separation
+    /// step fall back to a short clipping-clear step along the same candidate directions.
+    /// </summary>
+    internal static bool TryResolveCandidateStep(
+        MapPoint self,
+        MapPoint neighbour,
+        MapPoint threat,
+        bool hasThreat,
+        float minimumSpacingMeters,
+        int candidateIndex,
+        float stepMeters,
+        float clearanceMeters,
+        out MapPoint step)
     {
         step = default;
         if (candidateIndex < 0 || candidateIndex >= CandidateDirectionCount ||
+            !float.IsFinite(stepMeters) || stepMeters <= 0f ||
             !TryResolveStep(
                 self,
                 neighbour,
@@ -903,12 +964,11 @@ internal static class HaltSpacingCore
         if (!float.IsFinite(directionLength) || directionLength <= 0.01f)
             return false;
 
-        var targetDistance = minimumSpacingMeters + DestinationClearanceMeters;
         var candidate = new MapPoint(
-            dirX / directionLength * targetDistance,
-            dirZ / directionLength * targetDistance);
+            dirX / directionLength * stepMeters,
+            dirZ / directionLength * stepMeters);
         var destination = new MapPoint(self.X + candidate.X, self.Z + candidate.Z);
-        if (DestinationsConflict(destination, neighbour, minimumSpacingMeters))
+        if (DestinationsConflict(destination, neighbour, clearanceMeters))
             return false;
 
         step = candidate;
@@ -1615,16 +1675,20 @@ internal static class ObjectiveDefenseAreaCore
     internal const float MaximumHoldRadiusMeters = 32f;
 
     /// <summary>
-    /// Keeps one squad centered on the actual capture point and clamps every
-    /// surplus sector so its native HoldArea circle remains inside the
-    /// objective. Cover selection remains free inside that circle, but a dense
-    /// building behind the point can no longer pull the entire defense away.
+    /// Keeps one squad centered on the actual capture point. Every surplus
+    /// sector's center may be pushed out toward the objective edge — and its
+    /// native HoldArea circle allowed to overhang outward — when the offset
+    /// is biased toward the supplied threat direction; flank and rear offsets
+    /// keep a tighter leash so a dense building or trench line behind the
+    /// point still cannot drag the whole defense rearward. Cover selection
+    /// remains free inside the resulting circle either way.
     /// </summary>
     internal static ObjectiveDefenseArea Build(
         MapPoint objectiveCenter,
         float objectiveRadius,
         MapPoint preferredCenter,
-        bool coreGarrison)
+        bool coreGarrison,
+        MapPoint? threatDirection = null)
     {
         if (!objectiveCenter.IsFinite || !preferredCenter.IsFinite ||
             !float.IsFinite(objectiveRadius))
@@ -1643,8 +1707,25 @@ internal static class ObjectiveDefenseAreaCore
         var dx = preferredCenter.X - objectiveCenter.X;
         var dz = preferredCenter.Z - objectiveCenter.Z;
         var distance = MathF.Sqrt(dx * dx + dz * dz);
-        var maximumOffset = Math.Max(0f, effectiveRadius - holdRadius);
-        if (distance <= maximumOffset || distance <= 0.001f)
+        if (distance <= 0.001f)
+            return new ObjectiveDefenseArea(preferredCenter, holdRadius);
+
+        // The widest offset the rule ever allows (a sector directly ahead of
+        // the threat). This is the same value MaximumAnchorOffset reports to
+        // the cover-anchor search, so the two cannot silently drift apart.
+        var forwardOffset = MaximumAnchorOffset(effectiveRadius);
+        var maximumOffset = forwardOffset * 0.75f;
+        if (threatDirection.HasValue)
+        {
+            var direction = threatDirection.Value;
+            if (direction.IsFinite && (direction.X != 0f || direction.Z != 0f))
+            {
+                var isForward = dx * direction.X + dz * direction.Z >= 0f;
+                maximumOffset = isForward ? forwardOffset : forwardOffset * 0.5f;
+            }
+        }
+
+        if (distance <= maximumOffset)
             return new ObjectiveDefenseArea(preferredCenter, holdRadius);
 
         var scale = maximumOffset / distance;
@@ -1655,15 +1736,217 @@ internal static class ObjectiveDefenseAreaCore
             holdRadius);
     }
 
-    internal static float MaximumAnchorOffset(float objectiveRadius, float holdRadius)
+    /// <summary>
+    /// The widest center offset Build can ever produce for a non-core sector
+    /// (the forward case). Used as the cover-anchor search's outer distance
+    /// filter: a candidate further than this could never be selected however
+    /// its bearing turns out, while a candidate that is actually flank/rear
+    /// still gets clamped tighter by Build once its real bearing is known.
+    /// </summary>
+    internal static float MaximumAnchorOffset(float objectiveRadius)
     {
-        if (!float.IsFinite(objectiveRadius) || !float.IsFinite(holdRadius))
+        if (!float.IsFinite(objectiveRadius))
             return 0f;
 
-        return Math.Max(
-            0f,
-            Math.Max(MinimumObjectiveRadiusMeters, objectiveRadius) -
-            Math.Max(0f, holdRadius));
+        return Math.Max(MinimumObjectiveRadiusMeters, objectiveRadius);
+    }
+}
+
+internal readonly record struct ObjectiveCapacityInput(int Id, bool Pressured, bool EnemySecured);
+
+/// <summary>
+/// One recapture candidate for <see cref="ObjectiveCounterAttackPlanCore.SelectCounterAttackTargets"/>.
+/// <see cref="PassesGate"/> is meaningless (and never consulted) for a candidate
+/// that is not <see cref="EnemySecured"/>, since only a recapture target is ever gated.
+/// </summary>
+internal readonly record struct CounterAttackCandidate(int ObjectiveId, bool EnemySecured, bool PassesGate);
+
+/// <summary>
+/// Defender squad-count bookkeeping for objective planning. Baseline capacity
+/// is one squad per target plus a round-robin share of any surplus squads,
+/// then a single pressured objective may borrow one squad from the largest
+/// other target (unchanged prior behavior). For defenders only, an
+/// enemy-secured recapture target is then capped so a counter-attack cannot
+/// strip every other objective; the excess is handed to the remaining
+/// targets so no squad goes unassigned. Every friendly-secured or neutral
+/// target keeps its guaranteed baseline of one squad throughout, since
+/// capacity is only ever added to those targets here, never removed below
+/// the baseline. The attacker branch is returned untouched.
+/// </summary>
+internal static class ObjectiveCounterAttackPlanCore
+{
+    internal const int MaxCounterAttackSquadsPerObjective = 2;
+
+    /// <summary>
+    /// Shared assessment radius: how far from a lost objective a defender or
+    /// hostile squad counts toward <see cref="ShouldCounterAttack"/>. The caller
+    /// (the Unity-dependent planner) and the deterministic tests both key off
+    /// this one value so they cannot silently drift apart.
+    /// </summary>
+    internal const float CounterAttackAssessmentRadiusMeters = 125f;
+
+    private const float FriendlyWeight = 1.15f;
+    private const float EnemyWeight = 1f;
+    private const float NearbyPressurePenalty = 0.20f;
+    private const float RecentRepulsePenalty = 0.20f;
+    private const float StrongAdvantageThreshold = 1.35f;
+    private const float MarginalAdvantageThreshold = 1.0f;
+    private const int MarginalAdvantageMinimumFreeSquads = 2;
+
+    /// <summary>
+    /// A fresh repulse is only a reason to hold off when hostiles are still
+    /// close; a point lost minutes ago, or lost with no enemy left nearby, does
+    /// not carry the penalty. Kept as its own pure step (rather than folded into
+    /// <see cref="ShouldCounterAttack"/>) so the caller and the tests share one
+    /// combination rule.
+    /// </summary>
+    internal static bool ObjectiveLostRecentlyWithHostilesNearby(
+        bool objectiveLostRecently,
+        int nearbyHostileSquadCount)
+        => objectiveLostRecently && nearbyHostileSquadCount > 0;
+
+    /// <summary>
+    /// Whether a defender should actually launch a counter-attack on a lost
+    /// objective, instead of committing squads to every EnemySecured objective
+    /// unconditionally every planning cycle. A clear local advantage attacks at
+    /// once, a marginal advantage needs weight of numbers, and a bad local
+    /// situation makes the defenders consolidate on what they still hold
+    /// instead. Every input is plain data the caller already resolved, so this
+    /// stays deterministic, Unity-free, and testable.
+    /// </summary>
+    internal static bool ShouldCounterAttack(
+        int nearbyDefenderSquadCount,
+        int freeNearbyDefenderSquadCount,
+        int nearbyHostileSquadCount,
+        bool nearbyFriendlySecuredObjectivePressured,
+        bool objectiveLostRecentlyWithHostilesNearby)
+    {
+        if (freeNearbyDefenderSquadCount <= 0)
+            return false;
+
+        var score = nearbyDefenderSquadCount * FriendlyWeight /
+                    MathF.Max(1f, nearbyHostileSquadCount * EnemyWeight);
+
+        if (nearbyFriendlySecuredObjectivePressured)
+            score -= NearbyPressurePenalty;
+        if (objectiveLostRecentlyWithHostilesNearby)
+            score -= RecentRepulsePenalty;
+
+        if (score >= StrongAdvantageThreshold)
+            return true;
+
+        return score >= MarginalAdvantageThreshold &&
+               freeNearbyDefenderSquadCount >= MarginalAdvantageMinimumFreeSquads;
+    }
+
+    /// <summary>
+    /// Applies <see cref="ShouldCounterAttack"/>'s verdict across a faction's
+    /// candidate objectives for one planning cycle. A candidate that is not
+    /// EnemySecured is never gated - only a recapture target needs the
+    /// decision. If gating would leave no targets at all, every candidate is
+    /// kept instead: defenders must never freeze when every active objective
+    /// is lost.
+    /// </summary>
+    internal static List<int> SelectCounterAttackTargets(
+        IReadOnlyList<CounterAttackCandidate> candidates)
+    {
+        var kept = new List<int>();
+        foreach (var candidate in candidates)
+        {
+            if (!candidate.EnemySecured || candidate.PassesGate)
+                kept.Add(candidate.ObjectiveId);
+        }
+
+        if (kept.Count > 0)
+            return kept;
+
+        var bypassed = new List<int>(candidates.Count);
+        foreach (var candidate in candidates)
+            bypassed.Add(candidate.ObjectiveId);
+        return bypassed;
+    }
+
+    /// <summary>
+    /// Defenders treat an enemy-secured objective as a recapture target and
+    /// issue an attack order for the squads committed to it instead of a
+    /// defend order. Friendly-secured and neutral objectives are unaffected,
+    /// and an attacking faction always attacks regardless of EnemySecured.
+    /// </summary>
+    internal static bool ShouldIssueAttackOrder(bool attacking, bool enemySecured)
+        => attacking || enemySecured;
+
+    internal static Dictionary<int, int> BuildCapacities(
+        int squadCount,
+        IReadOnlyList<ObjectiveCapacityInput> targets,
+        bool attacking)
+    {
+        var capacities = targets.ToDictionary(target => target.Id, _ => 1);
+        if (targets.Count > 0)
+        {
+            var remaining = squadCount - targets.Count;
+            for (var index = 0; index < remaining; index++)
+                capacities[targets[index % targets.Count].Id]++;
+        }
+
+        if (attacking)
+            return capacities;
+
+        ApplyPressureReallocation(capacities, targets);
+        CapCounterAttackCapacity(capacities, targets);
+        return capacities;
+    }
+
+    private static void ApplyPressureReallocation(
+        Dictionary<int, int> capacities,
+        IReadOnlyList<ObjectiveCapacityInput> targets)
+    {
+        ObjectiveCapacityInput? threatened = targets
+            .Where(target => target.Pressured)
+            .OrderBy(target => target.Id)
+            .Select(target => (ObjectiveCapacityInput?)target)
+            .FirstOrDefault();
+        if (!threatened.HasValue)
+            return;
+
+        ObjectiveCapacityInput? donor = targets
+            .Where(target => target.Id != threatened.Value.Id && capacities[target.Id] > 1)
+            .OrderByDescending(target => capacities[target.Id])
+            .ThenBy(target => target.Id)
+            .Select(target => (ObjectiveCapacityInput?)target)
+            .FirstOrDefault();
+        if (!donor.HasValue)
+            return;
+
+        capacities[donor.Value.Id]--;
+        capacities[threatened.Value.Id]++;
+    }
+
+    private static void CapCounterAttackCapacity(
+        Dictionary<int, int> capacities,
+        IReadOnlyList<ObjectiveCapacityInput> targets)
+    {
+        var recipients = targets
+            .Where(target => !target.EnemySecured)
+            .OrderBy(target => target.Id)
+            .ToList();
+        if (recipients.Count == 0)
+            return;
+
+        foreach (var target in targets.Where(target => target.EnemySecured))
+        {
+            var excess = capacities[target.Id] - MaxCounterAttackSquadsPerObjective;
+            if (excess <= 0)
+                continue;
+
+            capacities[target.Id] = MaxCounterAttackSquadsPerObjective;
+            var recipientIndex = 0;
+            while (excess > 0)
+            {
+                capacities[recipients[recipientIndex].Id]++;
+                excess--;
+                recipientIndex = (recipientIndex + 1) % recipients.Count;
+            }
+        }
     }
 }
 
@@ -2025,7 +2308,7 @@ internal readonly record struct DefenderCrewCandidate(
 internal readonly record struct DefensiveWeaponCandidate(
     int WeaponId,
     bool Viable,
-    bool ArmorPiercing,
+    bool AntiTankCapable,
     float Caliber,
     float AmmunitionScore,
     float ThreatCoverage,
@@ -2083,8 +2366,8 @@ internal static class DefenderAllocationCore
                              float.IsFinite(weapon.InfantryApproachCoverage))
             .GroupBy(weapon => weapon.WeaponId)
             .Select(group => group.First())
-            .OrderByDescending(weapon => armorReported && weapon.ArmorPiercing)
-            .ThenByDescending(weapon => armorReported && weapon.ArmorPiercing ? weapon.Caliber : 0f)
+            .OrderByDescending(weapon => armorReported && weapon.AntiTankCapable)
+            .ThenByDescending(weapon => armorReported && weapon.AntiTankCapable ? weapon.Caliber : 0f)
             .ThenByDescending(weapon => armorReported ? weapon.ThreatCoverage : weapon.InfantryApproachCoverage)
             .ThenByDescending(weapon => weapon.AmmunitionScore)
             .ThenBy(weapon => weapon.WeaponId)

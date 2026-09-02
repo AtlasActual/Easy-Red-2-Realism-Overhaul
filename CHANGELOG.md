@@ -2,6 +2,18 @@
 
 This file records only concrete, player-visible changes in each released version of Easy Red 2 Realism Overhaul. It is a living description of the shipped mod: superseded wording is replaced with the final behavior, and changes that are removed or reverted are deleted instead of retained as historical notes.
 
+## 1.1.3 - 2026-09-02
+
+Easy Red 2 compatibility: version 2.0.9 Stable, Steam public branch build `24512933` (August 1, 2026).
+
+- Defenders now reject and abandon defensive cover that has no usable firing lane toward the attacker, and favor the outer defensive ring facing the threat over the geometric center of the objective.
+- Defending squads will now assume better positions in order to defend their assigned objective.
+- Defenders now weigh the local balance of squads before counter-attacking an objective the enemy has secured: a clear local advantage attacks at once, a marginal one waits for more free squads, and a bad local situation makes the defenders consolidate on the objectives they still hold instead of feeding squads into a hopeless assault. When every active objective is lost, defenders always attack rather than freeze. A launched counter-attack still commits up to two squads per lost objective while keeping at least one squad on every objective still held.
+- Fixed gamepad aiming on mounted static guns and ground-vehicle turrets moving the wrong way: stick left and right elevated the gun while up and down traversed it, and traverse was reversed. Mouse aiming was unaffected and is unchanged.
+- Fixed defending AI never crewing unmanned static anti-tank guns and other emplacements; defenders holding a position now actually send a soldier to man a nearby gun. The **Minimum Gun Caliber** setting now has an effect: it decides which guns count as anti-tank when several are available and enemy armor is about, while lighter emplacements are still crewed for their value against infantry.
+- AI infantry who end up crouching or standing inside a squadmate now keep taking short steps clear every few seconds until they no longer overlap, and a blocked full-spacing step falls back to a shorter one instead of leaving the group stacked. A soldier holding his reserved cover slot stays put; the intruder is the one who moves.
+- AI soldiers no longer call out ordinary enemy tanks and other ground vehicles as artillery when they spot them; vehicle contacts now always use the armor callout.
+
 ## 1.1.2 - 2026-08-08
 
 Easy Red 2 compatibility: version 2.0.9 Stable, Steam public branch build `24512933` (August 1, 2026).

@@ -83,6 +83,9 @@ internal sealed class ContactResponseState
     internal float HaltSpacingMoveUntil;
     internal bool HaltSpacingAttemptedThisEpisode;
     internal Vector3 HaltSpacingAttemptPosition;
+    // Earliest time a soldier who already made his rising-edge attempt may retry a
+    // clipping-clear step. Bounds the retry to "every few seconds" instead of a loop.
+    internal float HaltSpacingNextRetryAt;
     internal bool HasHaltSpacingTarget;
     internal Vector3 HaltSpacingTarget;
     internal bool SuppressionMovementOwned;

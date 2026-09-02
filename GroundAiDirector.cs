@@ -435,6 +435,7 @@ internal static class GroundAiDirector
         SoldierResolutions.Clear();
         LastMovementAuthority.Clear();
         EntityFactions.Clear();
+        ScriptLockedSquads.Clear();
         StaticAntiTankStaffing.ResetBattle();
         StaticGunInfantryTargeting.ResetBattle();
         SoldierFireDanger.Reset();

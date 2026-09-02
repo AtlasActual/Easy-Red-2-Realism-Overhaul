@@ -113,13 +113,14 @@ internal static class BattleChatter
         if (target.IsAirVehicle())
             return null;
 
-        if (!target.IsWheeledVehicleOrTank())
-            return VoiceManager.VoiceClip.enemyInfantrySpotted;
-
-        var vehicle = target.TryCast<Vehicle>();
-        return vehicle != null && vehicle.IsArtillery()
-            ? VoiceManager.VoiceClip.enemyArtillerySpotted
-            : VoiceManager.VoiceClip.enemyTankSpotted;
+        // Vehicle.IsArtillery() is not a vehicle-class check: it is true whenever
+        // any turret weapon fires slower than roughly 170 rounds per minute, which
+        // covers nearly every cannon-armed tank. Using it here made soldiers call
+        // out ordinary armor as artillery, so ground vehicles always get the
+        // armor line.
+        return target.IsWheeledVehicleOrTank()
+            ? VoiceManager.VoiceClip.enemyTankSpotted
+            : VoiceManager.VoiceClip.enemyInfantrySpotted;
     }
 
     private static bool TrySay(

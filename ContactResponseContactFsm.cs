@@ -1222,6 +1222,7 @@ internal static partial class ContactResponse
         state.HaltSpacingMoveUntil = 0f;
         state.HaltSpacingAttemptedThisEpisode = false;
         state.HaltSpacingAttemptPosition = default;
+        state.HaltSpacingNextRetryAt = 0f;
         state.HasHaltSpacingTarget = false;
         state.HaltSpacingTarget = default;
         state.ContactUntil = 0f;
@@ -1358,6 +1359,7 @@ internal static partial class ContactResponse
         state.HaltSpacingMoveUntil = 0f;
         state.HaltSpacingAttemptedThisEpisode = false;
         state.HaltSpacingAttemptPosition = default;
+        state.HaltSpacingNextRetryAt = 0f;
         state.HasHaltSpacingTarget = false;
         state.HaltSpacingTarget = default;
         ResetManeuverCoverHold(state);

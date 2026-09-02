@@ -6,9 +6,27 @@ ER2RealismOverhaul is built around the rough edges that become hard to ignore af
 
 The goal is to fix those moments without replacing the game underneath them. This is not a health or damage multiplier mod; Easy Red 2's missions, armour system, and basic damage model remain intact.
 
-> **Current release:** 1.1.1
+> **Current release:** 1.1.3
 >
 > **Compatibility:** Tested with Easy Red 2 2.0.9 Stable, Steam public-branch build `24512933` (August 1, 2026)
+
+## What's new in 1.1.3
+
+- Defenders reject and abandon defensive cover with no usable firing lane toward the attacker, and favor the outer defensive ring facing the threat over the center of the objective.
+- Defending squads assume much better positions to defend their assigned objective.
+- Defenders weigh the local balance of squads before counter-attacking a lost objective: a clear advantage attacks at once, a marginal one waits for more free squads, and a bad situation consolidates on the objectives still held. When every active objective is lost, defenders always attack.
+- Defending AI now actually crew unmanned static anti-tank guns and other emplacements, and the **Minimum Gun Caliber** setting decides which guns count as anti-tank.
+- AI infantry standing or crouching inside a squadmate keep taking short steps clear until they no longer overlap.
+- AI soldiers no longer call out ordinary enemy tanks and other ground vehicles as artillery.
+- Fixed gamepad aiming on mounted static guns and ground-vehicle turrets moving the wrong way.
+
+## What's new in 1.1.2
+
+- General refinements to AI behavior across objective play, movement, cover interactions, and vehicle combat.
+- Added the enabled-by-default **Spectator HUD** option, which keeps the full native gameplay HUD in the cinematic spectator camera; **F** toggles it.
+- Fresh installations use the maintainer's current tuned settings as their compiled defaults.
+- Aircraft mouse point aiming keeps turning past the original nose direction while the camera looks behind, and manual A/D roll no longer cancels the mouse-aim pitch and rudder inputs.
+- Fixed **Aircraft Speed** scaling raising takeoff and lift thresholds while lowering maximum speed.
 
 ## What's new in 1.1.1
 

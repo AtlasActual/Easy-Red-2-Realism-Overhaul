@@ -152,6 +152,7 @@ internal static partial class ContactResponse
         {
             state.HaltSpacingAttemptedThisEpisode = false;
             state.HaltSpacingAttemptPosition = default;
+            state.HaltSpacingNextRetryAt = 0f;
         }
 
         // End a dispersion grant as soon as its destination is reached instead of
@@ -271,7 +272,6 @@ internal static partial class ContactResponse
         float now)
     {
         if (!Settings.HaltSpacingEnabled.Value ||
-            !HaltSpacingCore.ShouldAttempt(state.HaltSpacingAttemptedThisEpisode, owner) ||
             !HaltSpacingCore.RelocationAllowsAttempt(
                 state.Relocating,
                 owner,
@@ -280,17 +280,51 @@ internal static partial class ContactResponse
             return false;
         }
 
-        // Mark the episode even when no reachable step exists. Repeatedly probing and
-        // granting movement is the crouch/run/stop loop this correction is designed to end.
-        state.HaltSpacingAttemptedThisEpisode = true;
-        state.HaltSpacingAttemptPosition = soldier.transform.position;
-        if (!TryStartSpacingStep(ai, soldier, state, soldierId, now))
-            return false;
+        var holdsCoverSlot = state.ReservedCoverId != IntPtr.Zero;
 
-        AiState.Trace(
-            $"Halt spacing: soldier {soldierId} stepped clear of a halted squadmate " +
-            "before taking his own fighting halt");
-        return true;
+        if (HaltSpacingCore.ShouldAttempt(
+                state.HaltSpacingAttemptedThisEpisode, owner, holdsCoverSlot))
+        {
+            // Mark the episode even when no reachable step exists. Repeatedly probing and
+            // granting movement is the crouch/run/stop loop this correction is designed
+            // to end.
+            state.HaltSpacingAttemptedThisEpisode = true;
+            state.HaltSpacingAttemptPosition = soldier.transform.position;
+            state.HaltSpacingNextRetryAt = now + HaltSpacingCore.RetryIntervalSeconds;
+            if (!TryStartSpacingStep(
+                    ai, soldier, state, soldierId, now,
+                    InfantryCoverPolicy.OccupancyRadiusMeters))
+            {
+                return false;
+            }
+
+            AiState.Trace(
+                $"Halt spacing: soldier {soldierId} stepped clear of a halted squadmate " +
+                "before taking his own fighting halt");
+            return true;
+        }
+
+        if (HaltSpacingCore.ShouldRetry(
+                state.HaltSpacingAttemptedThisEpisode, owner, holdsCoverSlot, now,
+                state.HaltSpacingNextRetryAt))
+        {
+            // Set the next retry deadline before probing, so a failed probe (nobody is
+            // actually overlapping any more) still waits a full interval rather than
+            // retrying every frame.
+            state.HaltSpacingNextRetryAt = now + HaltSpacingCore.RetryIntervalSeconds;
+            if (!TryStartSpacingStep(
+                    ai, soldier, state, soldierId, now, HaltSpacingCore.ClippingRadiusMeters))
+            {
+                return false;
+            }
+
+            AiState.Trace(
+                $"Halt spacing: soldier {soldierId} stepped out of a squadmate he was " +
+                "overlapping");
+            return true;
+        }
+
+        return false;
     }
 
     internal static bool TryStartCoverConflictSeparation(
@@ -309,68 +343,96 @@ internal static partial class ContactResponse
         // this short step on the same decision if another valid slot is available.
         state.HaltSpacingAttemptedThisEpisode = true;
         state.HaltSpacingAttemptPosition = soldier.transform.position;
-        if (!TryStartSpacingStep(ai, soldier, state, soldierId, now))
+        if (!TryStartSpacingStep(
+                ai, soldier, state, soldierId, now, InfantryCoverPolicy.OccupancyRadiusMeters))
+        {
             return false;
+        }
 
         AiState.Trace(
             $"Cover occupancy: soldier {soldierId} stepped away from the retained slot owner");
         return true;
     }
 
+    /// <summary>
+    /// <paramref name="crowdRadius"/> only gates whether a nearby friendly counts as
+    /// "crowding" this soldier (the full separation distance on a rising edge or cover
+    /// conflict, the tight clipping radius on a retry). The candidate search itself
+    /// always tries the full-length separation step first, then falls back to a short
+    /// clipping-clear step along the same directions if every full-length candidate is
+    /// blocked - so a blocked full step never leaves a genuinely overlapping soldier
+    /// stuck in place.
+    /// </summary>
     private static bool TryStartSpacingStep(
         SoldierAI ai,
         Soldier soldier,
         ContactResponseState state,
         int soldierId,
-        float now)
+        float now,
+        float crowdRadius)
     {
         var separation = InfantryCoverPolicy.OccupancyRadiusMeters;
         var position = soldier.transform.position;
         if (!CoverOccupancy.TryFindCrowdedFriendly(
-                position, soldier, separation, out var neighbour))
+                position, soldier, crowdRadius, out var neighbour))
             return false;
 
         var self = new MapPoint(position.x, position.z);
         var crowdedNeighbour = new MapPoint(neighbour.x, neighbour.z);
         var threat = new MapPoint(state.LastThreatPosition.x, state.LastThreatPosition.z);
         var target = default(Vector3);
+        var stepLength = 0f;
         var foundTarget = false;
-        for (var candidateIndex = 0;
-             candidateIndex < HaltSpacingCore.CandidateDirectionCount;
-             candidateIndex++)
+        for (var pass = 0; pass < 2 && !foundTarget; pass++)
         {
-            if (!HaltSpacingCore.TryResolveCandidateStep(
-                    self,
-                    crowdedNeighbour,
-                    threat,
-                    state.HasThreatPosition,
-                    separation,
-                    candidateIndex,
-                    out var step))
-            {
-                continue;
-            }
+            var passStepMeters = pass == 0
+                ? separation + HaltSpacingCore.DestinationClearanceMeters
+                : HaltSpacingCore.ShortStepMeters;
+            var passClearanceMeters = pass == 0
+                ? separation
+                : HaltSpacingCore.ClippingRadiusMeters;
 
-            target = new Vector3(
-                position.x + step.X,
-                position.y,
-                position.z + step.Z);
-            if (AiState.HaltSpacingTargetReservedByOther(
-                    target, soldierId, now, separation) ||
-                !IsShortStepReachable(soldier, position, target))
+            for (var candidateIndex = 0;
+                 candidateIndex < HaltSpacingCore.CandidateDirectionCount;
+                 candidateIndex++)
             {
-                continue;
-            }
+                if (!HaltSpacingCore.TryResolveCandidateStep(
+                        self,
+                        crowdedNeighbour,
+                        threat,
+                        state.HasThreatPosition,
+                        separation,
+                        candidateIndex,
+                        passStepMeters,
+                        passClearanceMeters,
+                        out var step))
+                {
+                    continue;
+                }
 
-            foundTarget = true;
-            break;
+                var candidateTarget = new Vector3(
+                    position.x + step.X,
+                    position.y,
+                    position.z + step.Z);
+                if (AiState.HaltSpacingTargetReservedByOther(
+                        candidateTarget, soldierId, now, passClearanceMeters) ||
+                    !IsShortStepReachable(soldier, position, candidateTarget, passClearanceMeters))
+                {
+                    continue;
+                }
+
+                target = candidateTarget;
+                stepLength = passStepMeters;
+                foundTarget = true;
+                break;
+            }
         }
 
         if (!foundTarget)
             return false;
 
         var stepWindow = Mathf.Clamp(
-            separation / 1.5f + 0.35f,
+            stepLength / 1.5f + 0.35f,
             HaltSpacingCore.StepWindowSeconds,
             3.5f);
         state.HaltSpacingMoveUntil = now + stepWindow;
@@ -380,7 +442,8 @@ internal static partial class ContactResponse
         return true;
     }
 
-    private static bool IsShortStepReachable(Soldier soldier, Vector3 from, Vector3 to)
+    private static bool IsShortStepReachable(
+        Soldier soldier, Vector3 from, Vector3 to, float occupancyRadius)
     {
         try
         {
@@ -405,7 +468,7 @@ internal static partial class ContactResponse
                 return false;
             }
 
-            return !CoverOccupancy.IsOccupiedByOther(to, soldier);
+            return !CoverOccupancy.IsOccupiedByOther(to, soldier, occupancyRadius);
         }
         catch (NullReferenceException)
         {

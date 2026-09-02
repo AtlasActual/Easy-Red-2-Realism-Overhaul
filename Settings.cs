@@ -337,7 +337,7 @@ internal static class Settings
         ContactResponseEnabled = config.Bind("AI - Infantry tactics - Contact response", "Enabled", true,
             "Coordinates cover selection, forward relocations, and close engagement halts when infantry make contact.");
         HaltSpacingEnabled = config.Bind("AI - Infantry tactics - Contact response", "StepClearOfStackedSquadmates", true,
-            "When a soldier is about to take a fighting halt on top of a squadmate, he first takes one short sideways or rear-side step into a distinct open position. Cover-slot spacing is handled separately by the cover-search crowding penalty and is unaffected by this setting.");
+            "When a soldier is about to take a fighting halt on top of a squadmate, he first takes one short sideways or rear-side step into a distinct open position, and keeps taking a short step clear every few seconds for as long as he is still physically overlapping a squadmate. A soldier holding his own reserved cover slot never steps aside for this; the squadmate intruding on him does. Cover-slot spacing is handled separately by the cover-search crowding penalty and is unaffected by this setting.");
         InfantrySeparationDistance = config.Bind("AI - Infantry tactics - Contact response", "MinimumSoldierSeparationMeters", 3.02f,
             new ConfigDescription("Minimum center-to-center distance autonomous AI tries to preserve when reserving cover or settling into a fighting halt. Larger values reduce bunching but may leave very tightly spaced trench or building slots unused.", new AcceptableValueRange<float>(1.25f, 4f)));
         ContactImmediateFireDistance = config.Bind("AI - Infantry tactics - Contact response", "ImmediateFireDistanceMeters", 20.103f,
@@ -680,7 +680,7 @@ internal static class Settings
         ChatterSquadCooldownSeconds = config.Bind("AI - Infantry tactics - Battle chatter", "SquadCooldownSeconds", 6f,
             new ConfigDescription("Base minimum time between extra lines in the same squad. This prevents chorus-like callouts.", new AcceptableValueRange<float>(1.5f, 20f)));
         ChatterContactCalloutChance = config.Bind("AI - Infantry tactics - Battle chatter", "NewContactCalloutChance", 0.7f,
-            new ConfigDescription("Chance that a newly acquired infantry, armor, or artillery contact produces an extra native callout.", new AcceptableValueRange<float>(0f, 1f)));
+            new ConfigDescription("Chance that a newly acquired infantry or armor contact produces an extra native callout.", new AcceptableValueRange<float>(0f, 1f)));
         ChatterRoutineCalloutChance = config.Bind("AI - Infantry tactics - Battle chatter", "RoutineCalloutChance", 0.25f,
             new ConfigDescription("Chance at each randomized chatter opportunity while a soldier is doing something worth calling out.", new AcceptableValueRange<float>(0f, 1f)));
         ChatterRoutineMinimumSeconds = config.Bind("AI - Infantry tactics - Battle chatter", "RoutineMinimumIntervalSeconds", 16f,

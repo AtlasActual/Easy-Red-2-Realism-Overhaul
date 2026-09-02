@@ -127,6 +127,11 @@ internal static class StaticAntiTankStaffing
     {
         RefreshPlayerOverrides(now);
         var defensiveSquads = CollectDefensiveSquads();
+        if (defensiveSquads.Count == 0)
+        {
+            AiState.Trace("Defensive emplacement staffing: no defensive squads collected this cycle");
+        }
+
         var factions = defensiveSquads
             .Select(squad => squad.Leader?.faction ?? string.Empty)
             .Concat(AssignmentsByWeapon.Values.Select(assignment => assignment.Faction))
@@ -200,7 +205,12 @@ internal static class StaticAntiTankStaffing
         var armor = CollectReportedArmor(faction, areas);
         var runtimeWeapons = CollectWeapons(faction, areas, armor);
         if (runtimeWeapons.Count == 0)
+        {
+            AiState.Trace(
+                $"Defensive emplacement staffing: no viable weapons for faction {faction} " +
+                $"across {squads.Count} squad(s)");
             return;
+        }
 
         var squadCandidates = new List<DefenderSquadCandidate>(squads.Count);
         var crewCandidates = new List<DefenderCrewCandidate>();
@@ -241,16 +251,29 @@ internal static class StaticAntiTankStaffing
                 GroundAiDirector.IsExternallyControlledSquad(candidateSquad)));
         }
 
+        // A gun counts as anti-tank capable only when it both carries AP
+        // ammunition and meets the configured minimum caliber, so a rifle-
+        // calibre or heavy machine-gun mount with AP belts does not outrank a
+        // real AT gun once armor is reported. Staffing itself is unaffected:
+        // light emplacements are still crewed for their anti-infantry value.
+        var minimumAntiTankCaliber = Settings.StaticAtMinimumCaliber.Value;
         var weaponCandidates = runtimeWeapons.Select(runtime => new DefensiveWeaponCandidate(
             runtime.Id,
             true,
-            runtime.HasArmorPiercing,
+            runtime.HasArmorPiercing && runtime.Caliber >= minimumAntiTankCaliber,
             runtime.Caliber,
             runtime.AmmunitionScore,
             runtime.ThreatCoverage,
             runtime.InfantryCoverage)).ToArray();
         var plan = DefenderAllocationCore.Allocate(
             squadCandidates, crewCandidates, weaponCandidates, armor.Count > 0);
+        if (plan.WeaponAssignments.Count == 0 && crewCandidates.Count > 0 && weaponCandidates.Length > 0)
+        {
+            AiState.Trace(
+                $"Defensive emplacement staffing: allocator produced no assignments for faction {faction} " +
+                $"(crew={crewCandidates.Count}, weapons={weaponCandidates.Length}, " +
+                $"unstaffed=[{string.Join(",", plan.UnstaffedWeaponIds)}])");
+        }
 
         var soldiers = crewCandidates.ToDictionary(candidate => candidate.SoldierId);
         var squadsById = squads.ToDictionary(SquadIdentity.GetSquadId);
@@ -359,16 +382,22 @@ internal static class StaticAntiTankStaffing
         out RuntimeWeapon info)
     {
         info = default;
-        if (weapon == null || weapon.life <= 0 ||
+        if (weapon == null || weapon.IsDisabled() ||
             (!weapon.IsStatic() && !IsStaffableVehicleGun(weapon)))
         {
             return false;
         }
 
+        // Vehicle.GetVehicleFaction() reports the sitting occupants' faction, or
+        // falls back to Soldier.CivilianFaction when nobody is aboard - never
+        // Soldier.UnknownFaction. Occupancy is therefore the real ownership
+        // model: an empty weapon is unowned and available to any faction, while
+        // an occupied one belongs to its occupants. IsSameFactionOrCivilian is
+        // the game's own predicate for exactly that question, so a weapon
+        // genuinely crewed by a hostile faction is still rejected below.
         var weaponFaction = weapon.GetVehicleFaction();
         if (!string.IsNullOrWhiteSpace(weaponFaction) &&
-            !string.Equals(weaponFaction, Soldier.UnknownFaction, StringComparison.OrdinalIgnoreCase) &&
-            !SameFaction(weaponFaction, faction))
+            !ResourcesManager.IsSameFactionOrCivilian(weaponFaction, faction))
         {
             return false;
         }
@@ -435,8 +464,15 @@ internal static class StaticAntiTankStaffing
         for (var index = 0; index < vehicles.Count; index++)
         {
             var vehicle = vehicles[index];
-            if (vehicle == null || vehicle.life <= 0 || vehicle.GetComponent<VehicleTank>() == null ||
-                !ResourcesManager.IsEnemyFaction(faction, vehicle.GetVehicleFaction()))
+            if (vehicle == null || vehicle.IsDisabled() || vehicle.GetComponent<VehicleTank>() == null)
+                continue;
+
+            // Same occupancy-derived faction as TryDescribeViableWeapon: an
+            // abandoned tank reports the civilian placeholder and is not a
+            // live threat crewed by anyone, let alone the enemy.
+            var vehicleFaction = vehicle.GetVehicleFaction();
+            if (string.IsNullOrWhiteSpace(vehicleFaction) ||
+                ResourcesManager.IsSameFactionOrCivilian(vehicleFaction, faction))
             {
                 continue;
             }
@@ -465,7 +501,7 @@ internal static class StaticAntiTankStaffing
             if (assignment.ObjectiveRevision != revision ||
                 assignment.Soldier == null || !assignment.Soldier.CanFight() ||
                 !SoldierStillHoldingDefense(assignment.Soldier) ||
-                assignment.Weapon == null || assignment.Weapon.life <= 0 ||
+                assignment.Weapon == null || assignment.Weapon.IsDisabled() ||
                 !WeaponStillHasAmmunition(assignment.Weapon) ||
                 !WeaponInsideActiveDefense(assignment.Weapon, activeAreas) ||
                 GroundAiDirector.IsExternallyControlledSquad(assignment.Soldier.joinedSquad))
@@ -564,7 +600,7 @@ internal static class StaticAntiTankStaffing
     {
         foreach (var playerOrder in PlayerOverridesByWeapon.Values.ToArray())
         {
-            if (playerOrder.Weapon == null || playerOrder.Weapon.life <= 0 ||
+            if (playerOrder.Weapon == null || playerOrder.Weapon.IsDisabled() ||
                 playerOrder.Squad == null)
             {
                 PlayerOverridesByWeapon.Remove(playerOrder.WeaponId);
