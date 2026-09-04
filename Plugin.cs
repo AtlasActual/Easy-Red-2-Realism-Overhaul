@@ -16,7 +16,7 @@ public sealed class Plugin : BasePlugin
 {
     public const string PluginGuid = "ca.antoi.er2.tacticalai";
     public const string PluginName = "Easy Red 2 Realism Overhaul";
-    public const string PluginVersion = "1.1.3";
+    public const string PluginVersion = "1.1.4";
 
     internal static ManualLogSource LogSource { get; private set; } = null!;
     private bool _modEnabled;
@@ -63,36 +63,54 @@ public sealed class Plugin : BasePlugin
             Log.LogWarning($"Could not set GC latency mode: {ex.Message}");
         }
 
+        CompatibilityReport.CaptureGameVersion();
+        Log.LogInfo(
+            $"{PluginName} {PluginVersion} starting on Easy Red 2 (Application.version {CompatibilityReport.GameVersion}, " +
+            $"Unity {CompatibilityReport.UnityVersion}).");
+
         StartupSplashSkipper.TrySkip();
         Settings.Bind(Config);
         AudioVoiceCapacity.ApplyAtStartup();
         StutterProbe.InstallExceptionCounter();
         SettingsCatalog.Initialize();
-        _atmosphericParticlePersistenceController = AddComponent<AtmosphericParticlePersistenceController>();
-        _settingsSyncController = AddComponent<SettingsSyncController>();
-        _settingsMenuController = AddComponent<SettingsMenuController>();
-        _aircraftFlightInstrumentsController = AddComponent<AircraftFlightInstrumentsController>();
-        _firstPersonPlayerShadowController = AddComponent<FirstPersonPlayerShadowController>();
-        _playerViewFeaturesController = AddComponent<PlayerViewFeaturesController>();
-        _playerSuppressionBlurController = AddComponent<PlayerSuppressionBlurController>();
-        _playerHeadshotBlackoutController = AddComponent<PlayerHeadshotBlackoutController>();
-        _vehicleAimingReticleController = AddComponent<VehicleAimingReticleController>();
-        _multiplayerPlayerNameController = AddComponent<MultiplayerPlayerNameController>();
-        _multiplayerSharedSquadController = AddComponent<MultiplayerSharedSquadController>();
-        _immersiveWorldHudController = AddComponent<ImmersiveWorldHudController>();
-        _leaveSquadRedeployController = AddComponent<LeaveSquadRedeployController>();
-        _spectatorHudController = AddComponent<SpectatorHudController>();
-        _bulletPenetrationController = AddComponent<BulletPenetrationController>();
-        _aiDebugOverlayController = AddComponent<AiDebugOverlayController>();
+
+        // Every component and patch module attaches on its own. A game update that
+        // renames or removes one piece of game code then costs that one feature, and
+        // the log and settings menu say which, instead of the whole plugin failing
+        // to load while its remaining pieces silently stop working.
+        _atmosphericParticlePersistenceController = TryAddComponent<AtmosphericParticlePersistenceController>();
+        _settingsSyncController = TryAddComponent<SettingsSyncController>();
+        _settingsMenuController = TryAddComponent<SettingsMenuController>();
+        _aircraftFlightInstrumentsController = TryAddComponent<AircraftFlightInstrumentsController>();
+        _firstPersonPlayerShadowController = TryAddComponent<FirstPersonPlayerShadowController>();
+        _playerViewFeaturesController = TryAddComponent<PlayerViewFeaturesController>();
+        _playerSuppressionBlurController = TryAddComponent<PlayerSuppressionBlurController>();
+        _playerHeadshotBlackoutController = TryAddComponent<PlayerHeadshotBlackoutController>();
+        _vehicleAimingReticleController = TryAddComponent<VehicleAimingReticleController>();
+        _multiplayerPlayerNameController = TryAddComponent<MultiplayerPlayerNameController>();
+        _multiplayerSharedSquadController = TryAddComponent<MultiplayerSharedSquadController>();
+        _immersiveWorldHudController = TryAddComponent<ImmersiveWorldHudController>();
+        _leaveSquadRedeployController = TryAddComponent<LeaveSquadRedeployController>();
+        _spectatorHudController = TryAddComponent<SpectatorHudController>();
+        _bulletPenetrationController = TryAddComponent<BulletPenetrationController>();
+        _aiDebugOverlayController = TryAddComponent<AiDebugOverlayController>();
 
         _harmony = new Harmony(PluginGuid);
         if (Settings.InstallGameplayPatches.Value &&
             Settings.DeferredInteropHandleCleanupEnabled.Value)
         {
-            InteropFinalizerReaper.TryInstall(_harmony);
+            try
+            {
+                InteropFinalizerReaper.TryInstall(_harmony);
+            }
+            catch (Exception ex)
+            {
+                CompatibilityReport.NotePatchModuleFailed(nameof(InteropFinalizerReaper), ex);
+            }
         }
 
         PatchModules(_harmony, typeof(Plugin).Assembly);
+        CompatibilityReport.LogSummary();
 
         Log.LogInfo($"{PluginName} {PluginVersion} loaded. objectiveCoordination={Settings.ObjectiveCoordinationEnabled.Value}, " +
                     $"attackPostureBonus={Settings.AttackingForceBonusEnabled.Value}, " +
@@ -143,6 +161,21 @@ public sealed class Plugin : BasePlugin
                     $"audioBalance={Settings.AudioBalanceEnabled.Value}");
     }
 
+    private T? TryAddComponent<T>() where T : UnityEngine.MonoBehaviour
+    {
+        try
+        {
+            return AddComponent<T>();
+        }
+        catch (Exception ex)
+        {
+            // Il2CppInterop registers the component's methods with the game when it is
+            // added; a signature naming a game type that no longer exists fails here.
+            CompatibilityReport.NoteControllerFailed(typeof(T).Name, ex);
+            return null;
+        }
+    }
+
     // Patch modules that stay installed even when gameplay patching is switched off:
     // the probe is how a patches-off run is measured, so removing it would make the
     // comparison the switch exists for impossible.
@@ -159,13 +192,26 @@ public sealed class Plugin : BasePlugin
         // isolating a stutter to the mod (or clearing it) requires.
         var gameplayPatchesEnabled = Settings.InstallGameplayPatches.Value;
 
-        var patchTypes = assembly.GetTypes()
-            .Where(type => type.GetCustomAttributes(typeof(HarmonyPatch), false).Length != 0)
-            .OrderBy(type => type.FullName, StringComparer.Ordinal);
-
         var skipped = 0;
-        foreach (var patchType in patchTypes)
+        foreach (var patchType in GetLoadableTypes(assembly).OrderBy(type => type.FullName, StringComparer.Ordinal))
         {
+            // Reading the HarmonyPatch attribute resolves the game types named in it.
+            // One that this game build no longer has must fail only its own module: an
+            // unguarded throw here used to abort the loop before any module was applied.
+            bool isPatchModule;
+            try
+            {
+                isPatchModule = patchType.GetCustomAttributes(typeof(HarmonyPatch), false).Length != 0;
+            }
+            catch (Exception ex)
+            {
+                CompatibilityReport.NotePatchModuleFailed(patchType.FullName ?? patchType.Name, ex);
+                continue;
+            }
+
+            if (!isPatchModule)
+                continue;
+
             if (!gameplayPatchesEnabled && !DiagnosticPatchTypes.Contains(patchType))
             {
                 skipped++;
@@ -177,11 +223,12 @@ public sealed class Plugin : BasePlugin
             {
                 var patched = harmony.CreateClassProcessor(patchType).Patch();
                 ContainUnityMessageExceptions(harmony, patched);
+                CompatibilityReport.NotePatchModuleApplied();
                 LogSource.LogInfo($"Applied patch module {patchType.FullName}");
             }
             catch (Exception ex)
             {
-                LogSource.LogError($"Patch module {patchType.FullName} failed and was skipped: {ex}");
+                CompatibilityReport.NotePatchModuleFailed(patchType.FullName ?? patchType.Name, ex);
             }
         }
 
@@ -190,6 +237,24 @@ public sealed class Plugin : BasePlugin
             LogSource.LogWarning(
                 $"InstallGameplayPatches is false: skipped {skipped} gameplay patch modules. " +
                 "The mod is loaded but inert; set it back to true in the config to play with it.");
+        }
+    }
+
+    private static IEnumerable<Type> GetLoadableTypes(Assembly assembly)
+    {
+        try
+        {
+            return assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            // A type whose own definition names a missing game type cannot be loaded at
+            // all. Report those and continue with every type that did load.
+            var loadable = ex.Types.Where(type => type != null).Select(type => type!).ToArray();
+            LogSource.LogError(
+                $"{ex.Types.Length - loadable.Length} type(s) in the mod reference game code this game build " +
+                $"no longer has and were skipped: {CompatibilityReport.DescribeLoaderExceptions(ex)}");
+            return loadable;
         }
     }
 

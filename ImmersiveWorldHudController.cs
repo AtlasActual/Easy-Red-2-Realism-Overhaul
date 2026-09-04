@@ -124,24 +124,9 @@ internal static class PlayerWorldHudContextPatch
     }
 }
 
-[HarmonyPatch(typeof(Squad), nameof(Squad.GetAllyMarkerIcon), typeof(bool))]
-internal static class WorldAllyMarkerPatch
-{
-    [HarmonyPrefix]
-    private static bool Prefix(ref Sprite __result)
-    {
-        if (SpectatorHudVisibility.ShouldShow() ||
-            !Settings.ImmersiveWorldHudEnabled.Value ||
-            !WorldHudDrawContext.InsidePlayerWorldHud)
-        {
-            return true;
-        }
-
-        __result = WorldHudDrawContext.ClearMarkerSprite();
-        return false;
-    }
-}
-
+// Easy Red 2 2.1.0 folded the separate ally overload (GetAllyMarkerIcon) into a
+// single GetMarkerIcon(bool isAlly); binding by name covers whichever overloads
+// the running build declares.
 [HarmonyPatch(typeof(Squad), nameof(Squad.GetMarkerIcon))]
 internal static class WorldUnitMarkerPatch
 {

@@ -1,3 +1,4 @@
+using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 
@@ -31,24 +32,93 @@ internal static class MeleeHitQueryScope
     }
 }
 
-[HarmonyPatch(typeof(Soldier._MeleeDamageCR_d__362), "MoveNext")]
+/// <summary>
+/// The melee coroutine is a compiler-generated nested class of Soldier whose
+/// name carries an ordinal (for example <c>_MeleeDamageCR_d__362</c>) that
+/// changes whenever the game adds or removes a Soldier member. It is resolved
+/// by its stable prefix at patch time instead of being named at compile time,
+/// so a game update that renumbers it disables nothing and one that removes it
+/// disables only this module.
+/// </summary>
+[HarmonyPatch]
 internal static class SoldierMeleeDamageCoroutinePatch
 {
-    [HarmonyPrefix]
-    private static void Prefix(
-        Soldier._MeleeDamageCR_d__362 __instance,
-        out bool __state)
+    private const string CoroutineTypePrefix = "_MeleeDamageCR_d__";
+    private const string AttackerMemberName = "__4__this";
+
+    private static readonly Dictionary<Type, MethodInfo> AttackerGetters = new();
+
+    [HarmonyTargetMethods]
+    private static IEnumerable<MethodBase> TargetMethods()
     {
-        var attacker = __instance.__4__this;
-        __state = Settings.ImprovedMeleeHitRegistrationEnabled.Value &&
-                  MultiplayerAuthority.CanMutateGameplay() &&
-                  attacker != null &&
-                  MeleeHitQueryScope.TryEnter(attacker);
+        var coroutineTypes = typeof(Soldier)
+            .GetNestedTypes(BindingFlags.Public | BindingFlags.NonPublic)
+            .Where(type => type.Name.StartsWith(CoroutineTypePrefix, StringComparison.Ordinal))
+            .OrderBy(type => type.Name, StringComparer.Ordinal)
+            .ToArray();
+
+        if (coroutineTypes.Length == 0)
+        {
+            throw new InvalidOperationException(
+                $"Soldier has no nested '{CoroutineTypePrefix}*' melee coroutine class in this game build.");
+        }
+
+        var targets = new List<MethodBase>();
+        foreach (var coroutineType in coroutineTypes)
+        {
+            var moveNext = AccessTools.Method(coroutineType, "MoveNext");
+            var attackerGetter = AccessTools.PropertyGetter(coroutineType, AttackerMemberName) ??
+                                 AccessTools.Method(coroutineType, "get_" + AttackerMemberName);
+            if (moveNext == null || attackerGetter == null)
+            {
+                throw new InvalidOperationException(
+                    $"{coroutineType.FullName} lacks MoveNext or its '{AttackerMemberName}' attacker accessor.");
+            }
+
+            AttackerGetters[coroutineType] = attackerGetter;
+            targets.Add(moveNext);
+        }
+
+        Plugin.LogSource.LogInfo(
+            $"Melee hit registration bound to {string.Join(", ", coroutineTypes.Select(type => type.Name))}.MoveNext.");
+        return targets;
+    }
+
+    [HarmonyPrefix]
+    private static void Prefix(object __instance, out bool __state)
+    {
+        __state = false;
+        if (!Settings.ImprovedMeleeHitRegistrationEnabled.Value ||
+            !MultiplayerAuthority.CanMutateGameplay())
+        {
+            return;
+        }
+
+        var attacker = ResolveAttacker(__instance);
+        __state = attacker != null && MeleeHitQueryScope.TryEnter(attacker);
     }
 
     [HarmonyFinalizer]
     private static void Finalizer(bool __state)
         => MeleeHitQueryScope.Exit(__state);
+
+    private static Soldier? ResolveAttacker(object? coroutine)
+    {
+        if (coroutine == null ||
+            !AttackerGetters.TryGetValue(coroutine.GetType(), out var getter))
+        {
+            return null;
+        }
+
+        try
+        {
+            return getter.Invoke(coroutine, null) as Soldier;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }
 
 /// <summary>

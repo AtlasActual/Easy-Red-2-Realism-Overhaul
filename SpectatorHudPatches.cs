@@ -1,6 +1,7 @@
 using Corvostudio.CinematicCamera;
 using HarmonyLib;
 using Il2CppInterop.Runtime.Attributes;
+using System.Reflection;
 using UnityEngine;
 
 namespace ER2RealismOverhaul;
@@ -352,7 +353,7 @@ internal static class SpectatorHudVisibility
                 }
             }
 
-            var squadIcon = squad.GetAllyMarkerIcon(true);
+            var squadIcon = squad.GetMarkerIcon(true);
             if (Exists(squadIcon))
             {
                 Marker3DGUI.Draw(
@@ -801,24 +802,37 @@ internal static class SpectatorHudControlStatePatch
     }
 }
 
-// Every pooled world marker, including squad/unit icons, flows through this
-// overload. Blocking it while F has hidden the spectator HUD also clears any
-// remaining pooled marker on the following native Marker3DGUI refresh.
-[HarmonyPatch(
-    typeof(Marker3DGUI),
-    nameof(Marker3DGUI.Draw),
-    new Type[]
-    {
-        typeof(Il2CppSystem.Object),
-        typeof(int),
-        typeof(Texture),
-        typeof(Vector3),
-        typeof(float),
-        typeof(float),
-        typeof(Color)
-    })]
+// Every pooled world marker, including squad/unit icons, flows through the
+// Marker3DGUI draw entry points. Blocking them while F has hidden the spectator
+// HUD also clears any remaining pooled marker on the following native refresh.
+// Easy Red 2 2.1.0 replaced the single Draw overload with an occlusion-aware
+// pair (Draw with a trailing bool, DrawOccluded) plus a short overload, so every
+// declared Draw* method is bound by name instead of one fixed parameter list.
+[HarmonyPatch]
 internal static class SpectatorMarkerDrawPatch
 {
+    [HarmonyTargetMethods]
+    private static IEnumerable<MethodBase> TargetMethods()
+    {
+        var targets = typeof(Marker3DGUI)
+            .GetMethods(BindingFlags.Public | BindingFlags.NonPublic |
+                        BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+            .Where(method => method.Name == "Draw" || method.Name == "DrawOccluded")
+            .OrderBy(method => method.ToString(), StringComparer.Ordinal)
+            .Cast<MethodBase>()
+            .ToArray();
+
+        if (targets.Length == 0)
+        {
+            throw new InvalidOperationException(
+                "Marker3DGUI declares no Draw or DrawOccluded method in this game build.");
+        }
+
+        Plugin.LogSource.LogInfo(
+            $"Spectator marker suppression bound to {targets.Length} Marker3DGUI draw method(s).");
+        return targets;
+    }
+
     [HarmonyPrefix]
     private static bool Prefix()
         => !SpectatorHudVisibility.IsManagedSpectator() || SpectatorHudVisibility.ShouldShow();

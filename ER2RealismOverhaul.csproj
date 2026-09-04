@@ -24,6 +24,8 @@
     <Compile Remove="backups\**\*.cs" />
     <!-- The package-free deterministic scenario runner links the planner separately. -->
     <Compile Remove="tests\**\*.cs" />
+    <!-- Standalone game-update investigation tools with their own project files. -->
+    <Compile Remove="tools\**\*.cs" />
     <Reference Include="0Harmony"><HintPath>$(BepInExCore)\0Harmony.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="BepInEx.Core"><HintPath>$(BepInExCore)\BepInEx.Core.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="BepInEx.Unity.Common"><HintPath>$(BepInExCore)\BepInEx.Unity.Common.dll</HintPath><Private>false</Private></Reference>

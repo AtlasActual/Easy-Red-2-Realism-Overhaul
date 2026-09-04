@@ -205,10 +205,24 @@ internal sealed class SettingsMenuController : MonoBehaviour
 
         var titleRect = new Rect(rect.x + padding, rect.y + S(10f), rect.width * 0.52f, S(38f));
         GUI.Label(titleRect, "EASY RED 2  /  REALISM OVERHAUL", _titleStyle!);
-        GUI.Label(
-            new Rect(titleRect.x, titleRect.yMax, titleRect.width, S(25f)),
-            "Tactical AI and battlefield configuration",
-            _mutedStyle!);
+
+        // A game update that removed code the mod hooks shows up here, where players
+        // look first, instead of only in the BepInEx log.
+        var compatibilityNotice = CompatibilityReport.MenuNotice;
+        if (compatibilityNotice.Length != 0)
+        {
+            GUI.Label(
+                new Rect(titleRect.x, titleRect.yMax, titleRect.width, S(25f)),
+                compatibilityNotice,
+                _errorStyle!);
+        }
+        else
+        {
+            GUI.Label(
+                new Rect(titleRect.x, titleRect.yMax, titleRect.width, S(25f)),
+                "Tactical AI and battlefield configuration",
+                _mutedStyle!);
+        }
 
         var statusWidth = Mathf.Max(S(280f), versionRect.x - S(18f) - (rect.x + rect.width * 0.54f));
         var statusRect = new Rect(rect.x + rect.width * 0.54f, rect.y + S(15f), statusWidth, S(52f));

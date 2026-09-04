@@ -6,9 +6,16 @@ ER2RealismOverhaul is built around the rough edges that become hard to ignore af
 
 The goal is to fix those moments without replacing the game underneath them. This is not a health or damage multiplier mod; Easy Red 2's missions, armour system, and basic damage model remain intact.
 
-> **Current release:** 1.1.3
+> **Current release:** 1.1.4
 >
-> **Compatibility:** Tested with Easy Red 2 2.0.9 Stable, Steam public-branch build `24512933` (August 1, 2026)
+> **Compatibility:** Tested with Easy Red 2 2.1.0, Steam public-branch build `25110514` (September 3, 2026). Versions 1.1.3 and earlier do not work on 2.1.0.
+
+## What's new in 1.1.4
+
+- Compatibility with Easy Red 2 2.1.0. Versions 1.1.3 and earlier install none of their gameplay patches on 2.1.0 because one renumbered game class aborted the whole patch pass; only the settings menu, compass, and binocular overlay kept working.
+- Each feature now attaches to the game on its own. Game code that a future update renames or removes switches off only the features that used it, the **F10** settings menu header says how many could not attach, and `BepInEx/LogOutput.log` names each one with the missing game type or method.
+- Improved melee hit registration no longer depends on the compiler-generated name of the game's melee coroutine class.
+- Immersive World HUD and Spectator HUD marker suppression rebound to the 2.1.0 squad marker icon and world marker drawing methods.
 
 ## What's new in 1.1.3
 
@@ -198,7 +205,9 @@ If the original host leaves and an unmodded player becomes host, the overhaul ca
 
 ## Compatibility and feedback
 
-Easy Red 2 updates can change the game code that BepInEx mods rely on. If the mod stops loading after a game update, or something behaves differently online than it does offline, please report it on the project's [Issues page](../../issues).
+Easy Red 2 updates can change the game code that BepInEx mods rely on. Each feature attaches to the game on its own, so an update that renames or removes one piece of game code switches off only the features that used it. When that happens, the **F10** settings menu header shows how many features could not attach, and `BepInEx/LogOutput.log` contains a line starting with `Compatibility summary for Easy Red 2` that lists each failed module and the game type or method that no longer exists.
+
+If features stop working after a game update, or something behaves differently online than it does offline, please report it on the project's [Issues page](../../issues) and attach `BepInEx/LogOutput.log` from a session that reproduced the problem; the compatibility summary in it is what allows the affected hooks to be rebound.
 
 ## License
 

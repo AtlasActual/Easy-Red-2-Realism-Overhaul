@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Disassembles chosen game methods straight from GameAssembly.dll using the
+    Cpp2IL, LibCpp2IL, and Iced libraries that BepInEx already ships, so a hook's
+    native surroundings can be read after a game update without any other tool.
+    Calls are resolved to game method names, rip-relative loads to metadata
+    (string literals, type infos), and [reg+offset] operands to candidate field
+    names of the declaring type and of any types passed with "-types".
+
+      dotnet run -c Release (then, after a double dash) "<game dir>" out -types PlayerController,Soldier
+          "Soldier::UpdateCameraPos" "PlayerController::LateUpdate" "Squad::*"
+
+    Every BepInEx\core DLL is copied next to the tool so the Cpp2IL dependency
+    graph resolves at run time. Set ER2_GAME_DIR or pass /p:ER2GameDir=... when
+    the game is not in the default location.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <ER2GameDir Condition="'$(ER2GameDir)' == '' and '$(ER2_GAME_DIR)' != ''">$(ER2_GAME_DIR)</ER2GameDir>
+    <ER2GameDir Condition="'$(ER2GameDir)' == ''">E:\SteamLibrary\steamapps\common\Easy Red 2</ER2GameDir>
+    <BepCore>$(ER2GameDir)\BepInEx\core</BepCore>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Cpp2IL.Core"><HintPath>$(BepCore)\Cpp2IL.Core.dll</HintPath></Reference>
+    <Reference Include="LibCpp2IL"><HintPath>$(BepCore)\LibCpp2IL.dll</HintPath></Reference>
+    <Reference Include="AssetRipper.Primitives"><HintPath>$(BepCore)\AssetRipper.Primitives.dll</HintPath></Reference>
+    <Reference Include="Iced"><HintPath>$(BepCore)\Iced.dll</HintPath></Reference>
+  </ItemGroup>
+  <Target Name="CopyCore" AfterTargets="Build">
+    <ItemGroup><CoreDlls Include="$(BepCore)\*.dll" /></ItemGroup>
+    <Copy SourceFiles="@(CoreDlls)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

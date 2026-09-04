@@ -2,6 +2,15 @@
 
 This file records only concrete, player-visible changes in each released version of Easy Red 2 Realism Overhaul. It is a living description of the shipped mod: superseded wording is replaced with the final behavior, and changes that are removed or reverted are deleted instead of retained as historical notes.
 
+## 1.1.4 - 2026-09-03
+
+Easy Red 2 compatibility: version 2.1.0, Steam public branch build `25110514` (September 3, 2026). Versions 1.1.3 and earlier do not work on 2.1.0: the update renumbered a compiler-generated class inside `Soldier` that one patch named directly, and because the loader read every patch attribute before applying any module, that single missing class stopped every Harmony patch from installing. Only the features that run as plain Unity components (settings menu, compass, binocular overlay) kept working, which is what the "freelook broken, most features broken" reports described.
+
+- The mod now loads one feature at a time. Game code that an update renames or removes disables only the feature that used it instead of the whole patch pass, and the settings menu header (**F10**) shows how many features could not attach to the running game version. `BepInEx/LogOutput.log` lists each failed module with the exact game type or method that no longer exists, and records the game and Unity versions at startup, so a report can name what broke.
+- Improved melee hit registration finds the game's melee coroutine class by its stable name prefix instead of its compiler ordinal (`_MeleeDamageCR_d__362` in 2.0.9, `_MeleeDamageCR_d__460` in 2.1.0), so a game update that adds members to `Soldier` no longer removes the feature.
+- Immersive World HUD: 2.1.0 folded the separate ally squad marker icon lookup into `Squad.GetMarkerIcon(bool)`. The marker suppression is bound to the merged method, so friendly squad markers are hidden again while the immersive HUD is active.
+- Spectator HUD: 2.1.0 replaced the single `Marker3DGUI.Draw` overload with occlusion-aware `Draw` and `DrawOccluded` variants. The **F** HUD toggle now blocks every marker draw entry point, so hiding the spectator HUD hides world markers again, and the friendly squad icon in the spectator marker layer uses the merged icon method.
+
 ## 1.1.3 - 2026-09-02
 
 Easy Red 2 compatibility: version 2.0.9 Stable, Steam public branch build `24512933` (August 1, 2026).
