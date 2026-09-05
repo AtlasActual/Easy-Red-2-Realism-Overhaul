@@ -19,11 +19,13 @@ internal static class StaticAntiTankStaffing
     private const float VehicleRelocationReleaseMeters = 25f;
     private const float TransitProgressEpsilonMeters = 0.75f;
     private const float UnreachableTransitSeconds = 18f;
+    private const float FailedTransitRetrySeconds = 45f;
     private const float PlayerOrderReleaseGraceSeconds = 12f;
 
     private static readonly Dictionary<int, WeaponAssignment> AssignmentsByWeapon = new();
     private static readonly Dictionary<int, int> WeaponBySoldier = new();
     private static readonly Dictionary<int, PlayerWeaponOverride> PlayerOverridesByWeapon = new();
+    private static readonly Dictionary<int, float> WeaponRetryAfter = new();
     private static float _nextInventoryAt;
     private static bool _updating;
 
@@ -119,6 +121,7 @@ internal static class StaticAntiTankStaffing
         AssignmentsByWeapon.Clear();
         WeaponBySoldier.Clear();
         PlayerOverridesByWeapon.Clear();
+        WeaponRetryAfter.Clear();
         _nextInventoryAt = 0f;
         _updating = false;
     }
@@ -203,7 +206,7 @@ internal static class StaticAntiTankStaffing
         float now)
     {
         var armor = CollectReportedArmor(faction, areas);
-        var runtimeWeapons = CollectWeapons(faction, areas, armor);
+        var runtimeWeapons = CollectWeapons(faction, areas, armor, now);
         if (runtimeWeapons.Count == 0)
         {
             AiState.Trace(
@@ -314,6 +317,7 @@ internal static class StaticAntiTankStaffing
                 !GroundAiDirector.ExecuteProtectedInfantryAssignment(
                     soldier, weaponInfo.Weapon, () => soldier.CoverPosition(vehicleDestination)))
             {
+                DeferWeaponRetry(stamp.WeaponId, now);
                 Release(stamp, "native destination rejected");
                 continue;
             }
@@ -335,7 +339,7 @@ internal static class StaticAntiTankStaffing
         {
             var squad = pair.Value;
             var leader = squad?.Leader;
-            if (squad == null || leader == null || squad.IsVehicleCrew ||
+            if (squad == null || leader == null || !squad.fullySpawned || squad.IsVehicleCrew ||
                 GroundAiDirector.IsExternallyControlledSquad(squad) ||
                 !TryGetDefensiveArea(squad, out _, out _))
             {
@@ -352,7 +356,8 @@ internal static class StaticAntiTankStaffing
     private static List<RuntimeWeapon> CollectWeapons(
         string faction,
         IReadOnlyList<DefensiveAreaBounds> areas,
-        IReadOnlyList<Vehicle> reportedArmor)
+        IReadOnlyList<Vehicle> reportedArmor,
+        float now)
     {
         var result = new List<RuntimeWeapon>();
         var vehicles = Vehicle.allVehicles;
@@ -362,7 +367,18 @@ internal static class StaticAntiTankStaffing
         for (var index = 0; index < vehicles.Count; index++)
         {
             var weapon = vehicles[index];
-            if (weapon == null || PlayerOverridesByWeapon.ContainsKey(weapon.GetInstanceID()) ||
+            if (weapon == null)
+                continue;
+
+            var weaponId = weapon.GetInstanceID();
+            if (WeaponRetryAfter.TryGetValue(weaponId, out var retryAfter))
+            {
+                if (StaticWeaponAssignmentCore.RetryDeferred(now, retryAfter))
+                    continue;
+                WeaponRetryAfter.Remove(weaponId);
+            }
+
+            if (PlayerOverridesByWeapon.ContainsKey(weaponId) ||
                 !TryDescribeViableWeapon(weapon, faction, areas, reportedArmor, out var info) ||
                 AssignmentsByWeapon.ContainsKey(info.Id))
             {
@@ -500,6 +516,8 @@ internal static class StaticAntiTankStaffing
         {
             if (assignment.ObjectiveRevision != revision ||
                 assignment.Soldier == null || !assignment.Soldier.CanFight() ||
+                assignment.Soldier.joinedSquad == null ||
+                !assignment.Soldier.joinedSquad.fullySpawned ||
                 !SoldierStillHoldingDefense(assignment.Soldier) ||
                 assignment.Weapon == null || assignment.Weapon.IsDisabled() ||
                 !WeaponStillHasAmmunition(assignment.Weapon) ||
@@ -574,6 +592,7 @@ internal static class StaticAntiTankStaffing
                         assignment.Weapon,
                         () => assignment.Soldier.CoverPosition(vehicleDestination)))
                 {
+                    DeferWeaponRetry(assignment.WeaponId, now);
                     Release(assignment, "protected destination could not be restored");
                     continue;
                 }
@@ -591,6 +610,7 @@ internal static class StaticAntiTankStaffing
             }
             else if (now - assignment.LastProgressAt >= UnreachableTransitSeconds)
             {
+                DeferWeaponRetry(assignment.WeaponId, now);
                 Release(assignment, "unreachable path timeout");
             }
         }
@@ -734,6 +754,7 @@ internal static class StaticAntiTankStaffing
         AssignmentsByWeapon.Remove(assignment.WeaponId);
         WeaponBySoldier.Remove(assignment.SoldierId);
         GroundAiDirector.ReleaseInfantryAssignment(assignment.Soldier);
+        ClearReleasedDestination(assignment);
         AiState.Trace(
             $"Defender gun vacancy: weapon {assignment.WeaponId}, soldier {assignment.SoldierId}, {reason}");
     }
@@ -741,18 +762,22 @@ internal static class StaticAntiTankStaffing
     private static void ReleaseForPlayerOrder(WeaponAssignment assignment)
     {
         Release(assignment, "superseded by player vehicle order");
+    }
+
+    private static void ClearReleasedDestination(WeaponAssignment assignment)
+    {
         try
         {
-            if (assignment.Soldier == null || assignment.Soldier.IsOnVehicle())
+            if (assignment.Soldier == null || assignment.Weapon == null)
                 return;
 
-            var destinationVehicle = assignment.Soldier.VehicleToOperate();
-            if (destinationVehicle != null &&
-                destinationVehicle.GetInstanceID() == assignment.WeaponId)
+            if (StaticWeaponAssignmentCore.ShouldClearDestinationOnRelease(
+                    assignment.Soldier.IsOnVehicle(),
+                    MemberIsUsingWeapon(assignment.Soldier, assignment.Weapon)))
             {
                 // CoverPosition(null) is the native way to leave an AiDestination.
-                // It also gives the vehicle back any seat claimed while the old
-                // defender was travelling, before SendUnitsToVehicle counts space.
+                // Clear it after dropping the protected lease so an abandoned gun
+                // route cannot continue to outrank the soldier's defensive cover.
                 ContactResponse.ExecuteOwnedCoverWrite(
                     assignment.Soldier,
                     () => assignment.Soldier.CoverPosition(null!));
@@ -761,9 +786,12 @@ internal static class StaticAntiTankStaffing
         catch (Exception ex)
         {
             Plugin.LogSource.LogWarning(
-                $"Could not clear superseded gun destination {assignment.WeaponId}: {ex.Message}");
+                $"Could not clear released gun destination {assignment.WeaponId}: {ex.Message}");
         }
     }
+
+    private static void DeferWeaponRetry(int weaponId, float now)
+        => WeaponRetryAfter[weaponId] = now + FailedTransitRetrySeconds;
 
     private static float HorizontalDistance(Vector3 first, Vector3 second)
     {

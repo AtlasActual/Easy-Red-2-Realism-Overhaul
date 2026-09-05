@@ -2288,6 +2288,14 @@ internal static class StaticWeaponAssignmentCore
         bool emergencyInterrupted)
         => !mountedOnAssignedWeapon && !destinationTargetsAssignedWeapon &&
            !emergencyInterrupted;
+
+    internal static bool ShouldClearDestinationOnRelease(
+        bool soldierMounted,
+        bool destinationTargetsAssignedWeapon)
+        => !soldierMounted && destinationTargetsAssignedWeapon;
+
+    internal static bool RetryDeferred(float now, float retryAfter)
+        => float.IsFinite(now) && float.IsFinite(retryAfter) && now < retryAfter;
 }
 
 internal readonly record struct DefenderSquadCandidate(

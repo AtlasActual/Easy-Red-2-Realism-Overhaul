@@ -5041,6 +5041,16 @@ internal static class Program
             "An intact static-weapon route was needlessly rewritten.");
         False(StaticWeaponAssignmentCore.ShouldReassertDestination(false, false, true),
             "A lethal emergency was overridden by static-weapon transit.");
+        True(StaticWeaponAssignmentCore.ShouldClearDestinationOnRelease(false, true),
+            "An abandoned on-foot gun route was left active after its staffing lease ended.");
+        False(StaticWeaponAssignmentCore.ShouldClearDestinationOnRelease(true, true),
+            "Releasing a staffed gun tried to clear the mounted gunner's native destination.");
+        False(StaticWeaponAssignmentCore.ShouldClearDestinationOnRelease(false, false),
+            "Releasing a gun assignment cleared an unrelated native destination.");
+        True(StaticWeaponAssignmentCore.RetryDeferred(20f, 45f),
+            "A recently unreachable emplacement was made immediately eligible again.");
+        False(StaticWeaponAssignmentCore.RetryDeferred(45f, 45f),
+            "An emplacement remained deferred after its retry window elapsed.");
     }
 
     private static void FortifiedCoverBeatsCloserWeakCover()
