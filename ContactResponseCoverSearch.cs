@@ -61,15 +61,18 @@ internal static class CoverOccupancy
     /// Nearest friendly within <paramref name="radius"/> when this soldier enters a
     /// fighting halt (plan 018 item 3). A whole squad can reach the same stop on one frame,
     /// before any neighbour has committed its halt output, so spatial crowding is the fact
-    /// that matters here. The caller invokes this only once per halt episode.
+    /// that matters here. The caller probes once per halt episode, then on bounded
+    /// retries for unresolved physical clipping.
     /// </summary>
     internal static bool TryFindCrowdedFriendly(
         Vector3 position,
         Soldier soldier,
         float radius,
-        out Vector3 neighbourPosition)
+        out Vector3 neighbourPosition,
+        out Soldier? neighbour)
     {
         neighbourPosition = default;
+        neighbour = null;
         var __t = ModTimeProbe.Begin();
         try
         {
@@ -110,6 +113,7 @@ internal static class CoverOccupancy
 
                 nearestSqr = distanceSqr;
                 neighbourPosition = otherPosition;
+                neighbour = other;
                 found = true;
             }
 
@@ -774,7 +778,8 @@ internal static partial class ContactResponse
         bool evaluateFiringQuality,
         out float bestFortifiedScore,
         out bool searchDeferred,
-        out CoverPositionQuality selectedQuality)
+        out CoverPositionQuality selectedQuality,
+        CoverPositionQuality? defensiveUpgradeFrom = null)
     {
         bestFortifiedScore = float.NegativeInfinity;
         selectedQuality = default;
@@ -875,9 +880,13 @@ internal static partial class ContactResponse
                 var distanceSqr = (coverPosition - position).sqrMagnitude;
                 if (distanceSqr < 1f)
                     continue;
-                // A forward corridor replaces the old strict "closer to the waypoint"
-                // rule so attackers can use flanking cover and off-axis doorways
-                // within a bounded backtrack, not only a small forward half-moon.
+                if (defensiveUpgradeFrom.HasValue &&
+                    (candidateId == state.DefensiveCoverAnchorId || distanceSqr < 9f ||
+                     distanceSqr > InfantryCoverDecisionCore.DefensiveUpgradeMaximumDistanceMeters *
+                                   InfantryCoverDecisionCore.DefensiveUpgradeMaximumDistanceMeters))
+                    continue;
+                // Permit lateral/rear entrances within a bounded backtrack. Native
+                // navigation, not a straight-line bearing, chooses the entrance route.
                 if (enforceAttackProgress &&
                     !AttackCoverCorridorCore.Accepts(
                         new MapPoint(position.x, position.z),
@@ -989,6 +998,13 @@ internal static partial class ContactResponse
                     : selectedPosture;
                 var primaryProtectionFraction =
                     InfantryCoverDecisionCore.ProtectionFraction(protectionPosture);
+                if (defensiveUpgradeFrom.HasValue &&
+                    !InfantryCoverDecisionCore.IsWorthDefensiveRelocation(
+                        defensiveUpgradeFrom.Value,
+                        new CoverPositionQuality(primaryProtected, geometry.ClassificationSucceeded,
+                            primaryProtectionFraction, assignedPoseCanFire || standingCanFire),
+                        Mathf.Sqrt(distanceSqr), exposedRouteFraction))
+                    continue;
                 // Crowding term (plan 016): count other soldiers' active reservations
                 // within dispersion range of this candidate, reusing the reservation
                 // map already consulted above - no extra physics or allocation inside
@@ -998,17 +1014,9 @@ internal static partial class ContactResponse
                     soldier.GetInstanceID(),
                     now,
                     InfantryCoverPolicy.CoverDispersionSpacingMeters);
-                // Defensive occupation is different from ordinary maneuver cover:
-                // a position must both protect the defender and provide at least one
-                // usable firing posture toward the attacker. Without this hard gate,
-                // an authored building/interior slot can be considered safe while
-                // leaving the occupant unable to engage the attacking force.
-                var defensiveFiringLane = assignedPoseCanFire || standingCanFire;
-                if (defensiveOccupation && !defensiveFiringLane)
-                {
-                    continue;
-                }
-
+                // A blocked ray to a distant enemy is common in buildings and
+                // trenches. Prefer firing lanes in the score; do not make global
+                // line of sight a prerequisite for occupying protective cover.
                 var scoreInput = new CoverScoreInput(
                     distanceSqr,
                     posePenalty,
@@ -1060,16 +1068,6 @@ internal static partial class ContactResponse
                             geometry.Standing.HasClassifiedObstruction,
                             geometry.Crouched.HasClassifiedObstruction,
                             geometry.Prone.HasClassifiedObstruction))
-                    {
-                        continue;
-                    }
-
-                    // The authored fallback is useful elsewhere in the mod when the
-                    // material sampler cannot classify a native cover node. For
-                    // defensive occupation it is intentionally not allowed when there
-                    // is no verified firing lane: that is the exact blind-building case
-                    // this defensive layer is meant to eliminate.
-                    if (defensiveOccupation && !defensiveFiringLane)
                     {
                         continue;
                     }
@@ -1143,7 +1141,7 @@ internal static partial class ContactResponse
 
         AiState.Trace(
             $"Cover inventory: soldier {soldier.GetInstanceID()} mode={selectionMode} " +
-            $"raw={rawExamined} eligible={coarseCandidates.Count} detailed={detailedIndices.Length} " +
+            $"raw={rawExamined} eligible={coarseCandidates.Count} detailed={detailedEvaluated}/{detailedIndices.Length} " +
             $"selected={(best == null ? "none" : best.Pointer.ToString())} " +
             $"fortified={bestFortifiedScore:0.00} fallback={usedAuthoredFallback}");
         return best;
@@ -1599,6 +1597,16 @@ internal static partial class ContactResponse
         }
 
         state.Relocating = true;
+        // Clear the old anchor only after the new assignment succeeds. Do not call
+        // ReleaseDefensiveCoverHold here: it would release the NEW reservation.
+        if (state.DefensiveCoverHold || state.HasDefensiveCoverAnchor)
+        {
+            state.DefensiveCoverHold = false;
+            state.HasDefensiveCoverAnchor = false;
+            state.DefensiveCoverAnchorId = IntPtr.Zero;
+            state.DefensiveCoverAnchorPosition = default;
+            state.HoldCoverUntil = 0f;
+        }
         state.AttackObjectiveBoundActive = false;
         state.AttackObjectiveBoundStartedAt = 0f;
         state.AttackFiringCommitUntil = 0f;

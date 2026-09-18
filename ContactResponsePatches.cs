@@ -42,9 +42,9 @@ internal static class ExclusiveCoverAssignmentPatch
         if (cover.IsVehicle())
             return true;
 
-        // Inside a director-owned defensive area, only the selected movement
-        // executor may change a cover destination. This closes the remaining native
-        // CoverPosition writer that used to circulate defenders between updates.
+        // Protect an actual reserved move/anchor, not mere entry into the objective
+        // radius. With no selected slot, native HoldArea must still be able to assign
+        // its building/trench/sandbag destinations.
         if (!ContactResponse.MayWriteCoverAssignment(__instance))
             return false;
 
@@ -61,13 +61,12 @@ internal static class ExclusiveCoverAssignmentPatch
             if (!TryGetUsableCoverPosition(cover, out var coverPosition))
                 return false;
 
-            // A player-issued hold order defines the area in which this squad may
-            // improve its position. Native or mod cover selection must not silently
-            // replace that command with a cover slot outside the ordered area.
-            if (!ContactResponse.CoverRespectsPlayerHoldOrder(__instance, coverPosition))
+            // Restoring native assignment for unanchored defenders must still
+            // preserve their assigned area, including a player's explicit hold.
+            if (!ContactResponse.CoverRespectsDefensiveOrder(__instance, coverPosition))
             {
                 AiState.Trace(
-                    $"Player hold: blocked soldier {soldierId} from cover outside the ordered area");
+                    $"Defensive order: blocked soldier {soldierId} from cover outside the ordered area");
                 return false;
             }
 

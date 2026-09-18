@@ -26,8 +26,8 @@ internal enum CommandAuthority
     NativeFallback = 0,
     ImmediateCombat = 200,
     ProtectedFortification = 300,
-    VehicleBoarding = 350,
     CriticalSuppression = 400,
+    VehicleBoarding = 450,
     RequiredSafety = 500,
     LethalEmergency = 600,
     PlayerOrScript = 700
@@ -618,15 +618,14 @@ internal enum MovementOwner
     // Pinned: suppression owns locomotion (SuppressionMovementOwned).
     PinnedHold = 6,
 
-    // Required actions, grenade throw safety, and stalled-route recovery can halt
-    // combat movement, but must yield while escaping an active lethal hazard.
-    SafetyHalt = 7,
+    // Evading an active flame - the ONE owner above the halts that GRANTS movement. A
+    // soldier inside the beaten zone of a flamethrower leaves it even while pinned, which
+    // is why the halt sites used to be individually guarded by !flameEvading.
+    HazardEscape = 7,
 
-    HazardEscape = 8,
-
-    // Already burning uses the game's stationary reaction. Keep this separate
-    // from interruptible action safety so a reload callback cannot cancel escape.
-    BurningHold = 9
+    // Burning, a required action (reload/bandage), a grenade-safety halt, or the movement
+    // watchdog's stall recovery hold. Nothing moves through this.
+    SafetyHalt = 8
 }
 
 /// <summary>
@@ -648,8 +647,7 @@ internal static class MovementArbiterCore
         bool haltSpacing,
         bool engagementHold,
         bool coverHold,
-        bool committedMove,
-        bool burningHold = false)
+        bool committedMove)
     {
         var resolved = MovementOwner.Free;
         if (committedMove)
@@ -662,17 +660,15 @@ internal static class MovementArbiterCore
             resolved = MovementOwner.HaltSpacing;
         if (pinnedHold)
             resolved = MovementOwner.PinnedHold;
-        if (safetyHalt)
-            resolved = MovementOwner.SafetyHalt;
         if (hazardEscape)
             resolved = MovementOwner.HazardEscape;
-        if (burningHold)
-            resolved = MovementOwner.BurningHold;
+        if (safetyHalt)
+            resolved = MovementOwner.SafetyHalt;
         return (int)declared > (int)resolved ? declared : resolved;
     }
 
     internal static bool Halts(MovementOwner owner)
-        => owner is MovementOwner.BurningHold or MovementOwner.SafetyHalt or MovementOwner.PinnedHold or
+        => owner is MovementOwner.SafetyHalt or MovementOwner.PinnedHold or
                     MovementOwner.EngagementHold or MovementOwner.CoverHold;
 
     internal static bool Grants(MovementOwner owner)
@@ -1237,16 +1233,10 @@ internal static class SuppressionRecoveryPoseCore
 /// <summary>
 /// Pure ownership policy for the one non-cover prone intent: a soldier who was actually
 /// moving and personally observes the start of a new continuous contact episode dives once.
-/// A cover move ignores distant contacts but permits one near-threat escalation per
-/// episode. Target switching cannot renew that escalation or an already-active dive.
+/// Target switching inside that episode and an already-active dive cannot retrigger it.
 /// </summary>
 internal static class ContactDivePolicyCore
 {
-    internal static bool IsImmediateThreat(float horizontalDistanceSqr, float thresholdMeters)
-        => float.IsFinite(horizontalDistanceSqr) && horizontalDistanceSqr >= 0f &&
-           float.IsFinite(thresholdMeters) && thresholdMeters > 0f &&
-           horizontalDistanceSqr <= thresholdMeters * thresholdMeters;
-
     internal static bool ContactWasContinuous(
         bool hasPreviousObservedContact,
         float lastSeenAt,
@@ -1262,15 +1252,8 @@ internal static class ContactDivePolicyCore
         bool hasObservedTarget,
         bool contactWasContinuous,
         float currentDiveUntil,
-        float now,
-        bool hasCommittedCoverMove = false,
-        bool survivalActionActive = false,
-        bool immediateThreat = false,
-        bool immediateThreatResponseUsed = false)
-        => (!hasCommittedCoverMove || immediateThreat) && !survivalActionActive &&
-           wasActuallyMoving && hasObservedTarget &&
-           (!contactWasContinuous ||
-            hasCommittedCoverMove && immediateThreat && !immediateThreatResponseUsed) &&
+        float now)
+        => wasActuallyMoving && hasObservedTarget && !contactWasContinuous &&
            float.IsFinite(currentDiveUntil) && float.IsFinite(now) &&
            now >= currentDiveUntil;
 
@@ -1320,7 +1303,7 @@ internal readonly record struct SoldierTacticalSnapshot(
     bool ScriptOwned,
     bool Alive,
     bool Mounted,
-    bool Pinned,
+    bool Suppressed,
     bool NeedsReloadSafety,
     bool LethalHazard,
     MapPoint Position,
@@ -1557,12 +1540,9 @@ internal static class CombatMovementPolicyCore
         bool hasMovementOrder,
         bool underPressure,
         float now,
-        float configuredSeconds,
-        bool coverMoveActive = false)
+        float configuredSeconds)
     {
-        // Beginning a cover relocation clears the old firing timer. Do not treat
-        // that reset as a new contact and stop the soldier en route to protection.
-        if (currentCommitUntil > 0f || attackBoundActive || coverMoveActive ||
+        if (currentCommitUntil > 0f || attackBoundActive ||
             !hasMovementOrder || !underPressure || !float.IsFinite(now))
         {
             return currentCommitUntil;
@@ -1615,13 +1595,9 @@ internal static class CombatMovementPolicyCore
         bool pinned,
         bool onUsableCover,
         float coverHoldUntil,
-        float now,
-        bool immediateThreat = false)
+        float now)
     {
-        // A firing/halt deadline measures elapsed time, not threat neutralization.
-        // Close observed contact keeps the fighting decision alive; the separate
-        // cover policy can still move an exposed soldier into protection.
-        if (!hasAttackRoute || pinned || immediateThreat ||
+        if (!hasAttackRoute || pinned ||
             float.IsNaN(now) || float.IsInfinity(now) ||
             float.IsNaN(coverHoldUntil))
         {
@@ -2057,8 +2033,9 @@ internal readonly record struct TacticalPolicyOptions(
     bool ContactResponseEnabled);
 
 /// <summary>
-/// Pure per-soldier movement/pose/fire-permission proposal generator.
-/// Survival actions precede boarding, assignments, and ordinary combat. Reads only
+/// Pure per-soldier movement/pose/fire-permission proposal generator. A
+/// line-for-line translation of the former GroundAiDirector.CollectProposals:
+/// same branch order, same constraint strings, same authorities. Reads only
 /// its snapshot and options arguments — no Settings, no Unity, no Soldier.
 /// </summary>
 internal static class ProposalGenerationCore
@@ -2108,17 +2085,17 @@ internal static class ProposalGenerationCore
                 TacticalChannel.Movement, TacticalAction.Hold, CommandAuthority.RequiredSafety,
                 ProposalSource.ActionSafety, snapshot.Position, "complete medical or reload action safely"));
         }
-        else if (snapshot.Pinned)
-        {
-            destination.Add(new TacticalProposal(
-                TacticalChannel.Movement, TacticalAction.Hold, CommandAuthority.CriticalSuppression,
-                ProposalSource.Suppression, snapshot.Position, "pin in protection"));
-        }
         else if (snapshot.HasVehicleBoardingOrder)
         {
             destination.Add(new TacticalProposal(
                 TacticalChannel.Movement, TacticalAction.Native, CommandAuthority.VehicleBoarding,
                 ProposalSource.VehicleBoarding, default, "complete native vehicle boarding order"));
+        }
+        else if (snapshot.Suppressed)
+        {
+            destination.Add(new TacticalProposal(
+                TacticalChannel.Movement, TacticalAction.Hold, CommandAuthority.CriticalSuppression,
+                ProposalSource.Suppression, snapshot.Position, "pin in protection"));
         }
 
         if (snapshot.HasProtectedAssignment)
@@ -2158,7 +2135,7 @@ internal static class ProposalGenerationCore
                 ProposalSource.Contact, snapshot.ThreatPosition, "contact response"));
         }
 
-        if (snapshot.Pinned)
+        if (snapshot.Suppressed)
         {
             destination.Add(new TacticalProposal(
                 TacticalChannel.Pose, TacticalAction.Crouch, CommandAuthority.CriticalSuppression,

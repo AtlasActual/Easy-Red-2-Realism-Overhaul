@@ -16,7 +16,7 @@ public sealed class Plugin : BasePlugin
 {
     public const string PluginGuid = "ca.antoi.er2.tacticalai";
     public const string PluginName = "Easy Red 2 Realism Overhaul";
-    public const string PluginVersion = "1.1.4";
+    public const string PluginVersion = ModVersionInfo.Value;
 
     internal static ManualLogSource LogSource { get; private set; } = null!;
     private bool _modEnabled;

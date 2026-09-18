@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="AiPriorityScenarios.cs" />
     <Compile Include="AircraftAerodynamicsScenarios.cs" />
     <Compile Include="AircraftCameraScenarios.cs" />
     <Compile Include="AircraftMouseInstructorScenarios.cs" />

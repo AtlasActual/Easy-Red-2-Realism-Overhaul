@@ -136,9 +136,6 @@ internal sealed class ContactResponseState
     // Absolute deadline for the one non-cover prone intent: a moving soldier's first
     // visual acquisition of a continuous contact episode. While active he halts and fires.
     internal float ContactDiveProneUntil;
-    // One near-threat escalation per continuous contact episode, shared by both
-    // acquisition and periodic updates so target switching cannot restart it.
-    internal bool ImmediateThreatResponseUsed;
     internal bool AttackConditionsWereFavorable;
     internal float AttackHaltStartedAt;
     internal bool AttackProgressForced;

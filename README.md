@@ -6,20 +6,25 @@ ER2RealismOverhaul is built around the rough edges that become hard to ignore af
 
 The goal is to fix those moments without replacing the game underneath them. This is not a health or damage multiplier mod; Easy Red 2's missions, armour system, and basic damage model remain intact.
 
-> **Current release:** 1.1.4
+> **Current release:** 1.1.5
 >
 > **Compatibility:** Tested with Easy Red 2 2.1.0, Steam public-branch build `25110514` (September 3, 2026). Versions 1.1.3 and earlier do not work on 2.1.0.
 
-## What's new in 1.1.4
+## What's new in 1.1.5
 
-- Compatibility with Easy Red 2 2.1.0. Versions 1.1.3 and earlier install none of their gameplay patches on 2.1.0 because one renumbered game class aborted the whole patch pass; only the settings menu, compass, and binocular overlay kept working.
-- Each feature now attaches to the game on its own. Game code that a future update renames or removes switches off only the features that used it, the **F10** settings menu header says how many could not attach, and `BepInEx/LogOutput.log` names each one with the missing game type or method.
-- Improved melee hit registration no longer depends on the compiler-generated name of the game's melee coroutine class.
-- Immersive World HUD and Spectator HUD marker suppression rebound to the 2.1.0 squad marker icon and world marker drawing methods.
+- Fixed mod-side restrictions that stopped defenders short of native sandbag, trench, and building positions. Unanchored defenders can continue native cover movement, and protective slots remain eligible when intervening walls block a distant firing ray.
+- Defenders give less weight to immediate enemy visibility when choosing protected positions. In calm periods they occasionally reassess nearby cover, moving only for a substantial measured protection gain rather than shuffling between equivalent slots.
+- Improved overlap correction: distant cover reservations no longer exempt stacked soldiers, and two overlapping cover occupants choose one to step aside. Corrections preserve defensive boundaries and require a clear destination.
+- Attackers can use nearby off-axis entrances; estimated straight-line exposure no longer vetoes protected destinations, and close contact respects committed movement and the attack halt deadline.
+- After the timed initial close-contact firing response, exposed soldiers can seek protective cover even without an immediate firing lane or attack-advance authorization. Close enemy proximity no longer causes a permanent open-ground halt; suppression and cover-search cooldowns still apply.
+- Fixed defending AI sometimes remaining motionless after spawning while trying to enter a static emplacement. Staffing now waits for the complete squad to spawn and releases failed emplacement routes back to normal defensive cover behavior.
+- Unreachable emplacements receive a short retry delay instead of immediately assigning the same failed route again.
+- Game builds without the separate spectator phase-bar HUD class now skip that legacy hook cleanly while retaining the main spectator HUD integration.
+- Compatibility remains Easy Red 2 2.1.0, Steam public-branch build `25110514`.
 
 ## What's new in 1.1.3
 
-- Defenders reject and abandon defensive cover with no usable firing lane toward the attacker, and favor the outer defensive ring facing the threat over the center of the objective.
+- Defenders favor protective cover with useful firing lanes and positions on the outer defensive ring facing the threat over the center of the objective.
 - Defending squads assume much better positions to defend their assigned objective.
 - Defenders weigh the local balance of squads before counter-attacking a lost objective: a clear advantage attacks at once, a marginal one waits for more free squads, and a bad situation consolidates on the objectives still held. When every active objective is lost, defenders always attack.
 - Defending AI now actually crew unmanned static anti-tank guns and other emplacements, and the **Minimum Gun Caliber** setting decides which guns count as anti-tank.
@@ -100,7 +105,7 @@ The goal is to fix those moments without replacing the game underneath them. Thi
 
 - **Squads and vehicles attack and defend under the game's own routing.** Easy Red 2's maps are balanced around vanilla's continuous frontal pressure, so the mod no longer runs its own attack/defense operation planner; the tactical layer below still governs how soldiers fight once native orders send them into position.
 - **Attacks are less likely to die after first contact.** Assaulting squads use buildings, trenches, and other strong cover as intermediate bounds or support-by-fire positions, then resume their advance once covering fire is established or the maximum combat halt is reached. A modest configurable attack-posture bonus helps offensive AI maintain pressure without changing health or damage.
-- **Defenders build their plan around fortified ground.** The AI groups nearby cover into positions, values protection and firing lanes above raw distance, and reserves distinct slots. After arriving, each defender takes one useful trench or building position—or holds the arrival point when none is free—and stays put unless that position is destroyed or unsafe.
+- **Defenders build their plan around fortified ground.** The AI groups nearby cover into positions, values protection and firing lanes above raw distance, and reserves distinct slots. Each defender completes the move into a useful trench or building position. Established positions stay stable during contact; in calm periods, defenders occasionally check for a substantially better protected slot nearby. Without a selected slot, native positioning remains available instead of freezing the soldier at the objective boundary.
 - **Static weapons are a core part of every defence.** Autonomous squads under a defend order proactively crew viable loaded guns across every active hold area, including attacker-side squads ordered to hold ground. Every squad may contribute gunners while retaining its leader and one other mobile soldier, plus its last key specialists. Reported armour makes AP-capable guns the first staffing priority. Empty armed troop transports parked in the position, such as a halftrack with a mounted machine gun, are crewed the same way; tanks, assault guns, and aircraft are not.
 - **AI-led transports dismount before disaster.** Infantry leave APCs when credible nearby contact or incoming fire makes remaining inside the greater risk, rather than waiting for the vehicle to be destroyed.
 

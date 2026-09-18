@@ -120,7 +120,6 @@ internal static class InfantryCoverDecisionCore
         // This is only the immediate firing response, not a standing veto on
         // looking for cover. The normal FSM retains protective positions and
         // validates a destination before granting a move out of open ground.
-        // False means reassess protection, not that the enemy is neutralized.
         => closeThreat && !allowsMovingFire && firingPhaseActive;
 
     internal static CoverPostureChoice SelectReloadPosture(

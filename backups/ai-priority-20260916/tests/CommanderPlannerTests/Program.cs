@@ -6,12 +6,6 @@ internal static class Program
     {
         var tests = new (string Name, Action Run)[]
         {
-            (nameof(AiPriorityScenarios.SurvivalOverridesCompetingTasks), AiPriorityScenarios.SurvivalOverridesCompetingTasks),
-            (nameof(AiPriorityScenarios.EscapeSurvivesSafetyCallbacks), AiPriorityScenarios.EscapeSurvivesSafetyCallbacks),
-            (nameof(AiPriorityScenarios.CoverMoveInterruptionDependsOnDistance), AiPriorityScenarios.CoverMoveInterruptionDependsOnDistance),
-            (nameof(AiPriorityScenarios.LiveCloseThreatOutlastsFiringDeadline), AiPriorityScenarios.LiveCloseThreatOutlastsFiringDeadline),
-            (nameof(AiPriorityScenarios.SurvivalDoesNotArmAContactDive), AiPriorityScenarios.SurvivalDoesNotArmAContactDive),
-            (nameof(AiPriorityScenarios.PinnedBoardingResumesAfterRecovery), AiPriorityScenarios.PinnedBoardingResumesAfterRecovery),
             (nameof(CoreAiTuningKeepsBaselineCenteredAndDirectional), CoreAiTuningKeepsBaselineCenteredAndDirectional),
             (nameof(SuppressionPenaltyLadderStartsGentleAndPinsOnlyUnderHeavyFire), SuppressionPenaltyLadderStartsGentleAndPinsOnlyUnderHeavyFire),
             (nameof(SuppressionCrouchBandUsesFifteenPointReleaseHysteresis), SuppressionCrouchBandUsesFifteenPointReleaseHysteresis),
@@ -857,13 +851,13 @@ internal static class Program
 
     private static void MovementArbiterSafetyOutranksEveryLesserOwner()
     {
-        // Escape wins even when every interruptible hold is active. Burning has
-        // a separate highest-ranked hold, tested by EscapeSurvivesSafetyCallbacks.
-        Equal(MovementOwner.HazardEscape,
+        // Failure criterion: a soldier must never move while burning, mid-reload, or
+        // pinned. Safety wins over every lesser owner, and over all of them at once.
+        Equal(MovementOwner.SafetyHalt,
             ResolveMovement(MovementOwner.OrderedMove, safetyHalt: true, hazardEscape: true,
                 pinnedHold: true, haltSpacing: true, engagementHold: true,
                 coverHold: true, committedMove: true),
-            "An interruptible safety halt trapped the soldier in a lethal hazard.");
+            "A safety halt lost locomotion to a lesser owner.");
         False(MovementArbiterCore.Grants(MovementOwner.SafetyHalt),
             "The safety halt was treated as permission to move.");
 
@@ -4366,12 +4360,6 @@ internal static class Program
         Equal(deadline, CombatMovementPolicyCore.EnsureInitialAttackFiringCommit(
                 deadline, false, true, true, now, CombatMovementPolicyCore.DefaultAttackFiringHoldSeconds),
             "Continued contact restarted an expired firing phase.");
-        // BeginRelocation clears the attack timer and objective-bound flag. The
-        // next update must recognize the cover move as a committed movement phase.
-        Equal(0f, CombatMovementPolicyCore.EnsureInitialAttackFiringCommit(
-                0f, false, true, true, now, CombatMovementPolicyCore.DefaultAttackFiringHoldSeconds,
-                coverMoveActive: true),
-            "Starting a cover route rearmed the firing halt on the very next update.");
         var continuous = ContactDivePolicyCore.ContactWasContinuous(true, now - 0.1f, now, 2f);
         True(continuous, "A recent confirmed contact was not continuous.");
         False(ContactDivePolicyCore.ShouldStart(true, true, continuous, deadline, now),
@@ -5055,7 +5043,7 @@ internal static class Program
             HasStableCoverHold: false, HasTimedCoverHold: false, CanClaimReachedCover: false,
             HasEngagementHold: false, NeedsDefensivePositionControl: true);
         var snapshot = ProposalSnapshot(
-            suppressed: false,
+            suppressed: true,
             contactMovement: contactSensor,
             hasVehicleBoardingOrder: true);
         var proposals = new List<TacticalProposal>();
@@ -5063,7 +5051,7 @@ internal static class Program
         ProposalGenerationCore.Collect(snapshot, new TacticalPolicyOptions(true), proposals);
         var resolution = TacticalArbitrationCore.Resolve(snapshot, proposals);
         Equal(ProposalSource.VehicleBoarding, resolution.Winners[TacticalChannel.Movement].Source,
-            "Ordinary cover movement displaced a native vehicle-boarding order.");
+            "Cover or suppression movement displaced a native vehicle-boarding order.");
         Equal(TacticalAction.Native, resolution.Winners[TacticalChannel.Movement].Action,
             "The vehicle-boarding proposal did not defer movement to the game's native order.");
 

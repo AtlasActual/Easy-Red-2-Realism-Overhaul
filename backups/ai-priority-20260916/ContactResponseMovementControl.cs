@@ -28,9 +28,13 @@ internal static partial class ContactResponse
 
         return MovementArbiterCore.Resolve(
             declared,
-            // The core orders escape above interruptible action/stall holds,
-            // including SafetyHalt declarations from asynchronous callbacks.
-            state.ExposedReloadSafetyOwned || now < state.MovementStallHoldUntil,
+            // Burning, a required action, or the stall watchdog's recovery hold. Flame
+            // evasion outranks the last two - a reload/stall hold releases itself while
+            // the soldier leaves the flame, which is exactly what the scattered
+            // "!flameEvading &&" guards on the old halt sites encoded.
+            onFire ||
+            (!flameEvading &&
+            (state.ExposedReloadSafetyOwned || now < state.MovementStallHoldUntil)),
             flameEvading,
             state.SuppressionMovementOwned,
             now < state.HaltSpacingMoveUntil,
@@ -42,8 +46,7 @@ internal static partial class ContactResponse
             state.MovementInhibitedByContactResponse || now < state.EngagementHoldUntil,
             // IsOnCover is interop, so the timer is tested first and short-circuits it.
             now < state.HoldCoverUntil && soldier.IsOnCover(),
-            state.Relocating,
-            burningHold: onFire);
+            state.Relocating);
     }
 
     /// <summary>

@@ -310,9 +310,9 @@ internal static partial class ContactResponse
         float now)
     {
         if (!Settings.ContactResponseEnabled.Value ||
-            !ContactDivePolicyCore.IsImmediateThreat(
-                HorizontalDistanceSqr(soldier.transform.position, targetPosition),
-                AiBehaviorTuning.ImmediateFireDistance))
+            HorizontalDistanceSqr(soldier.transform.position, targetPosition) >
+            AiBehaviorTuning.ImmediateFireDistance *
+            AiBehaviorTuning.ImmediateFireDistance)
         {
             return;
         }
@@ -349,8 +349,7 @@ internal static partial class ContactResponse
             wasActuallyMoving,
             hasObservedTarget: true,
             contactWasContinuous: contactWasContinuous,
-            now: now,
-            immediateThreat: true);
+            now: now);
         // Changing the selected enemy during continuous contact must not recreate
         // an indefinite halt, including while an exposed soldier awaits a cover
         // search. Only the bounded dive/firing phase owns this early return.
@@ -409,10 +408,6 @@ internal static partial class ContactResponse
                                          observedTargetPosition) <=
                                      AiBehaviorTuning.EngagementHaltDistance *
                                      AiBehaviorTuning.EngagementHaltDistance;
-        var closeThreat = target != null &&
-            ContactDivePolicyCore.IsImmediateThreat(
-                HorizontalDistanceSqr(soldier.transform.position, observedTargetPosition),
-                AiBehaviorTuning.ImmediateFireDistance);
         var underDirectFire = IncomingFireAwareness.TryGetActiveDirectCue(
             id, now, out var directFirePosition);
         var attackUnderPressure = target != null || state.Pinned ||
@@ -423,8 +418,7 @@ internal static partial class ContactResponse
             hasMovementOrder,
             attackUnderPressure,
             now,
-            AiBehaviorTuning.AttackFiringHoldSeconds,
-            coverMoveActive: state.Relocating);
+            AiBehaviorTuning.AttackFiringHoldSeconds);
         UpdateAttackObjectiveBoundCycle(
             state, hasMovementOrder, attackUnderPressure, now);
         var (maximumAttackHaltReached, maximumOnCoverAttackHaltReached) =
@@ -498,17 +492,6 @@ internal static partial class ContactResponse
             return;
         }
 
-        // Resolve survival before starting a timed firing response. Otherwise a
-        // newly spotted enemy can arm a dive while pinned and keep the soldier
-        // halted even after suppression releases him.
-        if (IsPinned(id))
-        {
-            if (state.Relocating)
-                PauseRelocation(ai, soldier, state, id, now, true);
-            ApplyPinnedSuppression(ai, soldier, state, now, Time.deltaTime);
-            return;
-        }
-
         if (target != null)
         {
             TryStartContactDive(
@@ -516,8 +499,7 @@ internal static partial class ContactResponse
                 wasActuallyMovingWhenObserved,
                 hasObservedTarget: true,
                 contactWasContinuous: contactWasContinuous,
-                now: now,
-                immediateThreat: closeThreat);
+                now: now);
         }
 
         // The dive is a complete combat action, not a one-frame pose request. It owns
@@ -533,6 +515,17 @@ internal static partial class ContactResponse
                 state.NextRelocationAllowedAt, state.ContactDiveProneUntil);
             RespondWithoutNewCover(
                 ai, soldier, state, state.LastThreatPosition, now);
+            return;
+        }
+
+        // Pinning owns ordinary locomotion independently of Contact Response. A
+        // selected cover destination is retained, but the soldier first halts and
+        // survives the burst that pinned him. Pinning itself does not create Prone.
+        if (IsPinned(id))
+        {
+            if (state.Relocating)
+                PauseRelocation(ai, soldier, state, id, now, true);
+            ApplyPinnedSuppression(ai, soldier, state, now, Time.deltaTime);
             return;
         }
 
@@ -553,7 +546,7 @@ internal static partial class ContactResponse
 
         // A real charge clears ordinary cover and engagement holds, but it does not
         // make a rifleman ignore an enemy inside immediate survival distance.
-        var actualCharge = IsActualCharge(soldier) && !closeThreat;
+        var actualCharge = IsActualCharge(soldier);
         if (actualCharge)
         {
             if (state.Relocating)
@@ -571,9 +564,12 @@ internal static partial class ContactResponse
             state.MovementInhibitedByContactResponse = false;
         }
 
-        // Expiry ends the minimum reaction, not the engagement. Reassess protection
-        // below; a still-actionable close enemy blocks objective advance, while a
-        // validated cover move remains available to get the soldier out of exposure.
+        // Once the initial firing phase expires, let the FSM evaluate protection
+        // even without a selected cover route or an attack advance authorization.
+        // Otherwise the soldier can kneel in the open forever near a visible enemy.
+        var closeThreat = target != null &&
+            HorizontalDistanceSqr(soldier.transform.position, observedTargetPosition) <=
+                AiBehaviorTuning.ImmediateFireDistance * AiBehaviorTuning.ImmediateFireDistance;
         var closeThreatRequiresStationaryFire = closeThreat && InfantryCoverDecisionCore.ShouldHaltForCloseThreat(
             closeThreat,
             HandheldWeaponClassifier.AllowsMovingFire(soldier, ai),
@@ -597,21 +593,6 @@ internal static partial class ContactResponse
                 ai, soldier, Time.deltaTime, now, MovementOwner.OrderedMove,
                 "fsm-charge");
             return;
-        }
-
-        // The cover destination may have been chosen before this close enemy was
-        // observed. Recheck it once at the pause/resume boundary, rather than
-        // treating the firing deadline as proof that the threat was neutralized.
-        if (state.Relocating && state.MovementHalted && closeThreat &&
-            !EvaluateCoverGeometry(
-                state.RelocateDestinationPosition, observedTargetPosition,
-                evaluateFiringQuality: false).IsProtective)
-        {
-            var expiredFiringCommit = state.AttackFiringCommitUntil;
-            FinishRelocation(ai, soldier, state, id, now, false, false);
-            // Retain the episode latch: reassessing a bad route is not a fresh
-            // contact that should restart the minimum firing timer next update.
-            state.AttackFiringCommitUntil = expiredFiringCommit;
         }
 
         // The close-contact pause above is no longer a separate coordination flag: the
@@ -930,6 +911,7 @@ internal static partial class ContactResponse
         }
 
         var targetPosition = state.LastThreatPosition;
+        var distance = Vector3.Distance(soldier.transform.position, targetPosition);
         var attackContactInsideHalt = hasAttackRoute && targetInsideAttackHalt;
         // Widened with the cap (plan 028): "a squadmate is firing at this contact right
         // now" is the same fact whatever the squad's order code, and it only ever
@@ -970,8 +952,7 @@ internal static partial class ContactResponse
             state.Pinned,
             hasUsableCover,
             state.ManeuverCoverMinimumHoldUntil,
-            now,
-            immediateThreat: closeThreat);
+            now);
         var forcedAttackProgress = authorizedAttackAdvance &&
                                    (hasUsableCover
                                        ? maximumOnCoverAttackHaltReached
@@ -1026,7 +1007,7 @@ internal static partial class ContactResponse
             coverCompromised,
             underDirectFire,
             suppressed && !hasAttackRoute,
-            closeThreat,
+            distance <= AiBehaviorTuning.ImmediateFireDistance,
             attackContactInsideHalt && !authorizedAttackAdvance,
             now >= state.NextRelocationAllowedAt &&
             (now >= state.NextDecisionAt || favorableJustEstablished),
@@ -1068,7 +1049,7 @@ internal static partial class ContactResponse
             now,
             coverDecision.SelectionMode,
             underDirectFire ? directFirePosition : null,
-            respectAttackWaypoint: !closeThreat,
+            respectAttackWaypoint: true,
             evaluateFiringQuality: true,
             out _,
             out var searchDeferred,
@@ -1081,7 +1062,7 @@ internal static partial class ContactResponse
             if (InfantryCoverDecisionCore.ShouldKeepMovingDuringDeferredCoverSearch(
                     searchDeferred,
                     hasUsableCover,
-                    closeThreat,
+                    distance <= AiBehaviorTuning.ImmediateFireDistance,
                     hasMovementOrder,
                     HasCommittedDestination(soldier),
                     CombatMovementPolicyCore.AttackFiringPhaseActive(
@@ -1698,21 +1679,14 @@ internal static partial class ContactResponse
         bool wasActuallyMoving,
         bool hasObservedTarget,
         bool contactWasContinuous,
-        float now,
-        bool immediateThreat)
+        float now)
     {
-        if (!contactWasContinuous)
-            state.ImmediateThreatResponseUsed = false;
         if (!ContactDivePolicyCore.ShouldStart(
                 wasActuallyMoving,
                 hasObservedTarget,
                 contactWasContinuous,
                 state.ContactDiveProneUntil,
-                now,
-                hasCommittedCoverMove: state.Relocating,
-                survivalActionActive: state.Pinned || state.ExposedReloadSafetyOwned,
-                immediateThreat: immediateThreat,
-                immediateThreatResponseUsed: state.ImmediateThreatResponseUsed))
+                now))
         {
             return false;
         }
@@ -1720,7 +1694,6 @@ internal static partial class ContactResponse
         var diveUntil = ContactDivePolicyCore.ResolveFiringDeadline(
             now, AiBehaviorTuning.AttackFiringHoldSeconds);
         state.ContactDiveProneUntil = diveUntil;
-        state.ImmediateThreatResponseUsed |= immediateThreat;
         state.AttackFiringCommitUntil = Mathf.Max(
             state.AttackFiringCommitUntil, diveUntil);
         state.EngagementHoldUntil = Mathf.Max(state.EngagementHoldUntil, diveUntil);
@@ -1762,7 +1735,6 @@ internal static partial class ContactResponse
         state.AttackContactToken = IntPtr.Zero;
         state.AttackContactLastSeenAt = 0f;
         state.ContactDiveProneUntil = 0f;
-        state.ImmediateThreatResponseUsed = false;
         state.AttackConditionsWereFavorable = false;
         state.AttackHaltStartedAt = 0f;
         state.AttackProgressForced = false;

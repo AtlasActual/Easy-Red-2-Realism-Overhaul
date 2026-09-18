@@ -12,10 +12,11 @@ obj/
 BepInEx/config/
 BepInEx/LogOutput.log
 
-# Keep public documentation limited to the project README
+# Keep public documentation limited to project references
 *.md
 !README.md
 !CHANGELOG.md
+!docs/AI_DECISION_FLOW.md
 
 # Packaged releases
 artifacts/

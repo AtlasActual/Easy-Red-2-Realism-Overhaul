@@ -2,6 +2,19 @@
 
 This file records only concrete, player-visible changes in each released version of Easy Red 2 Realism Overhaul. It is a living description of the shipped mod: superseded wording is replaced with the final behavior, and changes that are removed or reverted are deleted instead of retained as historical notes.
 
+## 1.1.5 - 2026-09-05
+
+Easy Red 2 compatibility: version 2.1.0, Steam public branch build `25110514` (September 3, 2026).
+
+- Fixed defending AI sometimes remaining motionless after spawning while trying to enter a static emplacement. Emplacement staffing now waits until the complete squad has spawned, clears the native boarding destination when an unreachable assignment is abandoned so normal defensive cover movement can resume, and briefly defers the failed emplacement before trying it again.
+- Fixed the optional spectator phase-bar patch naming a game HUD class directly. Builds without that separate class now skip only its legacy hook without reporting a compatibility failure; the main spectator HUD hook continues to run.
+- Fixed defensive area ownership stopping soldiers before they reached native sandbag, trench, or building slots and blocking replacement cover assignments. Only an actual reserved move or anchored slot now owns those assignments; defenders without a slot can continue native positioning.
+- Protected defensive cover no longer requires an unobstructed firing ray to a distant threat point. Firing opportunities still improve its score, but intervening urban walls no longer disqualify otherwise protective positions.
+- Fixed close contact indefinitely blocking exposed soldiers from searching for cover. Once the timed initial firing response ends, they can seek protective positions without immediate enemy LOS or attack-advance authorization. Suppression, occupied slots, order boundaries, and search retry limits still apply; soldiers already protected keep their cover.
+- Reduced the defensive no-sightline score penalty from 500 to 120 so substantially better protection can outweigh immediate visibility. During calm periods, anchored defenders reassess every 30–40 seconds and may move 3–20 m to a measured protection improvement of at least 20 percentage points, subject to route exposure, reservations, and order boundaries. Equal-quality positions do not trigger moves; arrival starts a fresh reassessment interval.
+- Fixed spacing exemptions treating distant or in-transit cover reservations as occupied slots. Two physically overlapping slot occupants now deterministically choose one to step aside, and autonomous AI yield to overlapping player-controlled soldiers. Escape checks allow leaving the friendly body already overlapping the start while retaining wall, endpoint-occupancy, reservation, and defensive-area checks.
+- Attackers can use nearby sideways or rearward entrances within the existing 8 m objective-distance backtrack allowance. Straight-line exposure estimates rank routes instead of vetoing protected destinations, and close rifle contact no longer indefinitely overrides committed movement or the attack halt deadline.
+
 ## 1.1.4 - 2026-09-03
 
 Easy Red 2 compatibility: version 2.1.0, Steam public branch build `25110514` (September 3, 2026). Versions 1.1.3 and earlier do not work on 2.1.0: the update renumbered a compiler-generated class inside `Soldier` that one patch named directly, and because the loader read every patch attribute before applying any module, that single missing class stopped every Harmony patch from installing. Only the features that run as plain Unity components (settings menu, compass, binocular overlay) kept working, which is what the "freelook broken, most features broken" reports described.
@@ -15,12 +28,12 @@ Easy Red 2 compatibility: version 2.1.0, Steam public branch build `25110514` (S
 
 Easy Red 2 compatibility: version 2.0.9 Stable, Steam public branch build `24512933` (August 1, 2026).
 
-- Defenders now reject and abandon defensive cover that has no usable firing lane toward the attacker, and favor the outer defensive ring facing the threat over the geometric center of the objective.
+- Defenders favor protective cover with useful firing lanes and positions on the outer defensive ring facing the threat over the geometric center of the objective.
 - Defending squads will now assume better positions in order to defend their assigned objective.
 - Defenders now weigh the local balance of squads before counter-attacking an objective the enemy has secured: a clear local advantage attacks at once, a marginal one waits for more free squads, and a bad local situation makes the defenders consolidate on the objectives they still hold instead of feeding squads into a hopeless assault. When every active objective is lost, defenders always attack rather than freeze. A launched counter-attack still commits up to two squads per lost objective while keeping at least one squad on every objective still held.
 - Fixed gamepad aiming on mounted static guns and ground-vehicle turrets moving the wrong way: stick left and right elevated the gun while up and down traversed it, and traverse was reversed. Mouse aiming was unaffected and is unchanged.
 - Fixed defending AI never crewing unmanned static anti-tank guns and other emplacements; defenders holding a position now actually send a soldier to man a nearby gun. The **Minimum Gun Caliber** setting now has an effect: it decides which guns count as anti-tank when several are available and enemy armor is about, while lighter emplacements are still crewed for their value against infantry.
-- AI infantry who end up crouching or standing inside a squadmate now keep taking short steps clear every few seconds until they no longer overlap, and a blocked full-spacing step falls back to a shorter one instead of leaving the group stacked. A soldier holding his reserved cover slot stays put; the intruder is the one who moves.
+- AI infantry who end up crouching or standing inside a squadmate retry short steps clear every few seconds, and a blocked full-spacing step falls back to a shorter one. A soldier actually occupying his reserved cover slot keeps it against an unanchored AI intruder; if two occupants physically overlap, one yields deterministically.
 - AI soldiers no longer call out ordinary enemy tanks and other ground vehicles as artillery when they spot them; vehicle contacts now always use the armor callout.
 
 ## 1.1.2 - 2026-08-08

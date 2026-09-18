@@ -164,7 +164,10 @@ foreach (var spec in specs)
                 sb.AppendLine("  " + i);
         }
         catch (Exception ex) { sb.AppendLine("  ISIL failed: " + ex.GetType().Name + ": " + ex.Message); }
-        var file = Path.Combine(outDir, $"{type.DefaultName}.{m.DefaultName}{(methods.Count > 1 ? "." + n : "")}.txt");
+        var fileName = $"{type.DefaultName}.{m.DefaultName}{(methods.Count > 1 ? "." + n : "")}.txt";
+        foreach (var invalid in Path.GetInvalidFileNameChars())
+            fileName = fileName.Replace(invalid, '_');
+        var file = Path.Combine(outDir, fileName);
         File.WriteAllText(file, sb.ToString());
         written++;
     }

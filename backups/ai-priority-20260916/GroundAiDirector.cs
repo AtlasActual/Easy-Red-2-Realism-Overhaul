@@ -335,11 +335,6 @@ internal static class GroundAiDirector
 
         ExclusiveCoverAssignmentPatch.MaintainOccupiedCoverClaim(soldier, now);
 
-        // Refresh the latched pin before choosing an executor. The crouch threshold
-        // is posture pressure, not a pin, and the previous tick's pin can be stale.
-        ModTimeProbe.Stage(SequentialStage.DirectorSuppressionReaction);
-        ContactResponse.UpdateSuppressionReaction(ai, soldier, id, now, Time.deltaTime);
-
         ModTimeProbe.Stage(SequentialStage.DirectorSnapshot);
         var snapshot = CaptureSnapshot(ai, soldier, squad);
         var reusableResolution = SoldierResolutions.TryGetValue(id, out var priorResolution)
@@ -355,6 +350,8 @@ internal static class GroundAiDirector
         // Suppression, fire safety, and lethal hazard systems remain local safety
         // executors. The selected movement owner decides whether contact/tank policy
         // may replace the current assignment.
+        ModTimeProbe.Stage(SequentialStage.DirectorSuppressionReaction);
+        ContactResponse.UpdateSuppressionReaction(ai, soldier, id, now, Time.deltaTime);
         ModTimeProbe.Stage(SequentialStage.DirectorSuppressiveSchedule);
         RememberedGrenadeThrows.Schedule(ai, soldier, now);
         KnownTargetSuppressiveFire.Schedule(ai, soldier, now);
@@ -475,7 +472,7 @@ internal static class GroundAiDirector
             scriptOwned,
             soldier.IsAlive,
             mounted,
-            Settings.DangerReactionsEnabled.Value && state.Pinned,
+            soldier.GetSuppressionValue() >= AiBehaviorTuning.CrouchSuppressionThreshold,
             state.ExposedReloadSafetyOwned,
             lethalHazard,
             new MapPoint(position.x, position.z),

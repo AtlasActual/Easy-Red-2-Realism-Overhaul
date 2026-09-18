@@ -730,9 +730,33 @@ internal static class SpectatorObjectiveHudPatch
     }
 }
 
-[HarmonyPatch(typeof(PhaseBarGUI), "LateUpdate")]
+[HarmonyPatch]
 internal static class SpectatorPhaseBarHudPatch
 {
+    // PhaseBarGUI was introduced as a separate native HUD component, but not every
+    // supported game build exposes it. Resolving it by name keeps a missing optional
+    // HUD class from making this patch type itself unloadable.
+    [HarmonyPrepare]
+    private static bool Prepare()
+    {
+        var available = TargetMethod() != null;
+        if (!available)
+        {
+            Plugin.LogSource.LogInfo(
+                "PhaseBarGUI.LateUpdate is unavailable; skipping the legacy spectator phase-bar hook. " +
+                "The PlayerGUI spectator HUD hook remains active.");
+        }
+
+        return available;
+    }
+
+    [HarmonyTargetMethod]
+    private static MethodBase? TargetMethod()
+    {
+        var phaseBarType = AccessTools.TypeByName("PhaseBarGUI");
+        return phaseBarType == null ? null : AccessTools.Method(phaseBarType, "LateUpdate");
+    }
+
     [HarmonyPrefix]
     private static void Prefix(out SpectatorNativeHudState __state)
         => __state = SpectatorNativeHudContext.Enter(withCharacter: false);
