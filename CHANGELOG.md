@@ -2,18 +2,23 @@
 
 This file records only concrete, player-visible changes in each released version of Easy Red 2 Realism Overhaul. It is a living description of the shipped mod: superseded wording is replaced with the final behavior, and changes that are removed or reverted are deleted instead of retained as historical notes.
 
-## 1.1.5 - 2026-09-05
+## 1.1.6 - 2026-09-18
 
-Easy Red 2 compatibility: version 2.1.0, Steam public branch build `25110514` (September 3, 2026).
+Easy Red 2 compatibility: version 2.1.0, Steam public branch build `25255578` (September 11, 2026).
 
-- Fixed defending AI sometimes remaining motionless after spawning while trying to enter a static emplacement. Emplacement staffing now waits until the complete squad has spawned, clears the native boarding destination when an unreachable assignment is abandoned so normal defensive cover movement can resume, and briefly defers the failed emplacement before trying it again.
-- Fixed the optional spectator phase-bar patch naming a game HUD class directly. Builds without that separate class now skip only its legacy hook without reporting a compatibility failure; the main spectator HUD hook continues to run.
 - Fixed defensive area ownership stopping soldiers before they reached native sandbag, trench, or building slots and blocking replacement cover assignments. Only an actual reserved move or anchored slot now owns those assignments; defenders without a slot can continue native positioning.
 - Protected defensive cover no longer requires an unobstructed firing ray to a distant threat point. Firing opportunities still improve its score, but intervening urban walls no longer disqualify otherwise protective positions.
 - Fixed close contact indefinitely blocking exposed soldiers from searching for cover. Once the timed initial firing response ends, they can seek protective positions without immediate enemy LOS or attack-advance authorization. Suppression, occupied slots, order boundaries, and search retry limits still apply; soldiers already protected keep their cover.
 - Reduced the defensive no-sightline score penalty from 500 to 120 so substantially better protection can outweigh immediate visibility. During calm periods, anchored defenders reassess every 30–40 seconds and may move 3–20 m to a measured protection improvement of at least 20 percentage points, subject to route exposure, reservations, and order boundaries. Equal-quality positions do not trigger moves; arrival starts a fresh reassessment interval.
 - Fixed spacing exemptions treating distant or in-transit cover reservations as occupied slots. Two physically overlapping slot occupants now deterministically choose one to step aside, and autonomous AI yield to overlapping player-controlled soldiers. Escape checks allow leaving the friendly body already overlapping the start while retaining wall, endpoint-occupancy, reservation, and defensive-area checks.
 - Attackers can use nearby sideways or rearward entrances within the existing 8 m objective-distance backtrack allowance. Straight-line exposure estimates rank routes instead of vetoing protected destinations, and close rifle contact no longer indefinitely overrides committed movement or the attack halt deadline.
+
+## 1.1.5 - 2026-09-05
+
+Easy Red 2 compatibility: version 2.1.0, Steam public branch build `25110514` (September 3, 2026).
+
+- Fixed defending AI sometimes remaining motionless after spawning while trying to enter a static emplacement. Emplacement staffing now waits until the complete squad has spawned, clears the native boarding destination when an unreachable assignment is abandoned so normal defensive cover movement can resume, and briefly defers the failed emplacement before trying it again.
+- Fixed the optional spectator phase-bar patch naming a game HUD class directly. Builds without that separate class now skip only its legacy hook without reporting a compatibility failure; the main spectator HUD hook continues to run.
 
 ## 1.1.4 - 2026-09-03
 

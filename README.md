@@ -6,21 +6,24 @@ ER2RealismOverhaul is built around the rough edges that become hard to ignore af
 
 The goal is to fix those moments without replacing the game underneath them. This is not a health or damage multiplier mod; Easy Red 2's missions, armour system, and basic damage model remain intact.
 
-> **Current release:** 1.1.5
+> **Current release:** 1.1.6
 >
-> **Compatibility:** Tested with Easy Red 2 2.1.0, Steam public-branch build `25110514` (September 3, 2026). Versions 1.1.3 and earlier do not work on 2.1.0.
+> **Compatibility:** Tested with Easy Red 2 2.1.0, Steam public-branch build `25255578` (September 11, 2026). Versions 1.1.3 and earlier do not work on 2.1.0.
 
-## What's new in 1.1.5
+## What's new in 1.1.6
 
 - Fixed mod-side restrictions that stopped defenders short of native sandbag, trench, and building positions. Unanchored defenders can continue native cover movement, and protective slots remain eligible when intervening walls block a distant firing ray.
 - Defenders give less weight to immediate enemy visibility when choosing protected positions. In calm periods they occasionally reassess nearby cover, moving only for a substantial measured protection gain rather than shuffling between equivalent slots.
 - Improved overlap correction: distant cover reservations no longer exempt stacked soldiers, and two overlapping cover occupants choose one to step aside. Corrections preserve defensive boundaries and require a clear destination.
 - Attackers can use nearby off-axis entrances; estimated straight-line exposure no longer vetoes protected destinations, and close contact respects committed movement and the attack halt deadline.
 - After the timed initial close-contact firing response, exposed soldiers can seek protective cover even without an immediate firing lane or attack-advance authorization. Close enemy proximity no longer causes a permanent open-ground halt; suppression and cover-search cooldowns still apply.
+- Compatibility: Easy Red 2 2.1.0, Steam public-branch build `25255578` (the September 11, 2026 patch).
+
+## What's new in 1.1.5
+
 - Fixed defending AI sometimes remaining motionless after spawning while trying to enter a static emplacement. Staffing now waits for the complete squad to spawn and releases failed emplacement routes back to normal defensive cover behavior.
 - Unreachable emplacements receive a short retry delay instead of immediately assigning the same failed route again.
 - Game builds without the separate spectator phase-bar HUD class now skip that legacy hook cleanly while retaining the main spectator HUD integration.
-- Compatibility remains Easy Red 2 2.1.0, Steam public-branch build `25110514`.
 
 ## What's new in 1.1.3
 
