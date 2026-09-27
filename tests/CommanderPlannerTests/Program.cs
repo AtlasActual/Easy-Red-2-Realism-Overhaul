@@ -9,6 +9,8 @@ internal static class Program
             (nameof(AiPriorityScenarios.SurvivalOverridesCompetingTasks), AiPriorityScenarios.SurvivalOverridesCompetingTasks),
             (nameof(AiPriorityScenarios.EscapeSurvivesSafetyCallbacks), AiPriorityScenarios.EscapeSurvivesSafetyCallbacks),
             (nameof(AiPriorityScenarios.CoverMoveInterruptionDependsOnDistance), AiPriorityScenarios.CoverMoveInterruptionDependsOnDistance),
+            (nameof(AiPriorityScenarios.CloseContactRetainsFiringStance), AiPriorityScenarios.CloseContactRetainsFiringStance),
+            (nameof(AiPriorityScenarios.CloseContactPoseOverridesCachedPostures), AiPriorityScenarios.CloseContactPoseOverridesCachedPostures),
             (nameof(AiPriorityScenarios.LiveCloseThreatOutlastsFiringDeadline), AiPriorityScenarios.LiveCloseThreatOutlastsFiringDeadline),
             (nameof(AiPriorityScenarios.SurvivalDoesNotArmAContactDive), AiPriorityScenarios.SurvivalDoesNotArmAContactDive),
             (nameof(AiPriorityScenarios.PinnedBoardingResumesAfterRecovery), AiPriorityScenarios.PinnedBoardingResumesAfterRecovery),
@@ -18,6 +20,11 @@ internal static class Program
             (nameof(PerformancePresetsOnlyTouchKnownCostDrivers), PerformancePresetsOnlyTouchKnownCostDrivers),
             (nameof(LargeBattlePresetIsStricterThanBalanced), LargeBattlePresetIsStricterThanBalanced),
             (nameof(RememberedGrenadesRequireFreshSafeUnseenContacts), RememberedGrenadesRequireFreshSafeUnseenContacts),
+            (nameof(AntiTankGrenadesNeedOnlyAVisibleTankInNativeReach), AntiTankGrenadesNeedOnlyAVisibleTankInNativeReach),
+            (nameof(FragGrenadesUseConfirmedOpportunitiesWithoutRequiringSuppression), FragGrenadesUseConfirmedOpportunitiesWithoutRequiringSuppression),
+            (nameof(FragGrenadesRespectOrdersAndThrowingReach), FragGrenadesRespectOrdersAndThrowingReach),
+            (nameof(ImprovisedCoverOnlyProposesGroundThatFacesAwayFromTheThreat), ImprovisedCoverOnlyProposesGroundThatFacesAwayFromTheThreat),
+            (nameof(ImprovisedCoverShortlistIsSmallNearAndSpread), ImprovisedCoverShortlistIsSmallNearAndSpread),
             (nameof(TracerRetentionHonorsMachineGunAndEndpointRules), TracerRetentionHonorsMachineGunAndEndpointRules),
             (nameof(CoverFsmHoldsUsefulCover), CoverFsmHoldsUsefulCover),
             (nameof(CoverFsmSuppressionOverridesUrgency), CoverFsmSuppressionOverridesUrgency),
@@ -30,6 +37,7 @@ internal static class Program
             (nameof(DeferredCoverSearchDoesNotStopExposedMovement), DeferredCoverSearchDoesNotStopExposedMovement),
             (nameof(CoverSelectionScoresEstimatedRouteInsteadOfVetoingEntrances), CoverSelectionScoresEstimatedRouteInsteadOfVetoingEntrances),
             (nameof(DefensiveAreaEntryDoesNotOwnAnEmptyCoverAssignment), DefensiveAreaEntryDoesNotOwnAnEmptyCoverAssignment),
+            (nameof(SlotlessDefendersFightInsteadOfWalkingNativeRoutesUnderContact), SlotlessDefendersFightInsteadOfWalkingNativeRoutesUnderContact),
             (nameof(ProtectedUrbanCoverDoesNotRequireDistantLineOfSight), ProtectedUrbanCoverDoesNotRequireDistantLineOfSight),
             (nameof(DefensiveVisibilityPreferenceDoesNotOverruleBetterProtection), DefensiveVisibilityPreferenceDoesNotOverruleBetterProtection),
             (nameof(DefensiveUpgradesRequireMeasuredProtectionGain), DefensiveUpgradesRequireMeasuredProtectionGain),
@@ -336,6 +344,147 @@ internal static class Program
         False(RememberedGrenadeDecisionCore.ShouldAttempt(
                 safeUnseenContact with { HasClearThrowArc = false }),
             "A blocked grenade arc was treated as clear.");
+    }
+
+    private static void FragGrenadesUseConfirmedOpportunitiesWithoutRequiringSuppression()
+    {
+        // A calm defender in cover used to depend entirely on the native
+        // suppression > 20 gate. A confirmed enemy in reach is enough to attempt.
+        var defender = new FragGrenadeDecisionInput(
+            true, false, true, true, true, false, false, false, 20f, 9f, 42f, 35f);
+        True(FragGrenadeDecisionCore.ShouldAttempt(defender),
+            "A calm stationary defender ignored a confirmed infantry grenade opportunity.");
+        True(FragGrenadeDecisionCore.ShouldAttempt(defender with { IsProne = true }),
+            "Stationary prone infantry unnecessarily lost grenade opportunities.");
+
+        foreach (var blocked in new[]
+                 {
+                     defender with { HasConfirmedVisibleInfantry = false },
+                     defender with { HasFragmentationGrenade = false },
+                     defender with { IsAvailableForThrow = false },
+                     defender with { IsPinned = true },
+                     defender with { CooldownReady = false }
+                 })
+        {
+            False(FragGrenadeDecisionCore.ShouldAttempt(blocked),
+                "Missing visual confirmation, inventory, availability, or cooldown allowed a frag attempt.");
+        }
+    }
+
+    private static void FragGrenadesRespectOrdersAndThrowingReach()
+    {
+        var assault = new FragGrenadeDecisionInput(
+            true, false, true, true, true, true, true, false, 20f, 9f, 42f, 35f);
+        True(FragGrenadeDecisionCore.ShouldAttempt(assault),
+            "An assaulting soldier could not make a throwing halt.");
+        False(FragGrenadeDecisionCore.ShouldAttempt(assault with { IsAssaulting = false }),
+            "A moving defender or follower interrupted its order to throw.");
+        False(FragGrenadeDecisionCore.ShouldAttempt(assault with { IsProne = true }),
+            "A prone crawler was permitted to throw while moving.");
+        False(FragGrenadeDecisionCore.ShouldAttempt(assault with { DistanceMeters = 8.99f }),
+            "The configured minimum safe range was ignored.");
+        True(FragGrenadeDecisionCore.ShouldAttempt(assault with { DistanceMeters = 9f }),
+            "A throw exactly at the configured minimum was rejected.");
+        False(FragGrenadeDecisionCore.ShouldAttempt(assault with { DistanceMeters = 35f }),
+            "The grenade's own ballistic limit was ignored.");
+        False(FragGrenadeDecisionCore.ShouldAttempt(assault with { MaximumRangeMeters = 19f }),
+            "Native reach overrode the user's shorter maximum range.");
+        True(FragGrenadeDecisionCore.ShouldAttempt(assault with { MaximumRangeMeters = 20f }),
+            "A throw exactly at the configured maximum was rejected.");
+        False(FragGrenadeDecisionCore.ShouldAttempt(assault with { NativeThrowRangeMeters = float.NaN }),
+            "An invalid grenade range allowed a throw.");
+        False(FragGrenadeDecisionCore.ShouldAttempt(assault with { DistanceMeters = float.PositiveInfinity }),
+            "An invalid target distance allowed a throw.");
+    }
+
+    private static void AntiTankGrenadesNeedOnlyAVisibleTankInNativeReach()
+    {
+        var tankInReach = new AntiTankGrenadeDecisionInput(
+            true, false, true, 12f, 20f, true, false);
+        True(AntiTankGrenadeDecisionCore.ShouldThrow(tankInReach),
+            "A soldier with an AT grenade ignored a visible enemy tank inside throwing range.");
+
+        False(AntiTankGrenadeDecisionCore.ShouldThrow(
+                tankInReach with { DistanceMeters = AntiTankGrenadeDecisionCore.MinimumThrowMeters }),
+            "An AT grenade was thrown inside the game's own minimum distance.");
+        False(AntiTankGrenadeDecisionCore.ShouldThrow(tankInReach with { DistanceMeters = 20f }),
+            "An AT grenade was thrown beyond its ballistic range.");
+        False(AntiTankGrenadeDecisionCore.ShouldThrow(tankInReach with { TankVisible = false }),
+            "An AT grenade was thrown at a tank the soldier could not see.");
+        False(AntiTankGrenadeDecisionCore.ShouldThrow(tankInReach with { FriendlyBesideTank = true }),
+            "An AT grenade was thrown onto a friendly soldier beside the tank.");
+        False(AntiTankGrenadeDecisionCore.ShouldThrow(tankInReach with { IsPinned = true }),
+            "A pinned soldier rose to throw an AT grenade.");
+        False(AntiTankGrenadeDecisionCore.ShouldThrow(tankInReach with { HasAntiTankGrenade = false }),
+            "A throw was authorized without an AT grenade.");
+        False(AntiTankGrenadeDecisionCore.ShouldThrow(tankInReach with { IsAvailableForThrow = false }),
+            "A reloading, burning, mounted or already-throwing soldier was told to throw.");
+        False(AntiTankGrenadeDecisionCore.ShouldThrow(tankInReach with { ThrowRangeMeters = float.NaN }),
+            "An invalid throw range authorized a throw.");
+    }
+
+    private static void ImprovisedCoverOnlyProposesGroundThatFacesAwayFromTheThreat()
+    {
+        // Threat due east (+X). A wall face whose normal points west shelters its west side.
+        True(FieldCoverProbeCore.IsShelteringFace(-1f, 0f, 0f, 1f, 0f),
+            "The sheltered side of a wall between the soldier and the threat was rejected.");
+        False(FieldCoverProbeCore.IsShelteringFace(1f, 0f, 0f, 1f, 0f),
+            "The exposed face of a wall was proposed as cover.");
+        False(FieldCoverProbeCore.IsShelteringFace(0f, 0f, 1f, 1f, 0f),
+            "A wall running along the line of fire was proposed as cover.");
+        False(FieldCoverProbeCore.IsShelteringFace(-0.5f, 0.87f, 0f, 1f, 0f),
+            "A gentle slope was mistaken for a wall.");
+        True(FieldCoverProbeCore.IsShelteringFace(-0.8f, 0.6f, 0f, 1f, 0f),
+            "A steep bank facing away from the threat was rejected.");
+        False(FieldCoverProbeCore.IsShelteringFace(float.NaN, 0f, 0f, 1f, 0f),
+            "An invalid surface normal produced a cover proposal.");
+        False(FieldCoverProbeCore.IsShelteringFace(-1f, 0f, 0f, 0f, 0f),
+            "A missing threat bearing produced a cover proposal.");
+
+        True(FieldCoverProbeCore.IsShelteringStep(10.9f, 10f),
+            "A trench wall on the threat side did not shelter the floor behind it.");
+        False(FieldCoverProbeCore.IsShelteringStep(10f, 10.9f),
+            "Standing on top of a bank was treated as being behind it.");
+        False(FieldCoverProbeCore.IsShelteringStep(10.4f, 10f),
+            "A shallow dip too low to hide a crouched man was proposed as cover.");
+        False(FieldCoverProbeCore.IsShelteringStep(float.NaN, 10f),
+            "An unmeasured ground sample produced a cover proposal.");
+
+        True(FieldCoverProbeCore.RadialRunsAlongThreatAxis(1f, 0f, 1f, 0f) &&
+             FieldCoverProbeCore.RadialRunsAlongThreatAxis(-1f, 0f, 1f, 0f),
+            "Radials toward and away from the threat were not searched for banks.");
+        False(FieldCoverProbeCore.RadialRunsAlongThreatAxis(0f, 1f, 1f, 0f),
+            "A radial across the line of fire measured banks that shelter from nobody.");
+    }
+
+    private static void ImprovisedCoverShortlistIsSmallNearAndSpread()
+    {
+        var candidates = new List<FieldCoverCandidate>
+        {
+            new(20f, 0f, 0f, 20f, 1f),
+            new(5f, 0f, 0f, 5f, 0.6f),
+            new(5.5f, 0f, 0.5f, 5.6f, 1f),   // same stretch of wall as the previous one
+            new(0f, 0f, 9f, 9f, 1f),
+            new(0f, 0f, 1f, 1f, 1f),          // on top of the soldier
+            new(0f, 0f, 60f, 60f, 1f),        // beyond the search radius
+            new(12f, 0f, 12f, 17f, 0.5f),
+            new(0f, 0f, float.NaN, float.NaN, 1f)
+        };
+        var shortlist = new List<FieldCoverCandidate>();
+        FieldCoverProbeCore.SelectShortlist(candidates, shortlist);
+
+        Equal(FieldCoverProbeCore.MaximumDetailedCandidates, shortlist.Count,
+            "The improvised-cover shortlist exceeded its ballistic evaluation allowance.");
+        True(shortlist.All(candidate =>
+                candidate.DistanceMeters >= FieldCoverProbeCore.MinimumDistanceMeters &&
+                candidate.DistanceMeters <= FieldCoverProbeCore.SearchRadiusMeters),
+            "A point on top of the soldier, out of range, or unmeasured was shortlisted.");
+        Near(5.6f, shortlist[0].DistanceMeters, 0.01f,
+            "A full-height wall half a metre further away lost to a kerb.");
+        True(shortlist.Count(candidate => candidate.DistanceMeters < 6f) == 1,
+            "Two shortlist places were spent on one stretch of wall.");
+        True(shortlist.Any(candidate => Math.Abs(candidate.DistanceMeters - 9f) < 0.01f),
+            "A solid nearby position was dropped from the shortlist.");
     }
 
     private static void TracerRetentionHonorsMachineGunAndEndpointRules()
@@ -986,7 +1135,7 @@ internal static class Program
     {
         if (contactDive && !flameEvading)
         {
-            owner = PoseOwner.ContactDive;
+            owner = PoseOwner.ContactReaction;
             return TacticalStance.Prone;
         }
         if (pinnedOrBurning && !flameEvading)
@@ -1395,15 +1544,15 @@ internal static class Program
 
     private static void MovingVisualContactDivesOnceAndCommitsToFire()
     {
-        False(ContactDivePolicyCore.ContactWasContinuous(
+        False(ContactReactionPolicyCore.ContactWasContinuous(
                 hasPreviousObservedContact: false, lastSeenAt: 10f, now: 10.1f,
                 continuitySeconds: 5f),
             "A soldier with no prior personal observation inherited a continuous contact.");
-        True(ContactDivePolicyCore.ShouldStart(
+        True(ContactReactionPolicyCore.ShouldStart(
                 wasActuallyMoving: true, hasObservedTarget: true,
-                contactWasContinuous: false, currentDiveUntil: 0f, now: 10f),
+                contactWasContinuous: false, currentReactionUntil: 0f, now: 10f),
             "A moving soldier did not dive on his first personal visual contact.");
-        var firingDeadline = ContactDivePolicyCore.ResolveFiringDeadline(
+        var firingDeadline = ContactReactionPolicyCore.ResolveFiringDeadline(
             now: 10f, configuredSeconds: 7f);
         Equal(17f, firingDeadline,
             "The contact dive did not inherit the configured seven-second firing hold.");
@@ -1411,41 +1560,41 @@ internal static class Program
             "The contact dive released before its firing opportunity elapsed.");
         False(CombatMovementPolicyCore.AttackFiringPhaseActive(firingDeadline, 17f),
             "The contact dive remained active after its firing deadline.");
-        False(ContactDivePolicyCore.ShouldStart(
+        False(ContactReactionPolicyCore.ShouldStart(
                 wasActuallyMoving: false, hasObservedTarget: true,
-                contactWasContinuous: false, currentDiveUntil: 0f, now: 10f),
+                contactWasContinuous: false, currentReactionUntil: 0f, now: 10f),
             "A stationary observer invented a contact dive.");
-        False(ContactDivePolicyCore.ShouldStart(
+        False(ContactReactionPolicyCore.ShouldStart(
                 wasActuallyMoving: true, hasObservedTarget: false,
-                contactWasContinuous: false, currentDiveUntil: 0f, now: 10f),
+                contactWasContinuous: false, currentReactionUntil: 0f, now: 10f),
             "Shared or remembered contact created a personal visual dive.");
 
-        var continuous = ContactDivePolicyCore.ContactWasContinuous(
+        var continuous = ContactReactionPolicyCore.ContactWasContinuous(
             hasPreviousObservedContact: true, lastSeenAt: 10f, now: 14.9f,
             continuitySeconds: 5f);
         True(continuous, "Target switching inside one visual-contact episode broke continuity.");
-        False(ContactDivePolicyCore.ShouldStart(
+        False(ContactReactionPolicyCore.ShouldStart(
                 wasActuallyMoving: true, hasObservedTarget: true,
-                contactWasContinuous: continuous, currentDiveUntil: 0f, now: 14.9f),
+                contactWasContinuous: continuous, currentReactionUntil: 0f, now: 14.9f),
             "Continuous visual contact repeatedly retriggered the dive.");
-        False(ContactDivePolicyCore.ShouldStart(
+        False(ContactReactionPolicyCore.ShouldStart(
                 wasActuallyMoving: true, hasObservedTarget: true,
-                contactWasContinuous: false, currentDiveUntil: 17f, now: 15f),
+                contactWasContinuous: false, currentReactionUntil: 17f, now: 15f),
             "An active firing commitment retriggered its own dive.");
-        var lapsed = ContactDivePolicyCore.ContactWasContinuous(
+        var lapsed = ContactReactionPolicyCore.ContactWasContinuous(
             hasPreviousObservedContact: true, lastSeenAt: 10f, now: 15.1f,
             continuitySeconds: 5f);
         False(lapsed,
             "A genuinely lapsed observation remained one endless contact episode.");
-        True(ContactDivePolicyCore.ShouldStart(
+        True(ContactReactionPolicyCore.ShouldStart(
                 wasActuallyMoving: true, hasObservedTarget: true,
-                contactWasContinuous: lapsed, currentDiveUntil: 15f, now: 15.1f),
+                contactWasContinuous: lapsed, currentReactionUntil: 15f, now: 15.1f),
             "A later contact episode could not trigger a new moving-contact dive.");
     }
 
     private static void ContactDiveOutranksMovementWhileOtherSafetyPosesCrouch()
     {
-        True((int)PoseOwner.ContactDive > (int)PoseOwner.MovementPose,
+        True((int)PoseOwner.ContactReaction > (int)PoseOwner.MovementPose,
             "The moving-contact dive did not outrank the movement pose.");
 
         // Even with movement declared, only the active contact dive keeps him prone.
@@ -1454,7 +1603,7 @@ internal static class Program
                 MovementOwner.OrderedMove, movementHalted: false, TacticalStance.Crouched,
                 out var diveOwner, contactDive: true),
             "An active contact dive was raised for a movement request.");
-        Equal(PoseOwner.ContactDive, diveOwner, "The contact dive lost pose ownership.");
+        Equal(PoseOwner.ContactReaction, diveOwner, "The contact dive lost pose ownership.");
         Equal(TacticalStance.Crouched,
             ResolvePoseWithMovementContract(
                 MovementOwner.CommittedMove, movementHalted: false, TacticalStance.Crouched,
@@ -1646,6 +1795,23 @@ internal static class Program
             "A slot on another floor blocked correction.");
         False(HaltSpacingCore.HoldsOccupiedSlot(true, false, float.NaN, 0f),
             "An invalid location was treated as occupied cover.");
+
+        // An anchored occupant is measured against the same leash that accepted his
+        // arrival. Trench and building stand points sit a step or more off the node.
+        True(HaltSpacingCore.HoldsOccupiedSlot(true, false, 3f, 0f, true, 4f),
+            "Ordinary trench spacing evicted an anchored defender from his own slot.");
+        False(HaltSpacingCore.HoldsOccupiedSlot(true, false, 4.5f, 0f, true, 4f),
+            "A defender beyond his anchor leash still counted as occupying the slot.");
+        False(HaltSpacingCore.HoldsOccupiedSlot(true, true, 1f, 0f, true, 4f),
+            "An in-transit reservation was protected because of a stale anchor.");
+        False(HaltSpacingCore.HoldsOccupiedSlot(false, false, 1f, 0f, true, 4f),
+            "An anchor without the reservation protected a slot someone else owns.");
+        False(HaltSpacingCore.HoldsOccupiedSlot(true, false, 1f, 3f, true, 4f),
+            "An anchored slot on another floor blocked correction.");
+        False(HaltSpacingCore.ShouldYieldToNeighbour(
+                HaltSpacingCore.HoldsOccupiedSlot(true, false, 2f, 0f, true, 4f),
+                false, true, false, 20, 10),
+            "An anchored defender stepped out of cover for a neighbour two metres away.");
     }
 
     private static void HaltSpacingResolvesTwoOverlappingSlotOwners()
@@ -1968,6 +2134,24 @@ internal static class Program
             "An unanchored soldier ran the optional upgrade policy.");
         var afterArrival = InfantryCoverDecisionCore.NextDefensiveReassessmentAt(next + 10f, -13);
         True(afterArrival >= next + 40f, "A new arrival did not receive a fresh minimum hold.");
+
+        True(InfantryCoverDecisionCore.ShouldReassessDefensiveCover(true, false, true, next, next, 0f,
+                InfantryCoverDecisionCore.MaximumDefensiveUpgradeMoves - 1),
+            "A defender could not use his last permitted optional upgrade.");
+        True(!InfantryCoverDecisionCore.ShouldReassessDefensiveCover(true, false, true, next, next, 0f,
+                InfantryCoverDecisionCore.MaximumDefensiveUpgradeMoves),
+            "Optional upgrades were unbounded and could circulate a calm defender indefinitely.");
+    }
+
+    private static void SlotlessDefendersFightInsteadOfWalkingNativeRoutesUnderContact()
+    {
+        True(InfantryCoverDecisionCore.ShouldFightFromUnanchoredDefensiveHalt(underPressure: true),
+            "A slotless defender kept walking his native route while in contact.");
+        False(InfantryCoverDecisionCore.ShouldFightFromUnanchoredDefensiveHalt(underPressure: false),
+            "A calm slotless defender was frozen short of his native cover route.");
+        // The 1.1.6 ownership rule stands: only a reserved move or anchor owns the hold.
+        False(InfantryCoverDecisionCore.ShouldHoldDefensivePosition(true, false, false),
+            "Area entry alone regained the unconditional defensive hold.");
     }
 
     private static void ProtectedFiringLaneBeatsEquallyProtectedBlindSlot()
@@ -2933,7 +3117,7 @@ internal static class Program
             "A transient movement-pose lease delayed the covered reload posture.");
         True((int)PoseOwner.CoverReload < (int)PoseOwner.Suppression,
             "The covered reload posture outranked suppression safety.");
-        True((int)PoseOwner.CoverReload < (int)PoseOwner.ContactDive,
+        True((int)PoseOwner.CoverReload < (int)PoseOwner.ContactReaction,
             "The covered reload posture outranked the committed contact dive.");
 
         Equal(TacticalStance.Prone,
@@ -2957,7 +3141,7 @@ internal static class Program
                 MovementOwner.OrderedMove, movementHalted: false, TacticalStance.Standing,
                 out var diveOwner, contactDive: true, coverReload: true),
             "A covered reload blocked the committed contact dive.");
-        Equal(PoseOwner.ContactDive, diveOwner,
+        Equal(PoseOwner.ContactReaction, diveOwner,
             "The contact dive lost ownership during a covered reload.");
         Equal(TacticalStance.Standing,
             ResolvePoseWithMovementContract(
@@ -3375,10 +3559,22 @@ internal static class Program
             threatDirection);
 
         var offset = Distance(area.Center, objective);
-        Near(objectiveRadius, offset, 0.01f,
-            "A forward defensive sector was not allowed out to the objective edge.");
+        Near(objectiveRadius, offset + area.HoldRadius, 0.01f,
+            "A forward defensive sector's hold circle did not reach exactly to the objective edge.");
+        True(offset > 0f,
+            "A forward defensive sector collapsed onto the core garrison.");
         Near(ObjectiveDefenseAreaCore.MaximumAnchorOffset(objectiveRadius), offset, 0.01f,
             "The forward containment offset disagreed with the cover-anchor search bound.");
+
+        // The regression this replaces: a sector centered ON the edge sent half its
+        // squad outside the capture zone, whatever the objective's size.
+        foreach (var radius in new[] { 12f, 20f, 40f, 75f, 150f })
+        {
+            var sector = ObjectiveDefenseAreaCore.Build(
+                objective, radius, new MapPoint(500f, 0f), coreGarrison: false, threatDirection);
+            True(Distance(sector.Center, objective) + sector.HoldRadius <= radius + 0.01f,
+                $"A {radius} m objective's forward sector overhung the capture zone.");
+        }
     }
 
     private static void ObjectiveDefenseRearOffsetStaysMoreConstrainedThanForward()
@@ -3396,7 +3592,7 @@ internal static class Program
             threatDirection);
 
         var offset = Distance(area.Center, objective);
-        Near(objectiveRadius * 0.5f, offset, 0.01f,
+        Near(ObjectiveDefenseAreaCore.MaximumAnchorOffset(objectiveRadius) * 0.5f, offset, 0.01f,
             "A rear defensive sector was not clamped to the tighter rear allowance.");
         True(offset < ObjectiveDefenseAreaCore.MaximumAnchorOffset(objectiveRadius),
             "A rear offset became as permissive as the forward offset.");
@@ -3413,8 +3609,8 @@ internal static class Program
             coreGarrison: false);
 
         var offset = Distance(area.Center, objective);
-        Near(objectiveRadius * 0.75f, offset, 0.01f,
-            "The no-threat-direction fallback did not use three quarters of the objective radius.");
+        Near(ObjectiveDefenseAreaCore.MaximumAnchorOffset(objectiveRadius) * 0.75f, offset, 0.01f,
+            "The no-threat-direction fallback did not use three quarters of the forward allowance.");
     }
 
     private static void ObjectiveAttackKeepsOnePressureSquadAndAlternatesWideFlanks()
@@ -4372,9 +4568,9 @@ internal static class Program
                 0f, false, true, true, now, CombatMovementPolicyCore.DefaultAttackFiringHoldSeconds,
                 coverMoveActive: true),
             "Starting a cover route rearmed the firing halt on the very next update.");
-        var continuous = ContactDivePolicyCore.ContactWasContinuous(true, now - 0.1f, now, 2f);
+        var continuous = ContactReactionPolicyCore.ContactWasContinuous(true, now - 0.1f, now, 2f);
         True(continuous, "A recent confirmed contact was not continuous.");
-        False(ContactDivePolicyCore.ShouldStart(true, true, continuous, deadline, now),
+        False(ContactReactionPolicyCore.ShouldStart(true, true, continuous, deadline, now),
             "Reacquiring an enemy during the cover move restarted the dive hold.");
         False(InfantryCoverDecisionCore.ShouldHaltForCloseThreat(true, false,
                 CombatMovementPolicyCore.AttackFiringPhaseActive(deadline, now)),

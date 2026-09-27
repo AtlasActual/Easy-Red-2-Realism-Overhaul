@@ -357,6 +357,8 @@ internal static class GroundAiDirector
         // may replace the current assignment.
         ModTimeProbe.Stage(SequentialStage.DirectorSuppressiveSchedule);
         RememberedGrenadeThrows.Schedule(ai, soldier, now);
+        AntiTankGrenadeThrows.Schedule(soldier, now);
+        FragGrenadeThrows.Schedule(ai, soldier, now);
         KnownTargetSuppressiveFire.Schedule(ai, soldier, now);
 
         var movementSource = resolution.Winners.TryGetValue(TacticalChannel.Movement, out var movement)
@@ -485,7 +487,47 @@ internal static class GroundAiDirector
             AiOwnership.IsAutonomous(soldier),
             ContactResponse.TryGetPlayerHoldOrder(soldier, out _, out _),
             HasProtectedInfantryAssignment(soldier),
-            !mounted && HasNativeVehicleBoardingOrder(soldier));
+            // A medic's walk to a casualty is the same kind of native errand as a
+            // boarding order: it outranks a defensive slot and yields to pinning.
+            !mounted && (HasNativeVehicleBoardingOrder(soldier) || HasNativeMedicOrder(soldier)));
+    }
+
+    /// <summary>
+    /// True while Squad.MedicRoutine has this soldier walking to a casualty. The game
+    /// keeps the patient only in the medic's MedicHealingDestination and clears it on
+    /// arrival, so there is no other field to read.
+    /// </summary>
+    internal static bool HasNativeMedicOrder(Soldier soldier)
+    {
+        try
+        {
+            // MedicRoutine only assigns a patient to a soldier carrying a syringe, and
+            // IsMedic is that one flag: everyone else skips the destination probe.
+            if (!soldier.IsMedic())
+                return false;
+
+            var destination = soldier.targetDestination;
+            return !ReferenceEquals(destination, null) && !destination.WasCollected &&
+                   IsLiveMedicDestination(destination);
+        }
+        catch (NullReferenceException)
+        {
+            return false;
+        }
+        catch (Il2CppInterop.Runtime.ObjectCollectedException)
+        {
+            return false;
+        }
+        catch (Il2CppInterop.Runtime.Il2CppException)
+        {
+            return false;
+        }
+    }
+
+    internal static bool IsLiveMedicDestination(AiDestination destination)
+    {
+        var healing = destination.TryCast<MedicHealingDestination>();
+        return !ReferenceEquals(healing, null) && !healing.coverReached;
     }
 
     /// <summary>

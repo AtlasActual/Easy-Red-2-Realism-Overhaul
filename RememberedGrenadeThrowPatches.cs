@@ -230,7 +230,7 @@ internal static class RememberedGrenadeThrows
         if (!AiState.RememberedGrenadeThrowStates.TryGetValue(soldierId, out var state) ||
             !state.Active ||
             state.TargetToken == IntPtr.Zero ||
-            item is not VirtualGrenade ||
+            !Il2CppTypeTests.Is<VirtualGrenade>(item) ||
             item.Pointer != state.GrenadeToken ||
             !TryBuildThrowArc(soldier, state.AimPoint, out var throwLookRotation))
         {
@@ -283,11 +283,14 @@ internal static class RememberedGrenadeThrows
         return state;
     }
 
-    private static VirtualGrenade? FindFragmentationGrenade(Soldier soldier)
+    internal static VirtualGrenade? FindFragmentationGrenade(Soldier soldier)
     {
         try
         {
-            return soldier.inventory?.FindItemOfType<VirtualGrenade>() as VirtualGrenade;
+            // Declared VirtualItem: a plain `as` cast was null for every soldier, which
+            // kept this whole feature from ever starting a throw.
+            return Il2CppTypeTests.As<VirtualGrenade>(
+                soldier.inventory?.FindItemOfType<VirtualGrenade>());
         }
         catch (NullReferenceException)
         {
@@ -357,7 +360,7 @@ internal static class RememberedGrenadeThrows
         }
     }
 
-    private static bool TryBuildThrowArc(
+    internal static bool TryBuildThrowArc(
         Soldier soldier,
         Vector3 targetPosition,
         out Quaternion throwLookRotation)

@@ -97,7 +97,7 @@ internal static class CombatSafety
         var radiusSqr = laneRadius * laneRadius;
         foreach (var creature in creatures)
         {
-            var friendly = creature as Soldier;
+            var friendly = Il2CppTypeTests.As<Soldier>(creature);
             if (friendly == null || friendly == shooter || !friendly.IsAlive ||
                 !SameFaction(friendly.faction, shooter.faction))
             {
@@ -137,7 +137,7 @@ internal static class CombatSafety
         var radiusSqr = radius * radius;
         foreach (var creature in creatures)
         {
-            var friendly = creature as Soldier;
+            var friendly = Il2CppTypeTests.As<Soldier>(creature);
             if (friendly == null || friendly == ignore || !friendly.IsAlive ||
                 !SameFaction(friendly.faction, faction))
             {
@@ -239,7 +239,7 @@ internal static class HandheldFriendlyFirePatch
                 return true;
             }
 
-            var shooter = user as Soldier;
+            var shooter = Il2CppTypeTests.As<Soldier>(user);
             if (!AiOwnership.IsAutonomous(shooter))
                 return true;
 
@@ -302,7 +302,7 @@ internal static class MountedFriendlyFirePatch
             return true;
         }
 
-        var shooter = user as Soldier;
+        var shooter = Il2CppTypeTests.As<Soldier>(user);
         if (!AiOwnership.IsAutonomous(shooter))
             return true;
 
@@ -364,26 +364,42 @@ internal static class InvalidTurretFireStatePatch
 internal static class SafeAiGrenadeThrowPatch
 {
     [HarmonyPrefix]
-    private static bool Prefix(Soldier __instance, VirtualItem item)
+    private static bool Prefix(Soldier __instance, VirtualItem item, Spottable aimTarget,
+        out bool __state)
     {
+        __state = false;
         if (!Settings.SafeAiGrenadeThrowsEnabled.Value ||
             !MultiplayerAuthority.CanMutateGameplay() ||
-            !AiOwnership.IsAutonomous(__instance))
+            !AiOwnership.IsAutonomous(__instance) ||
+            AntiTankGrenadeThrows.OwnsThrow(__instance))
         {
             return true;
         }
 
         // Smoke is support rather than a fragmentation hazard and keeps its native
-        // behavior. AT and ordinary/phosphorus grenades use the safety gate.
-        if (item is VirtualSmokeGrenade)
-            return true;
-        if (item is not VirtualGrenade && item is not VirtualATGrenade)
+        // behavior. `item` arrives wrapped as VirtualItem, so its class is asked of
+        // the runtime: a C# type test here was false for every grenade ever thrown.
+        if (Il2CppTypeTests.Is<VirtualSmokeGrenade>(item))
             return true;
 
         var id = __instance.GetInstanceID();
+        if (Il2CppTypeTests.Is<VirtualATGrenade>(item))
+            return AuthorizeNativeAntiTankThrow(__instance, id, aimTarget);
+        if (!Il2CppTypeTests.Is<VirtualGrenade>(item))
+            return true;
+
+        // Native Throw rejects busy hands/reloads before starting the animation.
+        // Do not stop movement or charge a cooldown for those rejected attempts.
+        if (__instance.IsThrowing || !__instance.CanPlaySpecialAnim())
+            return false;
+
         var rememberedThrow = RememberedGrenadeThrows.TryAuthorizeOwnedThrow(
             __instance, id, item, out var targetPosition);
-        var target = rememberedThrow ? null : __instance.GetCurrentBestVisibleEnemy();
+        var target = rememberedThrow
+            ? null
+            : TargetAcquisition.IsUsableTarget(aimTarget)
+                ? aimTarget
+                : __instance.GetCurrentBestVisibleEnemy();
         if (!rememberedThrow && target == null)
         {
             AiDebugTelemetry.RecordDecision(AiDebugCategory.Danger, id,
@@ -398,7 +414,8 @@ internal static class SafeAiGrenadeThrowPatch
         var moving = rememberedThrow
             ? __instance.IsMoving(0.2f)
             : __instance.IsMoving();
-        if (moving && (rememberedThrow || !assaulting || isProne))
+        if ((rememberedThrow && moving) ||
+            !FragGrenadeDecisionCore.CanUsePlatform(moving, assaulting, isProne))
         {
             // Defenders and prone crawlers wait until stationary. An assaulting
             // soldier instead makes a short crouched throwing halt; the native
@@ -440,7 +457,7 @@ internal static class SafeAiGrenadeThrowPatch
         // it is native cover, a trench, or open ground. Only an active assault gets
         // permission to halt movement for the throw.
         GroundAiDirector.ExecuteGrenadeSafetyHalt(__instance, moving);
-        AiState.NextGrenadeThrow[id] = now + AiBehaviorTuning.GrenadeCooldownSeconds;
+        __state = true;
         var throwContext = moving
             ? "assault halt"
             : isProne
@@ -449,6 +466,45 @@ internal static class SafeAiGrenadeThrowPatch
                     ? "cover"
                     : "stationary";
         AiState.Trace($"Grenade safety: soldier {id} throwing from {throwContext} at {distance:0}m");
+        return true;
+    }
+
+    [HarmonyPostfix]
+    private static void Postfix(Soldier __instance, bool __state)
+    {
+        // Prefix approval alone does not mean the game accepted the inventory
+        // item or another mod allowed the call. Only an actual throw spends it.
+        if (__state && __instance.IsThrowing)
+            AiState.NextGrenadeThrow[__instance.GetInstanceID()] =
+                Time.time + AiBehaviorTuning.GrenadeCooldownSeconds;
+    }
+
+    /// <summary>
+    /// The game's own anti-tank throw has already required a vehicle target between
+    /// 6 m and the grenade's ballistic range. The fragmentation rules below would veto
+    /// most of that window (a 9 m floor, an 11 m friendly radius sized for fragments,
+    /// a cooldown shared with frags), so an AT grenade answers only the two questions
+    /// that apply to it: can this man stand up to throw, and is a friendly at the tank.
+    /// </summary>
+    private static bool AuthorizeNativeAntiTankThrow(Soldier soldier, int id, Spottable aimTarget)
+    {
+        if (ContactResponse.IsPinned(id))
+        {
+            AiDebugTelemetry.RecordDecision(AiDebugCategory.Danger, id,
+                "AT grenade rejected: pinned");
+            return false;
+        }
+
+        if (TargetAcquisition.IsUsableTarget(aimTarget) &&
+            CombatSafety.FriendlyNear(
+                aimTarget.GetCenterOfUnit(), AiState.FactionOf(soldier),
+                AntiTankGrenadeDecisionCore.FriendlyClearanceMeters, soldier))
+        {
+            AiDebugTelemetry.RecordDecision(AiDebugCategory.Danger, id,
+                "AT grenade rejected: friendly beside the vehicle");
+            return false;
+        }
+
         return true;
     }
 }

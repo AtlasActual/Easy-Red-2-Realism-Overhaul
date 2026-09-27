@@ -78,10 +78,17 @@ internal static class InfantryCoverDecisionCore
     internal static float NextDefensiveReassessmentAt(float now, int soldierId)
         => now + 30f + (uint)soldierId % 11u;
 
+    // Optional upgrades are strictly bounded per defensive assignment. Protection is
+    // measured against a synthetic approach axis that shifts with the squad facing,
+    // so an unbounded "20 points better" rule can walk a defender around the
+    // objective, or back and forth between two slots, for as long as it stays calm.
+    internal const int MaximumDefensiveUpgradeMoves = 2;
+
     internal static bool ShouldReassessDefensiveCover(
         bool anchored, bool relocating, bool calm, float now, float nextCheckAt,
-        float nextRelocationAllowedAt)
+        float nextRelocationAllowedAt, int upgradeMovesUsed = 0)
         => anchored && !relocating && calm && nextCheckAt > 0f &&
+           upgradeMovesUsed < MaximumDefensiveUpgradeMoves &&
            now >= nextCheckAt && now >= nextRelocationAllowedAt;
 
     internal static bool IsWorthDefensiveRelocation(
@@ -109,6 +116,13 @@ internal static class InfantryCoverDecisionCore
     internal static bool ShouldHoldDefensivePosition(
         bool positionOwned, bool relocating, bool anchored)
         => positionOwned && !relocating && anchored;
+
+    internal static bool ShouldFightFromUnanchoredDefensiveHalt(bool underPressure)
+        // A defender with no slot may follow his native route into the area only
+        // while nothing is shooting at or visible to him. Under contact, recent
+        // contact, or incoming fire he stops and fights; the defensive cover search
+        // keeps retrying on its own cadence and a reserved move still outranks this.
+        => underPressure;
 
     internal static bool CanAnchorDefensiveCover(bool evaluationSucceeded, bool protective)
         // Visibility to one enemy (or a predicted point beyond several walls) is

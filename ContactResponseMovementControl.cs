@@ -467,7 +467,11 @@ internal static partial class ContactResponse
             AiState.OwnsCoverReservation(state.ReservedCoverId, soldierId, now),
             state.Relocating,
             HorizontalDistance(soldier.transform.position, state.ReservedCoverPosition),
-            soldier.transform.position.y - state.ReservedCoverPosition.y);
+            soldier.transform.position.y - state.ReservedCoverPosition.y,
+            // Same occupancy definition as the cover claim and the anchor leash.
+            TryGetStableCoverAnchor(state, out _, out var anchorId) &&
+            anchorId == state.ReservedCoverId,
+            InfantryCoverPolicy.DefensiveAnchorLeashMeters);
 
     private static bool IsShortStepReachable(
         Soldier soldier, Vector3 from, Vector3 to, float occupancyRadius)

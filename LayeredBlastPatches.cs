@@ -199,7 +199,7 @@ internal static class EnhancedFragmentation
         var candidates = new List<Soldier>();
         foreach (var creature in creatures)
         {
-            var soldier = creature as Soldier;
+            var soldier = Il2CppTypeTests.As<Soldier>(creature);
             if (soldier == null || !soldier.IsAlive)
                 continue;
 
@@ -408,7 +408,7 @@ internal static class LayeredBlastEffectsPatch
         var candidates = new List<Soldier>();
         foreach (var creature in creatures)
         {
-            var soldier = creature as Soldier;
+            var soldier = Il2CppTypeTests.As<Soldier>(creature);
             if (soldier != null && soldier.IsAlive &&
                 (soldier.GetCenterOfUnit() - position).sqrMagnitude <= suppressionRadius * suppressionRadius)
             {

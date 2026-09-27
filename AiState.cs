@@ -137,6 +137,8 @@ internal static class AiState
         ContactStates.Remove(id);
         KnownTargetSuppressiveFire.RemoveSoldier(id);
         RememberedGrenadeThrows.RemoveSoldier(id);
+        AntiTankGrenadeThrows.RemoveSoldier(id);
+        FragGrenadeThrows.RemoveSoldier(id);
         FlameEvasionUntil.Remove(id);
         NextOrderGesture.Remove(id);
         NextGrenadeThrow.Remove(id);

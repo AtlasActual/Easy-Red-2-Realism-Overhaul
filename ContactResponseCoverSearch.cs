@@ -820,7 +820,14 @@ internal static partial class ContactResponse
             towardThreat,
             true);
         if (candidates == null)
-            return null;
+        {
+            return defensiveUpgradeFrom.HasValue
+                ? null
+                : FindFieldCover(
+                    soldier, position, targetPosition, towardThreat, state, now, selectionMode,
+                    knownThreats, evaluateFiringQuality, enforceDefensiveArea, defensiveCenter,
+                    defensiveRadius, enforceAttackProgress, attackWaypoint, out selectedQuality);
+        }
 
         var constrainedSearch = enforceAttackProgress || enforceDefensiveArea;
         var rawCandidateLimit = constrainedSearch
@@ -881,7 +888,8 @@ internal static partial class ContactResponse
                 if (distanceSqr < 1f)
                     continue;
                 if (defensiveUpgradeFrom.HasValue &&
-                    (candidateId == state.DefensiveCoverAnchorId || distanceSqr < 9f ||
+                    (candidateId == state.DefensiveCoverAnchorId ||
+                     candidateId == state.DefensiveUpgradePreviousAnchorId || distanceSqr < 9f ||
                      distanceSqr > InfantryCoverDecisionCore.DefensiveUpgradeMaximumDistanceMeters *
                                    InfantryCoverDecisionCore.DefensiveUpgradeMaximumDistanceMeters))
                     continue;
@@ -1126,6 +1134,23 @@ internal static partial class ContactResponse
             }
         }
 
+        // No authored slot measured as protective. Ground that does is better than an
+        // authored node nobody could classify, and far better than lying in the open;
+        // an optional calm-period upgrade never leaves an anchor for improvised cover.
+        var usedFieldCover = false;
+        if (best == null && !defensiveUpgradeFrom.HasValue)
+        {
+            best = FindFieldCover(
+                soldier, position, targetPosition, towardThreat, state, now, selectionMode,
+                knownThreats, evaluateFiringQuality, enforceDefensiveArea, defensiveCenter,
+                defensiveRadius, enforceAttackProgress, attackWaypoint, out var fieldQuality);
+            if (best != null)
+            {
+                bestQuality = fieldQuality;
+                usedFieldCover = true;
+            }
+        }
+
         var usedAuthoredFallback = false;
         if (InfantryCoverDecisionCore.ShouldUseAuthoredFallback(
                 best != null, bestAuthoredFallback != null))
@@ -1143,7 +1168,7 @@ internal static partial class ContactResponse
             $"Cover inventory: soldier {soldier.GetInstanceID()} mode={selectionMode} " +
             $"raw={rawExamined} eligible={coarseCandidates.Count} detailed={detailedEvaluated}/{detailedIndices.Length} " +
             $"selected={(best == null ? "none" : best.Pointer.ToString())} " +
-            $"fortified={bestFortifiedScore:0.00} fallback={usedAuthoredFallback}");
+            $"fortified={bestFortifiedScore:0.00} fallback={usedAuthoredFallback} improvised={usedFieldCover}");
         return best;
     }
 
@@ -1622,6 +1647,9 @@ internal static partial class ContactResponse
         state.RelocateLastProgressPosition = soldier.transform.position;
         state.RelocateDestinationPointer = coverId;
         state.RelocateDestinationPosition = coverPosition;
+        // An adopted native destination is never one of these (the defensive adoption
+        // rejects them), so this is exactly "cover this mod improvised".
+        state.RelocateDestinationIsField = Il2CppTypeTests.Is<DestinationWithoutCover>(cover);
         state.ReservedCoverId = coverId;
         state.ReservedCoverPosition = coverPosition;
         ContinueCommittedMovement(ai, soldier, state, now);
@@ -1889,11 +1917,19 @@ internal static partial class ContactResponse
             return;
 
         if (!completedMove && markFailedCover)
+        {
             MarkFailedCover(state, state.ReservedCoverId, now);
+            if (state.RelocateDestinationIsField)
+            {
+                state.FailedFieldCoverPosition = state.ReservedCoverPosition;
+                state.FailedFieldCoverUntil = now + FieldCoverProbeCore.FailedPositionSeconds;
+            }
+        }
         else if (completedMove && state.FailedCoverId == state.ReservedCoverId)
             state.FailedCoverId = IntPtr.Zero;
 
         state.Relocating = false;
+        state.RelocateDestinationIsField = false;
         state.AttackObjectiveBoundActive = false;
         state.AttackObjectiveBoundStartedAt = 0f;
         state.AttackFiringCommitUntil = 0f;

@@ -60,29 +60,29 @@ internal static class AiPriorityScenarios
         const float threshold = 20f;
         foreach (var distance in new[] { 0f, 5f, 19.9f, 20f, 20.1f, 75f, 150f })
         {
-            var immediate = ContactDivePolicyCore.IsImmediateThreat(distance * distance, threshold);
+            var immediate = ContactReactionPolicyCore.IsImmediateThreat(distance * distance, threshold);
             Require(immediate == (distance <= threshold), "Immediate threat boundary changed.");
-            Require(ContactDivePolicyCore.ShouldStart(true, true, false, 0f, 100f,
+            Require(ContactReactionPolicyCore.ShouldStart(true, true, false, 0f, 100f,
                     hasCommittedCoverMove: true, immediateThreat: immediate) == immediate,
                 $"Cover move interruption was incorrect at {distance} metres.");
         }
         foreach (var invalid in new[] { -1f, float.NaN, float.PositiveInfinity })
-            Require(!ContactDivePolicyCore.IsImmediateThreat(invalid, threshold),
+            Require(!ContactReactionPolicyCore.IsImmediateThreat(invalid, threshold),
                 "Invalid distance created a close threat.");
-        Require(!ContactDivePolicyCore.ShouldStart(true, false, false, 0f, 100f,
+        Require(!ContactReactionPolicyCore.ShouldStart(true, false, false, 0f, 100f,
                 hasCommittedCoverMove: true, immediateThreat: true),
             "An unseen enemy interrupted the cover move.");
 
-        var deadline = ContactDivePolicyCore.ResolveFiringDeadline(100f, 8f);
-        Require(ContactDivePolicyCore.ShouldStart(true, true, true, 0f, 100f,
+        var deadline = ContactReactionPolicyCore.ResolveFiringDeadline(100f, 8f);
+        Require(ContactReactionPolicyCore.ShouldStart(true, true, true, 0f, 100f,
                 hasCommittedCoverMove: true, immediateThreat: true,
                 immediateThreatResponseUsed: false),
             "A previously distant contact could not escalate when it became close.");
-        Require(!ContactDivePolicyCore.ShouldStart(true, true, true, deadline, 101f,
+        Require(!ContactReactionPolicyCore.ShouldStart(true, true, true, deadline, 101f,
                 hasCommittedCoverMove: true, immediateThreat: true,
                 immediateThreatResponseUsed: false),
             "Proximity escalation restarted an already-active firing response.");
-        Require(!ContactDivePolicyCore.ShouldStart(true, true, true, deadline, deadline + 1f,
+        Require(!ContactReactionPolicyCore.ShouldStart(true, true, true, deadline, deadline + 1f,
                 hasCommittedCoverMove: true, immediateThreat: true,
                 immediateThreatResponseUsed: true),
             "Continuous close contact restarted the minimum reaction instead of reassessing.");
@@ -91,9 +91,60 @@ internal static class AiPriorityScenarios
             "An expired minimum reaction prevented protection reassessment.");
     }
 
+    internal static void CloseContactRetainsFiringStance()
+    {
+        // First sighting on an ordinary route and en route to cover must keep the
+        // rifleman's stop-and-fire window without inserting a stance transition.
+        foreach (var committedMove in new[] { false, true })
+        foreach (var current in new[] { TacticalStance.Standing, TacticalStance.Crouched, TacticalStance.Prone })
+        foreach (var distance in new[] { 0f, 5f, 19.9f, 20f })
+        {
+            var immediate = ContactReactionPolicyCore.IsImmediateThreat(distance * distance, 20f);
+            Require(ContactReactionPolicyCore.ShouldStart(true, true, false, 0f, 100f,
+                    hasCommittedCoverMove: committedMove, immediateThreat: immediate),
+                "Close contact lost its initial firing reaction.");
+            var stance = ContactReactionPolicyCore.SelectStance(immediate, current);
+            Require(stance == current,
+                $"Close contact at {distance} m inserted a stance transition from {current}.");
+            var deadline = ContactReactionPolicyCore.ResolveFiringDeadline(100f, 8f);
+            Require(InfantryCoverDecisionCore.ShouldHaltForCloseThreat(immediate, false,
+                    CombatMovementPolicyCore.AttackFiringPhaseActive(deadline, 100f)),
+                "Avoiding the dive let a rifleman keep moving instead of firing.");
+
+            foreach (var nextDistance in new[] { 5f, 75f, 19f, 21f })
+                Require(!ContactReactionPolicyCore.ShouldStart(true, true, true, deadline, 101f,
+                        hasCommittedCoverMove: committedMove,
+                        immediateThreat: ContactReactionPolicyCore.IsImmediateThreat(nextDistance * nextDistance, 20f),
+                        immediateThreatResponseUsed: true),
+                    "Target switching or range jitter replaced the committed firing posture.");
+        }
+
+        foreach (var distance in new[] { 20.1f, 75f })
+            Require(ContactReactionPolicyCore.SelectStance(
+                    ContactReactionPolicyCore.IsImmediateThreat(distance * distance, 20f),
+                    TacticalStance.Standing) == TacticalStance.Prone,
+                "A distant first contact lost its existing protective dive.");
+    }
+
+    internal static void CloseContactPoseOverridesCachedPostures()
+    {
+        foreach (var previousOwner in new[] { PoseOwner.MovementPose, PoseOwner.CoverEvaluation, PoseOwner.StationaryCombat })
+        foreach (var previousStance in new[] { TacticalStance.Prone, TacticalStance.Crouched })
+        foreach (var currentStance in new[] { TacticalStance.Standing, TacticalStance.Crouched })
+        {
+            var reactionStance = ContactReactionPolicyCore.SelectStance(true, currentStance);
+            Require(PoseArbiterCore.ShouldAccept(previousOwner, previousStance,
+                    PoseOwner.ContactReaction, reactionStance, false, 100f, 103.5f),
+                "A stale posture latch blocked the close-contact firing stance.");
+            Require(FinalPoseAuthorityCore.RewriteNativeRequest(true,
+                    TacticalStance.Prone, reactionStance) == currentStance,
+                "The native pose boundary reintroduced a dive during close contact.");
+        }
+    }
+
     internal static void LiveCloseThreatOutlastsFiringDeadline()
     {
-        var deadline = ContactDivePolicyCore.ResolveFiringDeadline(100f, 8f);
+        var deadline = ContactReactionPolicyCore.ResolveFiringDeadline(100f, 8f);
         // Both covering fire and the longest halt cap are available. Neither is
         // evidence that this soldier's personally observed close enemy is gone.
         foreach (var now in new[] { deadline, deadline + 30f, deadline + 120f })
@@ -136,10 +187,10 @@ internal static class AiPriorityScenarios
     {
         foreach (var committed in new[] { false, true })
         foreach (var immediate in new[] { false, true })
-            Require(!ContactDivePolicyCore.ShouldStart(true, true, false, 0f, 100f,
+            Require(!ContactReactionPolicyCore.ShouldStart(true, true, false, 0f, 100f,
                     committed, survivalActionActive: true, immediateThreat: immediate),
                 "A pin or required action armed a competing firing halt.");
-        Require(ContactDivePolicyCore.ShouldStart(true, true, false, 0f, 100f,
+        Require(ContactReactionPolicyCore.ShouldStart(true, true, false, 0f, 100f,
                 hasCommittedCoverMove: false, survivalActionActive: false),
             "An uncommitted moving soldier lost the ordinary contact response.");
     }

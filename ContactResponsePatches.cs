@@ -20,7 +20,10 @@ internal static class ExclusiveCoverAssignmentPatch
         // selected building/trench post between director updates.
         if (cover == null)
         {
-            var shouldBlockClear = ContactResponse.ShouldBlockNativeCoverClear(__instance);
+            // A finished heal clears itself this way. Blocking it would leave the spent
+            // errand as the medic's destination and MedicRoutine never assigns another.
+            var shouldBlockClear = !HoldsMedicDestination(__instance) &&
+                                   ContactResponse.ShouldBlockNativeCoverClear(__instance);
             if (!shouldBlockClear)
             {
                 var soldierId = __instance.GetInstanceID();
@@ -40,6 +43,15 @@ internal static class ExclusiveCoverAssignmentPatch
         // reject that call or squad vehicle orders, including static AT staffing,
         // silently succeed without sending a soldier to the requested seat.
         if (cover.IsVehicle())
+            return true;
+
+        // Squad.MedicRoutine sends a medic to a casualty through this same method,
+        // and the patient exists nowhere else. It is an errand, not a cover slot:
+        // ownership, area, occupancy and reservation rules written for fighting
+        // positions rejected it every tick, so a defending medic never left his post.
+        // The director sees the accepted errand on its next update and releases the
+        // medic's slot and holds through the same path as a vehicle boarding order.
+        if (IsMedicErrand(cover))
             return true;
 
         // Protect an actual reserved move/anchor, not mere entry into the objective
@@ -104,6 +116,30 @@ internal static class ExclusiveCoverAssignmentPatch
         }
 
         return true;
+    }
+
+    private static bool IsMedicErrand(AiDestination cover)
+    {
+        try
+        {
+            return GroundAiDirector.IsLiveMedicDestination(cover);
+        }
+        catch (NullReferenceException) { return false; }
+        catch (Il2CppException) { return false; }
+        catch (ObjectCollectedException) { return false; }
+    }
+
+    private static bool HoldsMedicDestination(Soldier soldier)
+    {
+        try
+        {
+            var destination = soldier.targetDestination;
+            return !ReferenceEquals(destination, null) && !destination.WasCollected &&
+                   !ReferenceEquals(destination.TryCast<MedicHealingDestination>(), null);
+        }
+        catch (NullReferenceException) { return false; }
+        catch (Il2CppException) { return false; }
+        catch (ObjectCollectedException) { return false; }
     }
 
     internal static void MaintainOccupiedCoverClaim(Soldier soldier, float now)

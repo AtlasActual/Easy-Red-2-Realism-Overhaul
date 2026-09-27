@@ -21,6 +21,9 @@
     <Compile Include="..\..\BallisticCoverDecisionCore.cs" Link="BallisticCoverDecisionCore.cs" />
     <Compile Include="..\..\AiBehaviorTuningCore.cs" Link="AiBehaviorTuningCore.cs" />
     <Compile Include="..\..\RememberedGrenadeDecisionCore.cs" Link="RememberedGrenadeDecisionCore.cs" />
+    <Compile Include="..\..\AntiTankGrenadeDecisionCore.cs" Link="AntiTankGrenadeDecisionCore.cs" />
+    <Compile Include="..\..\FragGrenadeDecisionCore.cs" Link="FragGrenadeDecisionCore.cs" />
+    <Compile Include="..\..\FieldCoverProbeCore.cs" Link="FieldCoverProbeCore.cs" />
     <Compile Include="..\..\InfantryCoverDecisionCore.cs" Link="InfantryCoverDecisionCore.cs" />
     <Compile Include="..\..\GroundAiDecisionCore.cs" Link="GroundAiDecisionCore.cs" />
     <Compile Include="..\..\TransportDismountDecisionCore.cs" Link="TransportDismountDecisionCore.cs" />

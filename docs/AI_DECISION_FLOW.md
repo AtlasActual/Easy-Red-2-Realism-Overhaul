@@ -85,16 +85,20 @@ flowchart TD
 
 Distance means horizontal distance to a personally actionable, observed target.
 Both the immediate acquisition callback and the regular contact FSM use
-`ContactDivePolicyCore.IsImmediateThreat`. The boundary is inclusive and uses the
+`ContactReactionPolicyCore.IsImmediateThreat`. The boundary is inclusive and uses the
 existing `ImmediateFireDistanceMeters` setting, scaled by AI aggressiveness
 (`AiBehaviorTuning.ImmediateFireDistance`); its unscaled compiled default is
 20.103 metres. No new magic distance or visibility privilege is introduced.
 
 A confirmed enemy at 10 m can interrupt a committed cover move at the baseline
-setting; one at 75 m cannot start that interruption. A continuous distant contact
+setting; one at 75 m cannot start that interruption. The close response halts in the
+soldier's current stance, avoiding a prone transition before the first shot. That
+stance is selected once and held for the existing firing commitment; a soldier
+already prone stays prone. A distant first contact outside a committed cover move
+retains the protective dive. A continuous distant contact
 that becomes close can escalate once. The same contact episode cannot repeatedly
 restart the minimum reaction by changing targets or crossing the threshold. A contact
-lapse starts a new episode under the existing continuity rule. Active dives finish
+lapse starts a new episode under the existing continuity rule. Active reactions finish
 their existing deadline; a new proposal does not extend it. That deadline is a
 reassessment point, not evidence that the enemy has been neutralized.
 

@@ -35,6 +35,7 @@ internal static class Settings
 
     internal static ConfigEntry<bool> ContactResponseEnabled = null!;
     internal static ConfigEntry<bool> HaltSpacingEnabled = null!;
+    internal static ConfigEntry<bool> ImprovisedCoverEnabled = null!;
     internal static ConfigEntry<float> InfantrySeparationDistance = null!;
     internal static ConfigEntry<float> ContactImmediateFireDistance = null!;
     internal static ConfigEntry<float> ContactCoverSearchRadius = null!;
@@ -90,6 +91,7 @@ internal static class Settings
     internal static ConfigEntry<float> GrenadeMaximumRange = null!;
     internal static ConfigEntry<float> GrenadeFriendlySafetyRadius = null!;
     internal static ConfigEntry<float> GrenadeCooldownSeconds = null!;
+    internal static ConfigEntry<bool> AntiTankGrenadeThrowsEnabled = null!;
 
     internal static ConfigEntry<float> LauncherMaximumEngagementDistance = null!;
     internal static ConfigEntry<float> LauncherAccuracySpreadMultiplier = null!;
@@ -338,6 +340,8 @@ internal static class Settings
             "Coordinates cover selection, forward relocations, and close engagement halts when infantry make contact.");
         HaltSpacingEnabled = config.Bind("AI - Infantry tactics - Contact response", "StepClearOfStackedSquadmates", true,
             "When a soldier is about to take a fighting halt on top of a squadmate, he first takes one short sideways or rear-side step into a distinct open position, and keeps taking a short step clear every few seconds for as long as he is still physically overlapping a squadmate. A soldier actually occupying his own reserved slot keeps it against an unanchored AI intruder. If two slot occupants physically overlap, one deterministically yields; AI also yield to an overlapping player-controlled neighbour. Cover-slot spacing is handled separately by the cover-search crowding penalty and is unaffected by this setting.");
+        ImprovisedCoverEnabled = config.Bind("AI - Infantry tactics - Contact response", "ImprovisedCover", true,
+            "When no placed cover slot (Combat Cover prop, building or trench node) protects a soldier, he probes the ground within about 20 m for walls, banks, crater lips and trench floors that actually stop bullets from the threat's direction and takes position there. Placed cover slots are always preferred when one protects him.");
         InfantrySeparationDistance = config.Bind("AI - Infantry tactics - Contact response", "MinimumSoldierSeparationMeters", 3.02f,
             new ConfigDescription("Minimum center-to-center distance autonomous AI tries to preserve when reserving cover or settling into a fighting halt. Larger values reduce bunching but may leave very tightly spaced trench or building slots unused.", new AcceptableValueRange<float>(1.25f, 4f)));
         ContactImmediateFireDistance = config.Bind("AI - Infantry tactics - Contact response", "ImmediateFireDistanceMeters", 20.103f,
@@ -446,6 +450,9 @@ internal static class Settings
             new ConfigDescription("Required friendly clearance around the intended grenade impact.", new AcceptableValueRange<float>(4f, 25f)));
         GrenadeCooldownSeconds = config.Bind("AI - Infantry tactics - Combat safety", "GrenadeCooldownSeconds", 13.035f,
             new ConfigDescription("Minimum time between explosive-grenade throws by one AI soldier. The recommended baseline is centered on this slider.", new AcceptableValueRange<float>(5f, 21.07f)));
+
+        AntiTankGrenadeThrowsEnabled = config.Bind("AI - Infantry tactics - Combat safety", "AntiTankGrenadeThrows", true,
+            "AI infantry carrying an anti-tank grenade throw it at a visible enemy tank inside throwing range even while their selected target is an infantryman. Without this the game only considers the throw while the tank itself is the soldier's current target. Friendly soldiers beside the tank still prevent the throw.");
 
         TankTacticsEnabled = config.Bind("AI - Vehicle tactics", "Enabled", true,
             "Makes AI tanks establish standoff and reverse when too close to enemy armor or a crewed anti-tank gun, while tanks on attack orders keep pressure against infantry.");
@@ -976,7 +983,7 @@ internal static class Settings
             section,
             currentKey,
             true,
-            "Allows range-checked, friendly-safe AI explosive-grenade throws from any stationary stance, including at a fresh last-known enemy position when the arcing path is clear. Assaulting soldiers may make a brief crouched halt for native visible-target throws.");
+            "AI regularly consider frag grenades against personally confirmed, visible infantry without waiting to be suppressed. Throws require safe range, friendly clearance and the per-soldier cooldown. Stationary soldiers can also throw at a fresh last-known enemy position when the arcing path is clear; assaulting soldiers may briefly halt for a visible-target throw.");
 
         if (oldCurrentExists && !currentExists)
         {

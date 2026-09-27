@@ -1168,6 +1168,10 @@ internal static class BulletPenetration
         collider.GetComponentInParent<Vehicle>() != null ||
         collider.GetComponentInParent<VehicleDamagablePart>() != null;
 
+    // Men and vehicles move on; neither is ground a soldier can plan to shelter behind.
+    internal static bool IsCharacterOrVehicle(Collider collider)
+        => IsCharacterStop(collider) || IsVehicleStop(collider);
+
     private static bool IsEnvironmentalPenetrationStop(Collider collider)
     {
         if (IsTerrainCollider(collider))

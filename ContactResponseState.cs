@@ -121,6 +121,17 @@ internal sealed class ContactResponseState
     internal IntPtr DefensiveCoverAnchorId;
     internal Vector3 DefensiveCoverAnchorPosition;
     internal float NextDefensiveCoverReassessmentAt;
+    // Optional calm-period upgrades taken under the current defensive ownership, and
+    // the slot the last one left, which is never an upgrade candidate again.
+    internal int DefensiveUpgradeMovesUsed;
+    internal IntPtr DefensiveUpgradePreviousAnchorId;
+    // Improvised (unauthored) cover. A probe that found nothing waits before probing
+    // again, and a spot the route could not reach is remembered by POSITION: its
+    // destination object is created per attempt, so its pointer identifies nothing.
+    internal float NextFieldCoverProbeAt;
+    internal bool RelocateDestinationIsField;
+    internal Vector3 FailedFieldCoverPosition;
+    internal float FailedFieldCoverUntil;
     internal bool DefensivePositionOwned;
     internal int DefensivePositionSquadId;
     internal int DefensivePositionObjectiveRevision;
@@ -133,9 +144,11 @@ internal sealed class ContactResponseState
     internal int SquadId;
     internal IntPtr AttackContactToken;
     internal float AttackContactLastSeenAt;
-    // Absolute deadline for the one non-cover prone intent: a moving soldier's first
-    // visual acquisition of a continuous contact episode. While active he halts and fires.
-    internal float ContactDiveProneUntil;
+    // One firing commitment for a moving soldier's first visual contact. Close contact
+    // preserves the acquisition stance; distant contact dives. Neither target switching
+    // nor crossing the distance boundary changes the pose during this commitment.
+    internal float ContactReactionUntil;
+    internal SoldierPose ContactReactionPose;
     // One near-threat escalation per continuous contact episode, shared by both
     // acquisition and periodic updates so target switching cannot restart it.
     internal bool ImmediateThreatResponseUsed;

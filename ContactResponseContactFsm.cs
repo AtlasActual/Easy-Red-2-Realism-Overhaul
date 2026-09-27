@@ -310,7 +310,7 @@ internal static partial class ContactResponse
         float now)
     {
         if (!Settings.ContactResponseEnabled.Value ||
-            !ContactDivePolicyCore.IsImmediateThreat(
+            !ContactReactionPolicyCore.IsImmediateThreat(
                 HorizontalDistanceSqr(soldier.transform.position, targetPosition),
                 AiBehaviorTuning.ImmediateFireDistance))
         {
@@ -320,7 +320,7 @@ internal static partial class ContactResponse
         var id = soldier.GetInstanceID();
         var state = AiState.GetContactState(id);
         var wasActuallyMoving = soldier.IsMoving(0.2f);
-        var contactWasContinuous = ContactDivePolicyCore.ContactWasContinuous(
+        var contactWasContinuous = ContactReactionPolicyCore.ContactWasContinuous(
             state.AttackContactToken != IntPtr.Zero,
             state.AttackContactLastSeenAt,
             now,
@@ -344,8 +344,9 @@ internal static partial class ContactResponse
             return;
         }
 
-        TryStartContactDive(
+        TryStartContactReaction(
             state,
+            soldier.Pose,
             wasActuallyMoving,
             hasObservedTarget: true,
             contactWasContinuous: contactWasContinuous,
@@ -353,11 +354,11 @@ internal static partial class ContactResponse
             immediateThreat: true);
         // Changing the selected enemy during continuous contact must not recreate
         // an indefinite halt, including while an exposed soldier awaits a cover
-        // search. Only the bounded dive/firing phase owns this early return.
+        // search. Only the bounded firing phase owns this early return.
         if (!InfantryCoverDecisionCore.ShouldHaltForCloseThreat(
                 closeThreat: true,
                 HandheldWeaponClassifier.AllowsMovingFire(soldier, ai),
-                IsContactDiveActive(state, now) ||
+                IsContactReactionActive(state, now) ||
                 CombatMovementPolicyCore.AttackFiringPhaseActive(state.AttackFiringCommitUntil, now)))
             return;
         if (state.Relocating)
@@ -390,7 +391,7 @@ internal static partial class ContactResponse
         var now = Time.time;
         var wasActuallyMovingWhenObserved = target != null && soldier.IsMoving(0.2f);
         var contactWasContinuous = target != null &&
-                                   ContactDivePolicyCore.ContactWasContinuous(
+                                   ContactReactionPolicyCore.ContactWasContinuous(
                                        state.AttackContactToken != IntPtr.Zero,
                                        state.AttackContactLastSeenAt,
                                        now,
@@ -410,7 +411,7 @@ internal static partial class ContactResponse
                                      AiBehaviorTuning.EngagementHaltDistance *
                                      AiBehaviorTuning.EngagementHaltDistance;
         var closeThreat = target != null &&
-            ContactDivePolicyCore.IsImmediateThreat(
+            ContactReactionPolicyCore.IsImmediateThreat(
                 HorizontalDistanceSqr(soldier.transform.position, observedTargetPosition),
                 AiBehaviorTuning.ImmediateFireDistance);
         var underDirectFire = IncomingFireAwareness.TryGetActiveDirectCue(
@@ -511,8 +512,9 @@ internal static partial class ContactResponse
 
         if (target != null)
         {
-            TryStartContactDive(
+            TryStartContactReaction(
                 state,
+                soldier.Pose,
                 wasActuallyMovingWhenObserved,
                 hasObservedTarget: true,
                 contactWasContinuous: contactWasContinuous,
@@ -520,17 +522,17 @@ internal static partial class ContactResponse
                 immediateThreat: closeThreat);
         }
 
-        // The dive is a complete combat action, not a one-frame pose request. It owns
+        // The reaction is a complete combat action, not a one-frame pose request. It owns
         // the halt through the same configurable firing commitment used after an attack
         // bound, even if the target pointer briefly flickers or the commander reassesses.
-        if (IsContactDiveActive(state, now) && state.HasThreatPosition)
+        if (IsContactReactionActive(state, now) && state.HasThreatPosition)
         {
             if (state.Relocating)
                 PauseRelocation(ai, soldier, state, id, now, false);
             state.EngagementHoldUntil = Mathf.Max(
-                state.EngagementHoldUntil, state.ContactDiveProneUntil);
+                state.EngagementHoldUntil, state.ContactReactionUntil);
             state.NextRelocationAllowedAt = Mathf.Max(
-                state.NextRelocationAllowedAt, state.ContactDiveProneUntil);
+                state.NextRelocationAllowedAt, state.ContactReactionUntil);
             RespondWithoutNewCover(
                 ai, soldier, state, state.LastThreatPosition, now);
             return;
@@ -654,12 +656,17 @@ internal static partial class ContactResponse
                     atSelectedCover,
                     nativeCoverReported,
                     destinationEnded);
+            // Improvised cover is a plain destination: the game never reports it as
+            // cover, so reaching it is the arrival, for an attacker as for a defender.
+            var reachedImprovisedCover = state.RelocateDestinationIsField &&
+                                         atSelectedCover && destinationEnded;
             if (destinationWasReplaced)
             {
                 FinishRelocation(ai, soldier, state, id, now, false, false);
             }
             else if (nativeCoverReported && atSelectedCover ||
-                     reachedReservedDefensiveSlot)
+                     reachedReservedDefensiveSlot ||
+                     reachedImprovisedCover)
             {
                 FinishRelocation(ai, soldier, state, id, now, true, true);
             }
@@ -1690,11 +1697,12 @@ internal static partial class ContactResponse
         state.AttackObjectiveBoundStartedAt = 0f;
     }
 
-    private static bool IsContactDiveActive(ContactResponseState state, float now)
-        => float.IsFinite(now) && now < state.ContactDiveProneUntil;
+    private static bool IsContactReactionActive(ContactResponseState state, float now)
+        => float.IsFinite(now) && now < state.ContactReactionUntil;
 
-    private static bool TryStartContactDive(
+    private static bool TryStartContactReaction(
         ContactResponseState state,
+        SoldierPose currentPose,
         bool wasActuallyMoving,
         bool hasObservedTarget,
         bool contactWasContinuous,
@@ -1703,11 +1711,11 @@ internal static partial class ContactResponse
     {
         if (!contactWasContinuous)
             state.ImmediateThreatResponseUsed = false;
-        if (!ContactDivePolicyCore.ShouldStart(
+        if (!ContactReactionPolicyCore.ShouldStart(
                 wasActuallyMoving,
                 hasObservedTarget,
                 contactWasContinuous,
-                state.ContactDiveProneUntil,
+                state.ContactReactionUntil,
                 now,
                 hasCommittedCoverMove: state.Relocating,
                 survivalActionActive: state.Pinned || state.ExposedReloadSafetyOwned,
@@ -1717,14 +1725,16 @@ internal static partial class ContactResponse
             return false;
         }
 
-        var diveUntil = ContactDivePolicyCore.ResolveFiringDeadline(
+        var reactionUntil = ContactReactionPolicyCore.ResolveFiringDeadline(
             now, AiBehaviorTuning.AttackFiringHoldSeconds);
-        state.ContactDiveProneUntil = diveUntil;
+        state.ContactReactionUntil = reactionUntil;
+        state.ContactReactionPose = FromTacticalStance(ContactReactionPolicyCore.SelectStance(
+            immediateThreat, ToTacticalStance(currentPose)));
         state.ImmediateThreatResponseUsed |= immediateThreat;
         state.AttackFiringCommitUntil = Mathf.Max(
-            state.AttackFiringCommitUntil, diveUntil);
-        state.EngagementHoldUntil = Mathf.Max(state.EngagementHoldUntil, diveUntil);
-        state.NextRelocationAllowedAt = Mathf.Max(state.NextRelocationAllowedAt, diveUntil);
+            state.AttackFiringCommitUntil, reactionUntil);
+        state.EngagementHoldUntil = Mathf.Max(state.EngagementHoldUntil, reactionUntil);
+        state.NextRelocationAllowedAt = Mathf.Max(state.NextRelocationAllowedAt, reactionUntil);
         state.ContactCrouchOwned = true;
         state.AttackProgressForced = false;
         CancelAttackMovementBound(state);
@@ -1761,7 +1771,8 @@ internal static partial class ContactResponse
         state.SquadId = 0;
         state.AttackContactToken = IntPtr.Zero;
         state.AttackContactLastSeenAt = 0f;
-        state.ContactDiveProneUntil = 0f;
+        state.ContactReactionUntil = 0f;
+        state.ContactReactionPose = default;
         state.ImmediateThreatResponseUsed = false;
         state.AttackConditionsWereFavorable = false;
         state.AttackHaltStartedAt = 0f;

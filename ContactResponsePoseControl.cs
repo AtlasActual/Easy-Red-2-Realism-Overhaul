@@ -56,12 +56,13 @@ internal static partial class ContactResponse
             state.CoverReloadPoseOwned = false;
         }
 
-        // a. A moving soldier's first visual acquisition owns one deliberate dive and
-        // firing commitment. Cover evaluation below is the only other Prone author.
-        if (now < state.ContactDiveProneUntil && !flameEvading && !soldier.IsOnFire)
+        // a. First visual acquisition owns a stable firing posture. Close contact keeps
+        // the acquisition stance; distant contact dives. Resolve this before the cache
+        // and cover evaluation so they cannot insert a prone transition before the shot.
+        if (now < state.ContactReactionUntil && !flameEvading && !soldier.IsOnFire)
         {
-            owner = PoseOwner.ContactDive;
-            return SoldierPose.Prone;
+            owner = PoseOwner.ContactReaction;
+            return state.ContactReactionPose;
         }
 
         // b. Pinned / on-fire safety may halt or crouch, but cannot invent Prone.
@@ -236,7 +237,7 @@ internal static partial class ContactResponse
     private static string OwnerTag(PoseOwner owner)
         => owner switch
         {
-            PoseOwner.ContactDive => "contact-dive",
+            PoseOwner.ContactReaction => "contact-reaction",
             PoseOwner.Suppression => "pinned-fire",
             PoseOwner.CoverReload => "cover-reload",
             PoseOwner.MovementPose => "movement",

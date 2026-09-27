@@ -118,7 +118,7 @@ internal static class CasualtySuppression
             var affected = 0;
             foreach (var creature in creatures)
             {
-                var soldier = creature as Soldier;
+                var soldier = Il2CppTypeTests.As<Soldier>(creature);
                 if (soldier == null || !soldier.IsAlive || !AiOwnership.IsAutonomous(soldier))
                     continue;
 
@@ -199,7 +199,7 @@ internal static class CasualtySuppression
 
             foreach (var creature in creatures)
             {
-                var soldier = creature as Soldier;
+                var soldier = Il2CppTypeTests.As<Soldier>(creature);
                 if (soldier == null || soldier == casualty || !soldier.IsAlive ||
                     !AiOwnership.IsAutonomous(soldier) ||
                     !CombatSafety.SameFaction(soldier.faction, casualty.faction))

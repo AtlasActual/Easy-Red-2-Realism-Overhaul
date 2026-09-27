@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$GameDir = $env:ER2_GAME_DIR,
-    [string]$MirrorRoot = 'C:\Users\antoi\Documents\Easy Red 2 AI mod'
+    [string]$MirrorRoot = 'C:\Users\antoi\Documents\Easy Red 2 AI mod',
+    [switch]$PackageOnly
 )
 
 Set-StrictMode -Version Latest
@@ -29,7 +30,9 @@ $compactStage = Join-Path $projectRoot "artifacts\ER2RealismOverhaul-v$modVersio
 $noBepStage = Join-Path $projectRoot "artifacts\ER2RealismOverhaul-v$modVersion-Windows-x64-No-BepInEx"
 $fullStage = Join-Path $projectRoot "artifacts\ER2RealismOverhaul-v$modVersion-Windows-x64-BepInEx"
 
-foreach ($requiredPath in @($GameDir, $MirrorRoot, $compactStage, $noBepStage, $fullStage)) {
+$requiredPaths = @($GameDir, $compactStage, $noBepStage, $fullStage)
+if (-not $PackageOnly) { $requiredPaths += $MirrorRoot }
+foreach ($requiredPath in $requiredPaths) {
     if (-not (Test-Path -LiteralPath $requiredPath)) {
         throw "Required path does not exist: $requiredPath"
     }
@@ -64,23 +67,25 @@ $runningGame = Get-Process -ErrorAction SilentlyContinue | Where-Object {
         $false
     }
 }
-if ($runningGame) {
+if ($runningGame -and -not $PackageOnly) {
     throw 'Easy Red 2 is running. Close it before deploying the consolidated DLL.'
 }
 
 $pluginRelativePath = 'BepInEx\plugins\ER2RealismOverhaul\ER2RealismOverhaul.dll'
 $deployedDlls = @(
-    (Join-Path $MirrorRoot 'bin\Release\net6.0\ER2RealismOverhaul.dll'),
-    (Join-Path $GameDir $pluginRelativePath),
     (Join-Path $compactStage $pluginRelativePath),
     (Join-Path $noBepStage $pluginRelativePath),
     (Join-Path $fullStage $pluginRelativePath)
 )
+if (-not $PackageOnly) {
+    $deployedDlls += (Join-Path $MirrorRoot 'bin\Release\net6.0\ER2RealismOverhaul.dll')
+    $deployedDlls += (Join-Path $GameDir $pluginRelativePath)
+}
 
 # Keep the historical game-root copy synchronized if it exists, even though BepInEx
 # loads the DLL from BepInEx\plugins\ER2RealismOverhaul.
 $legacyGameRootDll = Join-Path $GameDir 'ER2RealismOverhaul.dll'
-if (Test-Path -LiteralPath $legacyGameRootDll) {
+if (-not $PackageOnly -and (Test-Path -LiteralPath $legacyGameRootDll)) {
     $deployedDlls += $legacyGameRootDll
 }
 

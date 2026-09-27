@@ -6,9 +6,19 @@ ER2RealismOverhaul is built around the rough edges that become hard to ignore af
 
 The goal is to fix those moments without replacing the game underneath them. This is not a health or damage multiplier mod; Easy Red 2's missions, armour system, and basic damage model remain intact.
 
-> **Current release:** 1.1.6
+> **Current release:** 1.1.7
 >
 > **Compatibility:** Tested with Easy Red 2 2.1.0, Steam public-branch build `25255578` (September 11, 2026). Versions 1.1.3 and earlier do not work on 2.1.0.
+
+## What's new in 1.1.7
+
+- Defenders retain occupied cover during squadmate-spacing corrections, stop exposed native movement during contact, and avoid repeatedly trading equivalent cover slots.
+- Defending medics can leave their cover to reach casualties and return to defensive positioning afterward.
+- Added enabled-by-default **Anti Tank Grenade Throws**, allowing eligible infantry to engage visible nearby tanks even while targeting infantry.
+- **Safe AI Grenade Throws** now checks regularly for safe frag throws at confirmed, visible infantry without requiring suppression. Failed attempts no longer consume the grenade cooldown.
+- Added enabled-by-default **Improvised Cover**, allowing soldiers to evaluate nearby walls, banks, ditches, and crater lips when placed cover offers no protection.
+- Surplus defending squads keep their assigned hold areas inside the objective.
+- Fixed IL2CPP type checks that bypassed grenade safety and prevented remembered-position grenade throws; soldier detection in friendly-fire, blast-clearance, and casualty-suppression checks is also corrected.
 
 ## What's new in 1.1.6
 

@@ -303,9 +303,9 @@ internal enum PoseOwner
     // they cannot manufacture a prone request.
     Suppression = 9,
 
-    // a2: a moving soldier has visually acquired a new contact and deliberately dived
-    // to fire. This is the only non-cover owner permitted to request Prone.
-    ContactDive = 10
+    // a2: a moving soldier has visually acquired a new contact and halted to fire.
+    // Close contact keeps his current stance; distant contact can request Prone.
+    ContactReaction = 10
 }
 
 /// <summary>
@@ -349,7 +349,7 @@ internal static class FinalPoseAuthorityCore
 ///
 /// The invariant that keeps the two ladders consistent, verified rank by rank:
 /// the only owner above <see cref="PoseOwner.MovementPose"/> that can demand a new
-/// non-cover Prone is ContactDive, whose FSM commitment also owns a fighting halt. A
+/// non-cover Prone is ContactReaction, whose FSM commitment also owns a fighting halt. A
 /// covered reload can preserve Prone only when the occupied cover selected it; pinned,
 /// burning, exposed-reload, and bandage reactions do not create their own prone intent.
 /// </summary>
@@ -731,10 +731,24 @@ internal static class HaltSpacingCore
     // seconds", never a per-frame loop.
     internal const float RetryIntervalSeconds = 4f;
 
+    // A bare reservation only counts as occupied when the soldier stands on it.
+    internal const float UnanchoredSlotRadiusMeters = 0.75f;
+
+    /// <summary>
+    /// A reservation that is still metres away or in transit is not an occupied slot.
+    /// An ANCHORED reservation is different: arrival is accepted within the anchor
+    /// leash, and native trench/building stand points routinely sit more than a body
+    /// width from the node. Measuring an anchored occupant against the tight radius
+    /// made ordinary trench spacing evict him from his own cover.
+    /// </summary>
     internal static bool HoldsOccupiedSlot(bool ownsReservation, bool relocating,
-        float horizontalDistance, float verticalDistance)
+        float horizontalDistance, float verticalDistance,
+        bool anchoredToReservation = false, float anchorLeashMeters = 0f)
         => ownsReservation && !relocating && float.IsFinite(horizontalDistance) &&
-           float.IsFinite(verticalDistance) && horizontalDistance >= 0f && horizontalDistance <= 0.75f &&
+           float.IsFinite(verticalDistance) && horizontalDistance >= 0f &&
+           horizontalDistance <= (anchoredToReservation && float.IsFinite(anchorLeashMeters)
+               ? MathF.Max(UnanchoredSlotRadiusMeters, anchorLeashMeters)
+               : UnanchoredSlotRadiusMeters) &&
            MathF.Abs(verticalDistance) <= 1.75f;
 
     internal static bool ShouldYieldToNeighbour(bool holdsOccupiedSlot,
@@ -1235,13 +1249,19 @@ internal static class SuppressionRecoveryPoseCore
 }
 
 /// <summary>
-/// Pure ownership policy for the one non-cover prone intent: a soldier who was actually
-/// moving and personally observes the start of a new continuous contact episode dives once.
+/// A soldier who was actually moving and personally observes a new contact halts once
+/// to fire. Nearby threats retain his current stance so a dive cannot delay the shot;
+/// distant threats retain the deliberate prone reaction.
 /// A cover move ignores distant contacts but permits one near-threat escalation per
 /// episode. Target switching cannot renew that escalation or an already-active dive.
 /// </summary>
-internal static class ContactDivePolicyCore
+internal static class ContactReactionPolicyCore
 {
+    // Chosen once at acquisition and retained for the firing commitment. Keeping an
+    // already-prone soldier prone also avoids inserting a stand-up animation before fire.
+    internal static TacticalStance SelectStance(bool immediateThreat, TacticalStance currentStance)
+        => immediateThreat ? currentStance : TacticalStance.Prone;
+
     internal static bool IsImmediateThreat(float horizontalDistanceSqr, float thresholdMeters)
         => float.IsFinite(horizontalDistanceSqr) && horizontalDistanceSqr >= 0f &&
            float.IsFinite(thresholdMeters) && thresholdMeters > 0f &&
@@ -1261,7 +1281,7 @@ internal static class ContactDivePolicyCore
         bool wasActuallyMoving,
         bool hasObservedTarget,
         bool contactWasContinuous,
-        float currentDiveUntil,
+        float currentReactionUntil,
         float now,
         bool hasCommittedCoverMove = false,
         bool survivalActionActive = false,
@@ -1271,8 +1291,8 @@ internal static class ContactDivePolicyCore
            wasActuallyMoving && hasObservedTarget &&
            (!contactWasContinuous ||
             hasCommittedCoverMove && immediateThreat && !immediateThreatResponseUsed) &&
-           float.IsFinite(currentDiveUntil) && float.IsFinite(now) &&
-           now >= currentDiveUntil;
+           float.IsFinite(currentReactionUntil) && float.IsFinite(now) &&
+           now >= currentReactionUntil;
 
     internal static float ResolveFiringDeadline(float now, float configuredSeconds)
         => float.IsFinite(now)
@@ -1718,12 +1738,13 @@ internal static class ObjectiveDefenseAreaCore
 
     /// <summary>
     /// Keeps one squad centered on the actual capture point. Every surplus
-    /// sector's center may be pushed out toward the objective edge — and its
-    /// native HoldArea circle allowed to overhang outward — when the offset
-    /// is biased toward the supplied threat direction; flank and rear offsets
-    /// keep a tighter leash so a dense building or trench line behind the
-    /// point still cannot drag the whole defense rearward. Cover selection
-    /// remains free inside the resulting circle either way.
+    /// sector's center may be pushed out toward the threat, but only until its
+    /// native HoldArea circle touches the objective edge: a sector centered ON
+    /// the edge put half its squad outside the capture zone, where they neither
+    /// contest the objective nor use the cover authored inside it. Flank and
+    /// rear offsets keep a tighter leash so a dense building or trench line
+    /// behind the point still cannot drag the whole defense rearward. Cover
+    /// selection remains free inside the resulting circle either way.
     /// </summary>
     internal static ObjectiveDefenseArea Build(
         MapPoint objectiveCenter,
@@ -1739,10 +1760,7 @@ internal static class ObjectiveDefenseAreaCore
         }
 
         var effectiveRadius = Math.Max(MinimumObjectiveRadiusMeters, objectiveRadius);
-        var holdRadius = Math.Clamp(
-            effectiveRadius * 0.60f,
-            MinimumHoldRadiusMeters,
-            MaximumHoldRadiusMeters);
+        var holdRadius = HoldRadius(effectiveRadius);
         if (coreGarrison)
             return new ObjectiveDefenseArea(objectiveCenter, holdRadius);
 
@@ -1790,8 +1808,16 @@ internal static class ObjectiveDefenseAreaCore
         if (!float.IsFinite(objectiveRadius))
             return 0f;
 
-        return Math.Max(MinimumObjectiveRadiusMeters, objectiveRadius);
+        // Center offset plus hold radius never exceeds the objective radius.
+        var effectiveRadius = Math.Max(MinimumObjectiveRadiusMeters, objectiveRadius);
+        return Math.Max(0f, effectiveRadius - HoldRadius(effectiveRadius));
     }
+
+    private static float HoldRadius(float effectiveObjectiveRadius)
+        => Math.Clamp(
+            effectiveObjectiveRadius * 0.60f,
+            MinimumHoldRadiusMeters,
+            MaximumHoldRadiusMeters);
 }
 
 internal readonly record struct ObjectiveCapacityInput(int Id, bool Pressured, bool EnemySecured);

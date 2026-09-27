@@ -367,6 +367,8 @@ internal static class GunfireAwarenessBattleResetPatch
         MountedGunnerSuppression.ResetBattle();
         KnownTargetSuppressiveFire.ResetBattle();
         RememberedGrenadeThrows.ResetBattle();
+        AntiTankGrenadeThrows.ResetBattle();
+        FragGrenadeThrows.ResetBattle();
         ContactResponse.ResetBattleAttackEvidence();
         CasualtySuppression.ResetBattle();
     }
