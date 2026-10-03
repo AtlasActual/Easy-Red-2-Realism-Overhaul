@@ -15,7 +15,7 @@ namespace ER2RealismOverhaul;
 /// </summary>
 internal static class ObjectiveCoordination
 {
-    private const float PlanningIntervalSeconds = 24f;
+    private const float PlanningIntervalSeconds = 6f;
     private const float PressureChangeThreshold = 0.02f;
     private const float PressureMemorySeconds = 45f;
     private const int DefensiveCoverCandidateLimit = 64;
@@ -166,11 +166,10 @@ internal static class ObjectiveCoordination
                 return false;
 
             // Read once at snapshot time (not inside the per-objective planning
-            // loops) so the counter-attack gate's "free to maneuver" count stays
-            // allocation-light. Actively fighting, pinned, or mid-relocation all
-            // count as unavailable to redirect toward a fresh recapture.
+            // loops). A quiet cover relocation does not make a squad unavailable
+            // to reinforce an objective; active contact and pinning still do.
             var contact = AiState.GetContactState(leader.GetInstanceID());
-            var engaged = contact.ContactResponseActive || contact.Pinned || contact.Relocating;
+            var engaged = contact.ContactResponseActive || contact.Pinned;
 
             info = new SquadInfo(SquadIdentity.GetSquadId(squad), squad, faction, position, leader, engaged);
             return true;
@@ -193,7 +192,23 @@ internal static class ObjectiveCoordination
         while (iterator.MoveNext())
         {
             var objective = objectives.Current;
-            if (objective == null || !objective.CanAttractFaction(faction))
+            if (objective == null)
+                continue;
+
+            // Native CanAttractFaction rejects secured objectives, including
+            // capture points that defenders can still contest in this phase.
+            // Only extend eligibility for enabled, ordinary capture tasks: a
+            // completed destruction task or a script's faction restriction must
+            // never become an autonomous counter-attack destination.
+            var task = objective.missionTask;
+            var activeCaptureTask = task != null && task.IsTaskEnabled() &&
+                (Il2CppTypeTests.Is<MissionTaskConquerArea>(task) ||
+                 Il2CppTypeTests.Is<MissionTaskPushFrontline>(task));
+            if (!ObjectiveEligibilityCore.ShouldInclude(
+                    objective.CanAttractFaction(faction),
+                    battle.IsDefenderFaction(faction),
+                    activeCaptureTask,
+                    Il2CppTypeTests.Is<MissionObjectiveScripted>(objective)))
                 continue;
 
             var position = objective.GetTaskPosition();
@@ -301,25 +316,37 @@ internal static class ObjectiveCoordination
         var centroid = AveragePosition(squads);
         objectives.Sort((left, right) =>
         {
+            // When squads are scarce, retain a garrison on objectives still held
+            // before considering a recapture, even if the lost point is closer.
+            if (!attacking && left.EnemySecured != right.EnemySecured)
+                return left.EnemySecured ? 1 : -1;
+
             var distanceComparison = HorizontalDistanceSquared(centroid, left.Position)
                 .CompareTo(HorizontalDistanceSquared(centroid, right.Position));
             return distanceComparison != 0 ? distanceComparison : left.Id.CompareTo(right.Id);
         });
 
-        // Moved above target selection (plan 041): the defender branch below
-        // needs the hostile squad list to assess the counter-attack gate before
-        // targets are finalized, not just afterward for threat-direction facing.
         var hostileSquads = CollectHostileSquads(battle, faction, squadsByFaction);
 
         var targetCount = attacking
             ? Math.Min(objectives.Count, Math.Max(1, (squads.Count + 1) / 2))
             : Math.Min(objectives.Count, squads.Count);
         var targets = objectives.Take(targetCount).ToList();
-        if (!attacking)
-            targets = ApplyCounterAttackGate(squads, targets, objectives, hostileSquads, now);
-
         var capacities = BuildCapacities(squads.Count, targets, attacking);
         var assignments = AssignSquads(squads, targets, capacities);
+        if (!attacking)
+        {
+            var accepted = ApplyCounterAttackGate(
+                squads, targets, objectives, hostileSquads, assignments, now);
+            if (accepted.Count != targets.Count)
+            {
+                targets = accepted;
+                capacities = BuildCapacities(squads.Count, targets, attacking);
+                // Keep the squads whose strength justified each accepted attack.
+                // Only redistribute rejected assignments and surplus capacity.
+                assignments = AssignSquads(squads, targets, capacities, assignments);
+            }
+        }
 
         var flankCount = 0;
 
@@ -384,7 +411,7 @@ internal static class ObjectiveCoordination
     }
 
     /// <summary>
-    /// Defender-only (plan 041): gates each EnemySecured candidate objective
+    /// Gates each EnemySecured candidate objective
     /// through <see cref="ObjectiveCounterAttackPlanCore.ShouldCounterAttack"/>
     /// and drops the ones it rejects. Friendly-secured and neutral candidates
     /// are never gated. Rejected objectives simply stop being targets, so
@@ -398,13 +425,15 @@ internal static class ObjectiveCoordination
         List<ObjectiveInfo> targets,
         List<ObjectiveInfo> allObjectives,
         List<SquadInfo> hostileSquads,
+        Dictionary<int, List<SquadInfo>> assignments,
         float now)
     {
         var candidates = new List<CounterAttackCandidate>(targets.Count);
         foreach (var target in targets)
         {
             var passesGate = !target.EnemySecured ||
-                AssessCounterAttack(squads, target, allObjectives, hostileSquads, now);
+                AssessCounterAttack(
+                    squads, target, allObjectives, hostileSquads, assignments[target.Id], now);
             candidates.Add(new CounterAttackCandidate(target.Id, target.EnemySecured, passesGate));
         }
 
@@ -417,32 +446,33 @@ internal static class ObjectiveCoordination
     }
 
     /// <summary>
-    /// Counts nearby defenders/free defenders/hostiles within the shared
-    /// counter-attack radius, checks for nearby friendly-secured pressure and a
-    /// recent loss with hostiles still close, then hands the plain-data result
-    /// to the deterministic gate.
+    /// Counts local support plus the squads assigned to approach this objective.
+    /// Existing attackers remain committed when contact starts; new reinforcements
+    /// must be free to maneuver. Other objectives' garrisons are not reinforcements.
     /// </summary>
     private static bool AssessCounterAttack(
         List<SquadInfo> squads,
         ObjectiveInfo target,
         List<ObjectiveInfo> allObjectives,
         List<SquadInfo> hostileSquads,
+        List<SquadInfo> assigned,
         float now)
     {
         var radius = ObjectiveCounterAttackPlanCore.CounterAttackAssessmentRadiusMeters;
         var radiusSqr = radius * radius;
 
-        var nearbyDefenders = 0;
-        var freeNearbyDefenders = 0;
+        var assignedIds = new HashSet<int>(assigned.Select(squad => squad.Id));
+        var support = new List<CounterAttackSquadSupport>(squads.Count);
         foreach (var squad in squads)
         {
-            if (HorizontalDistanceSquared(squad.Position, target.Position) > radiusSqr)
-                continue;
-
-            nearbyDefenders++;
-            if (!squad.Engaged)
-                freeNearbyDefenders++;
+            var committed = LastOrders.TryGetValue(squad.Id, out var previous) &&
+                            previous.ObjectiveId == target.Id &&
+                            previous.Order != CoordinatedOrder.Defend;
+            support.Add(new CounterAttackSquadSupport(
+                HorizontalDistanceSquared(squad.Position, target.Position) <= radiusSqr,
+                assignedIds.Contains(squad.Id), squad.Engaged, committed));
         }
+        var strength = ObjectiveCounterAttackPlanCore.AssessStrength(support);
 
         var nearbyHostiles = 0;
         foreach (var hostile in hostileSquads)
@@ -456,7 +486,7 @@ internal static class ObjectiveCoordination
         var nearbyPressure = false;
         foreach (var candidate in allObjectives)
         {
-            if (candidate.Id == target.Id || !candidate.FriendlySecured || !candidate.Pressured)
+            if (candidate.Id == target.Id || candidate.EnemySecured || !candidate.Pressured)
                 continue;
 
             if (HorizontalDistanceSquared(candidate.Position, target.Position) <= pressureRadiusSqr)
@@ -473,7 +503,7 @@ internal static class ObjectiveCoordination
                 lostRecently, nearbyHostiles);
 
         return ObjectiveCounterAttackPlanCore.ShouldCounterAttack(
-            nearbyDefenders, freeNearbyDefenders, nearbyHostiles, nearbyPressure,
+            strength.SupportingSquads, strength.ManeuverSquads, nearbyHostiles, nearbyPressure,
             lostRecentlyWithHostilesNearby);
     }
 
@@ -518,18 +548,35 @@ internal static class ObjectiveCoordination
     private static Dictionary<int, List<SquadInfo>> AssignSquads(
         List<SquadInfo> squads,
         List<ObjectiveInfo> targets,
-        Dictionary<int, int> capacities)
+        Dictionary<int, int> capacities,
+        Dictionary<int, List<SquadInfo>>? preferredAssignments = null)
     {
         var assignments = targets.ToDictionary(
             objective => objective.Id,
             _ => new List<SquadInfo>());
         var assignedSquads = new HashSet<int>();
 
-        // Keep a still-valid assignment first. Position changes should not make
-        // squads trade objectives every planning tick.
-        foreach (var squad in squads)
+        if (preferredAssignments != null)
         {
-            if (!LastOrders.TryGetValue(squad.Id, out var previous) ||
+            foreach (var target in targets)
+            {
+                foreach (var squad in preferredAssignments[target.Id])
+                {
+                    if (assignments[target.Id].Count >= capacities[target.Id])
+                        break;
+                    assignments[target.Id].Add(squad);
+                    assignedSquads.Add(squad.Id);
+                }
+            }
+        }
+
+        // Keep a still-valid assignment first. Position changes should not make
+        // squads trade objectives every planning tick. Keep engaged garrisons
+        // first so free squads can fill newly opened counter-attack slots.
+        foreach (var squad in squads.OrderByDescending(squad => squad.Engaged))
+        {
+            if (assignedSquads.Contains(squad.Id) ||
+                !LastOrders.TryGetValue(squad.Id, out var previous) ||
                 !assignments.TryGetValue(previous.ObjectiveId, out var destination) ||
                 destination.Count >= capacities[previous.ObjectiveId])
             {

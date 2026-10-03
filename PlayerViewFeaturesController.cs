@@ -8,9 +8,6 @@ internal sealed class PlayerViewFeaturesController : MonoBehaviour
 {
     private const float FreeLookVerticalLimitDegrees = 60f;
     private const float FreeLookReturnSpeedDegreesPerSecond = 720f;
-    private const float OverlayRadiusHeightFraction = 0.49f;
-    private const float OverlayLensOffsetWidthFraction = 0.22f;
-    private const float OverlayStripHeight = 2f;
     private const float CompassVisibleArcDegrees = 120f;
     private const float CompassRevealDurationSeconds = 5f;
     private const float CompassEdgeFadeFraction = 0.16f;
@@ -21,6 +18,7 @@ internal sealed class PlayerViewFeaturesController : MonoBehaviour
 
     private static PlayerViewFeaturesController? _instance;
 
+    private readonly BinocularOverlayRenderer _binocularOverlay = new();
     private bool _binocularsActive;
     private bool _compassVisible;
     private bool _freeLookHeld;
@@ -107,7 +105,7 @@ internal sealed class PlayerViewFeaturesController : MonoBehaviour
                 return;
 
             if (_binocularsActive)
-                DrawBinocularOverlay();
+                _binocularOverlay.Draw();
 
             if (_compassVisible)
                 DrawCompass();
@@ -124,6 +122,7 @@ internal sealed class PlayerViewFeaturesController : MonoBehaviour
     private void OnDestroy()
     {
         ResetViewFeatures();
+        _binocularOverlay.Destroy();
         if (ReferenceEquals(_instance, this))
             _instance = null;
     }
@@ -299,61 +298,6 @@ internal sealed class PlayerViewFeaturesController : MonoBehaviour
     private static bool IsFreeLookKeyHeld() =>
         Input.GetKey(Settings.FreeLookKey.Value) ||
         (Settings.FreeLookKey.Value == KeyCode.LeftAlt && Input.GetKey(KeyCode.RightAlt));
-
-    [HideFromIl2Cpp]
-    private void DrawBinocularOverlay()
-    {
-        var width = (float)Screen.width;
-        var height = (float)Screen.height;
-        if (width <= 0f || height <= 0f)
-            return;
-
-        var radius = height * OverlayRadiusHeightFraction;
-        var centerX = width * 0.5f;
-        var centerY = height * 0.5f;
-        var lensOffset = Mathf.Min(width * OverlayLensOffsetWidthFraction, radius * 0.90f);
-
-        var previousColor = GUI.color;
-        GUI.color = Color.black;
-
-        for (var y = 0f; y < height; y += OverlayStripHeight)
-        {
-            var stripHeight = Mathf.Min(OverlayStripHeight, height - y);
-            var dy = y + stripHeight * 0.5f - centerY;
-            var squaredSpan = radius * radius - dy * dy;
-
-            if (squaredSpan <= 0f)
-            {
-                DrawBlackRect(0f, y, width, stripHeight);
-                continue;
-            }
-
-            var span = Mathf.Sqrt(squaredSpan);
-            var leftStart = centerX - lensOffset - span;
-            var leftEnd = centerX - lensOffset + span;
-            var rightStart = centerX + lensOffset - span;
-            var rightEnd = centerX + lensOffset + span;
-
-            DrawBlackRect(0f, y, Mathf.Max(0f, leftStart), stripHeight);
-
-            if (leftEnd < rightStart)
-            {
-                DrawBlackRect(
-                    Mathf.Max(0f, leftEnd),
-                    y,
-                    Mathf.Max(0f, rightStart - leftEnd),
-                    stripHeight);
-            }
-
-            DrawBlackRect(
-                Mathf.Min(width, rightEnd),
-                y,
-                Mathf.Max(0f, width - rightEnd),
-                stripHeight);
-        }
-
-        GUI.color = previousColor;
-    }
 
     [HideFromIl2Cpp]
     private void DrawCompass()
@@ -661,28 +605,6 @@ internal sealed class PlayerViewFeaturesController : MonoBehaviour
     };
 
     [HideFromIl2Cpp]
-    private static void DrawBlackRect(float x, float y, float width, float height)
-    {
-        if (width <= 0f || height <= 0f)
-            return;
-
-        // The circular binocular mask produces fractional-pixel strip bounds.
-        // IMGUI can drop a sub-pixel-wide outer strip, leaving isolated scene
-        // pixels visible along the lens edge. Expand the blackout out to the
-        // enclosing screen pixels so the mask remains continuous.
-        var left = Mathf.Floor(x);
-        var top = Mathf.Floor(y);
-        var right = Mathf.Ceil(x + width);
-        var bottom = Mathf.Ceil(y + height);
-        if (right <= left || bottom <= top)
-            return;
-
-        GUI.DrawTexture(
-            new Rect(left, top, right - left, bottom - top),
-            Texture2D.whiteTexture);
-    }
-
-    [HideFromIl2Cpp]
     private void ResetViewFeatures()
     {
         _compassVisibleUntil = float.NegativeInfinity;
@@ -705,6 +627,9 @@ internal sealed class PlayerViewFeaturesController : MonoBehaviour
     {
         if (_binocularsActive == active)
             return;
+
+        if (active)
+            _binocularOverlay.Raise();
 
         _binocularsActive = active;
         if (active)

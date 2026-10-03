@@ -398,7 +398,9 @@ internal static class StaticAntiTankStaffing
         out RuntimeWeapon info)
     {
         info = default;
-        if (weapon == null || weapon.IsDisabled() ||
+        // The editor lock forbids boarding independently of the physics toggle.
+        // An unlocked transport with physics disabled may still serve as a gun.
+        if (weapon == null || weapon.IsLocked() || weapon.IsDisabled() ||
             (!weapon.IsStatic() && !IsStaffableVehicleGun(weapon)))
         {
             return false;
@@ -519,12 +521,13 @@ internal static class StaticAntiTankStaffing
                 assignment.Soldier.joinedSquad == null ||
                 !assignment.Soldier.joinedSquad.fullySpawned ||
                 !SoldierStillHoldingDefense(assignment.Soldier) ||
-                assignment.Weapon == null || assignment.Weapon.IsDisabled() ||
+                assignment.Weapon == null || assignment.Weapon.IsLocked() ||
+                assignment.Weapon.IsDisabled() ||
                 !WeaponStillHasAmmunition(assignment.Weapon) ||
                 !WeaponInsideActiveDefense(assignment.Weapon, activeAreas) ||
                 GroundAiDirector.IsExternallyControlledSquad(assignment.Soldier.joinedSquad))
             {
-                Release(assignment, "invalid, empty, outside active defense, dead, or externally owned");
+                Release(assignment, "invalid, locked, empty, outside active defense, dead, or externally owned");
                 continue;
             }
 
@@ -925,6 +928,14 @@ internal static class GunnerSeatPriority
 
         try
         {
+            // A mission script can lock the weapon after allocation but before
+            // arrival. Do not bypass that lock through direct gunner boarding.
+            if (vehicle.IsLocked())
+            {
+                result = false;
+                return false;
+            }
+
             var mainSeat = vehicle.GetMainTurretSeat(false, out var seatId);
             if (mainSeat == null ||
                 (mainSeat.unitSet != null &&

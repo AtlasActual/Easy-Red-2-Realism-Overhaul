@@ -69,6 +69,12 @@ internal static class Program
             (nameof(ObjectiveDefenseWithoutAThreatDirectionUsesTheDeterministicFallback), ObjectiveDefenseWithoutAThreatDirectionUsesTheDeterministicFallback),
             (nameof(ObjectiveAttackKeepsOnePressureSquadAndAlternatesWideFlanks), ObjectiveAttackKeepsOnePressureSquadAndAlternatesWideFlanks),
             (nameof(DefenderRecaptureTargetsGetAttackOrdersInsteadOfDefense), DefenderRecaptureTargetsGetAttackOrdersInsteadOfDefense),
+            (nameof(SecuredCapturePointsRemainEligibleForDefenders), SecuredCapturePointsRemainEligibleForDefenders),
+            (nameof(DistantReservesCanRetakeAWhileBRetainsAGarrison), DistantReservesCanRetakeAWhileBRetainsAGarrison),
+            (nameof(CounterAttackCommitmentSurvivesContact), CounterAttackCommitmentSurvivesContact),
+            (nameof(CounterAttackAssessmentDoesNotBorrowOtherGarrisons), CounterAttackAssessmentDoesNotBorrowOtherGarrisons),
+            (nameof(SingleSquadCanReclaimAnUnopposedPoint), SingleSquadCanReclaimAnUnopposedPoint),
+            (nameof(RecaptureReinforcementsPreservePressuredGarrisons), RecaptureReinforcementsPreservePressuredGarrisons),
             (nameof(DefenderRecaptureCapacityCapsAtTwoAndProtectsEveryOtherObjective), DefenderRecaptureCapacityCapsAtTwoAndProtectsEveryOtherObjective),
             (nameof(AttackingFactionsIgnoreTheCounterAttackCapacityCap), AttackingFactionsIgnoreTheCounterAttackCapacityCap),
             (nameof(CounterAttackGateWeighsLocalStrengthBeforeAttacking), CounterAttackGateWeighsLocalStrengthBeforeAttacking),
@@ -3643,6 +3649,113 @@ internal static class Program
             "An attacking faction stopped attacking a neutral or friendly-contested objective.");
         True(ObjectiveCounterAttackPlanCore.ShouldIssueAttackOrder(attacking: true, enemySecured: true),
             "An attacking faction's behavior changed because of the new EnemySecured flag.");
+    }
+
+    private static void SecuredCapturePointsRemainEligibleForDefenders()
+    {
+        True(ObjectiveEligibilityCore.ShouldInclude(false, true, true, false),
+            "Native attraction filtering removed a secured, active capture point from defense planning.");
+        False(ObjectiveEligibilityCore.ShouldInclude(false, false, true, false),
+            "Attackers were sent back to an objective the native game no longer attracts them to.");
+        False(ObjectiveEligibilityCore.ShouldInclude(false, true, false, false),
+            "A disabled capture task or completed non-capture objective became a recapture target.");
+        False(ObjectiveEligibilityCore.ShouldInclude(false, true, true, true),
+            "Recapture planning bypassed a scripted objective's attraction restriction.");
+        True(ObjectiveEligibilityCore.ShouldInclude(true, true, false, true),
+            "A native-authorized scripted objective was excluded.");
+    }
+
+    private static void DistantReservesCanRetakeAWhileBRetainsAGarrison()
+    {
+        // All three squads have fallen back to B, outside A's assessment radius.
+        // B sorts first because it is still held. Previously B kept two squads
+        // and A failed the gate because it had no *nearby* free defenders.
+        var targets = new[]
+        {
+            new ObjectiveCapacityInput(2, Pressured: false, EnemySecured: false),
+            new ObjectiveCapacityInput(1, Pressured: false, EnemySecured: true),
+        };
+        var capacities = ObjectiveCounterAttackPlanCore.BuildCapacities(3, targets, attacking: false);
+        Equal(1, capacities[2], "B did not retain its core garrison.");
+        Equal(2, capacities[1], "Quiet B hoarded the surplus needed for the counter-attack on A.");
+
+        var support = new[]
+        {
+            new CounterAttackSquadSupport(false, false, false, false), // B's garrison
+            new CounterAttackSquadSupport(false, true, false, false),
+            new CounterAttackSquadSupport(false, true, false, false),
+        };
+        var strength = ObjectiveCounterAttackPlanCore.AssessStrength(support);
+        Equal(new CounterAttackStrength(2, 2), strength,
+            "Assigned distant reinforcements did not count, or B's garrison was double-booked.");
+        var canAttack = ObjectiveCounterAttackPlanCore.ShouldCounterAttack(
+            strength.SupportingSquads, strength.ManeuverSquads, 1, false, true);
+        True(canAttack, "Available reinforcements could not counter-attack a fresh loss.");
+        SequenceEqual(new[] { 2, 1 }, ObjectiveCounterAttackPlanCore.SelectCounterAttackTargets(new[]
+        {
+            new CounterAttackCandidate(2, false, true),
+            new CounterAttackCandidate(1, true, canAttack),
+        }), "A disappeared from the plan after the defenders regrouped at B.");
+    }
+
+    private static void CounterAttackCommitmentSurvivesContact()
+    {
+        foreach (var nearby in new[] { false, true })
+        {
+            var strength = ObjectiveCounterAttackPlanCore.AssessStrength(new[]
+            {
+                new CounterAttackSquadSupport(nearby, true, true, true),
+                new CounterAttackSquadSupport(nearby, true, true, true),
+            });
+            Equal(new CounterAttackStrength(2, 2), strength,
+                "Existing attackers lost commitment on contact, or nearby attackers were counted twice.");
+            True(ObjectiveCounterAttackPlanCore.ShouldCounterAttack(
+                    strength.SupportingSquads, strength.ManeuverSquads, 1, false, false),
+                "A viable counter-attack recalled its squads as soon as they engaged.");
+            False(ObjectiveCounterAttackPlanCore.ShouldCounterAttack(
+                    strength.SupportingSquads, strength.ManeuverSquads, 10, false, false),
+                "Commitment ignored a newly overwhelming hostile force.");
+        }
+    }
+
+    private static void CounterAttackAssessmentDoesNotBorrowOtherGarrisons()
+    {
+        var strength = ObjectiveCounterAttackPlanCore.AssessStrength(new[]
+        {
+            new CounterAttackSquadSupport(true, false, false, false), // nearby B garrison
+            new CounterAttackSquadSupport(false, false, false, true), // committed elsewhere
+            new CounterAttackSquadSupport(false, true, true, false), // engaged at another point
+        });
+        Equal(new CounterAttackStrength(1, 0), strength,
+            "An unassigned garrison or unavailable new reinforcement counted as a maneuver squad.");
+        False(ObjectiveCounterAttackPlanCore.ShouldCounterAttack(
+                strength.SupportingSquads, strength.ManeuverSquads, 0, false, false),
+            "An empty point was attacked with no available assigned squad.");
+    }
+
+    private static void SingleSquadCanReclaimAnUnopposedPoint()
+    {
+        True(ObjectiveCounterAttackPlanCore.ShouldCounterAttack(1, 1, 0, false, false),
+            "An unopposed lost point required two squads to reclaim.");
+        False(ObjectiveCounterAttackPlanCore.ShouldCounterAttack(1, 0, 0, false, false),
+            "A local but unavailable squad justified an unopposed recapture.");
+    }
+
+    private static void RecaptureReinforcementsPreservePressuredGarrisons()
+    {
+        var targets = new[]
+        {
+            new ObjectiveCapacityInput(2, Pressured: true, EnemySecured: false),
+            new ObjectiveCapacityInput(1, Pressured: false, EnemySecured: true),
+        };
+        var capacities = ObjectiveCounterAttackPlanCore.BuildCapacities(3, targets, attacking: false);
+        Equal(2, capacities[2], "A recapture stripped a pressured held point's reinforcement.");
+        Equal(1, capacities[1], "The recapture did not preserve its baseline squad.");
+
+        targets[0] = targets[0] with { Pressured = false };
+        capacities = ObjectiveCounterAttackPlanCore.BuildCapacities(2, targets, attacking: false);
+        Equal(1, capacities[2], "A recapture took the last garrison from a quiet point.");
+        Equal(2, capacities.Values.Sum(), "Capacity allocation invented or lost a squad.");
     }
 
     private static void DefenderRecaptureCapacityCapsAtTwoAndProtectsEveryOtherObjective()

@@ -6,9 +6,16 @@ ER2RealismOverhaul is built around the rough edges that become hard to ignore af
 
 The goal is to fix those moments without replacing the game underneath them. This is not a health or damage multiplier mod; Easy Red 2's missions, armour system, and basic damage model remain intact.
 
-> **Current release:** 1.1.7
+> **Current release:** 1.1.8
 >
 > **Compatibility:** Tested with Easy Red 2 2.1.0, Steam public-branch build `25255578` (September 11, 2026). Versions 1.1.3 and earlier do not work on 2.1.0.
+
+## What's new in 1.1.8
+
+- Defenders can retake active captured objectives using available reinforcements while retaining garrisons at held points. Counterattack orders survive contact, and objective planning now runs every six seconds.
+- AI emplacement staffing respects editor and mission-script locks, including a lock applied while a soldier is approaching the gun.
+- Mass parachute drops now descend about 30% more slowly, with individual descent speeds, wind response, and smooth canopy sway. Nearby parachutes share gradual gusts while spreading naturally; aircraft exit momentum applies to AI as well as players.
+- Binoculars now have overlapping eyepieces, soft optical edge shading, subtle rim reflections, and a short settling motion when raised.
 
 ## What's new in 1.1.7
 
@@ -65,7 +72,7 @@ The goal is to fix those moments without replacing the game underneath them. Thi
 ## What's new in 1.1.0
 
 - Infantry posture and movement ownership were reworked to stop crouch/stand, crouch/prone, run/stop, inch-forward, and aim/lower loops.
-- Attackers now use five-second crouched bounds under fire and configurable 5–15 second firing holds, while the commander reassesses every 24 seconds without interrupting unchanged movement.
+- Attackers now use five-second crouched bounds under fire and configurable 5–15 second firing holds, while unchanged commander orders no longer interrupt movement.
 - Cover slots remain exclusive through brief native-state flicker, and overlapping soldiers separate instead of sharing one position.
 - AI can reacquire recent shooters concealed by vegetation without seeing through solid cover, and confirmed sight loss now requires fresh visual reacquisition.
 - Added **AT Launcher Accuracy**, renamed **Awareness** to **Perception**, and preserved vehicle reboarding after AI repairs.
@@ -149,7 +156,7 @@ Quick Setup and the AI / Core Behavior page also expose centered 0.5x-1.5x slide
 
 The F10 menu also lets you rebind the **Binoculars Key**, **Free Look Key**, and **Compass Key**: select a binding, press the desired key, then Apply to save it. Defaults remain **Caps Lock**, either **Alt** key, and **K**.
 
-On foot in first person, press **Caps Lock** to toggle the clean 10x binocular view and hold either **Alt** key for a 200-degree freelook arc. Press **K** during gameplay to show the scrolling compass band for five seconds. The F10 menu includes magnification, freelook arc, compass units, and always-visible compass settings.
+On foot in first person, press **Caps Lock** to toggle the 10x binocular view with overlapping eyepieces, soft optical edge shading, subtle rim reflections, and a short eye-relief settling motion and hold either **Alt** key for a 200-degree freelook arc. Press **K** during gameplay to show the scrolling compass band for five seconds. The F10 menu includes magnification, freelook arc, compass units, and always-visible compass settings.
 
 ### Visual AI diagnostics
 

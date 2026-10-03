@@ -2,6 +2,15 @@
 
 This file records only concrete, player-visible changes in each released version of Easy Red 2 Realism Overhaul. It is a living description of the shipped mod: superseded wording is replaced with the final behavior, and changes that are removed or reverted are deleted instead of retained as historical notes.
 
+## 1.1.8 - 2026-10-03
+
+Easy Red 2 compatibility: version 2.1.0, Steam public branch build `25255578` (September 11, 2026).
+
+- Fixed defenders abandoning captured objectives because the game's attraction filter removed them before counterattack planning. Enabled capture and frontline objectives in the current phase remain eligible for recapture; scripted restrictions and retired objectives remain respected. Available assigned reinforcements count even beyond the local assessment radius, quiet held points can supply a surplus squad while keeping a garrison, and pressured garrisons retain their reinforcement. Counterattack assignments persist when contact begins, subject to the force assessment and individual combat safety, and a single available squad can reclaim an unopposed point. Objective planning now runs every six seconds instead of 24.
+- AI emplacement staffing now respects editor and mission-script locks when selecting guns, maintaining assignments, and boarding. A gun locked while its assigned soldier is approaching is released instead of boarded through the direct gunner-seat path; unlocked vehicle guns remain eligible when their physics are disabled.
+- Mass parachute drops descend about 30% more slowly, with modest individual variation in descent speed, wind response, and smooth canopy sway. Nearby parachutes share gradual gusts while developing different landing positions, and gentle sway remains on calm maps. Players and AI both inherit a brief reduced portion of aircraft exit momentum; native landing behavior and host authority are retained.
+- Reworked the binocular overlay with overlapping eyepieces, soft optical edge shading, faint rim reflections, and a short eye-relief settling motion. The central image stays clear, the eyepieces retain their proportions across screen aspect ratios, and the outer blackout remains continuous.
+
 ## 1.1.7 - 2026-09-22
 
 Easy Red 2 compatibility: version 2.1.0, Steam public branch build `25255578` (September 11, 2026).
@@ -87,7 +96,7 @@ Easy Red 2 compatibility: version 2.0.9 Stable, Steam public branch build `24512
 - Suppressed infantry remain crouched until suppression drops below the release threshold, preventing stance cycling while incoming fire decays.
 - Target memory now requires a fresh visual reacquisition after confirmed sight loss, while recent gunfire can still reveal crouched or prone shooters concealed by vegetation without seeing through solid cover.
 - Attackers now hold to fire after contact and each bound, avoid abandoning clearly better firing positions, and advance in five-second crouched bounds under fire. **Attack Firing Hold Seconds** is adjustable from 5–15 seconds and defaults to 7.
-- The objective commander now reassesses every 24 seconds, and unchanged plans no longer interrupt soldiers already moving.
+- Unchanged objective commander plans no longer interrupt soldiers already moving.
 - Stalled paths retry once before being abandoned; short spacing corrections no longer cause repeated run/stop or stance changes.
 - Cover slots remain exclusive through brief native-state flicker, and soldiers contesting the same reserved cover slot separate instead of sharing it.
 - Renamed **Awareness** to **Perception**; saved values migrate automatically, and the setting now also affects when a visible enemy stops an advance.
@@ -98,7 +107,7 @@ Easy Red 2 compatibility: version 2.0.9 Stable, Steam public branch build `24512
 Easy Red 2 compatibility: version 2.0.8 Stable, Steam public branch build `24435722` (July 29, 2026).
 
 - AI suppression now follows a graduated response ladder within the game's 100-point suppression range. A nearby projectile impact adds at most 12 points, so isolated rifle rounds cause only slight awareness loss, roughly three rapid impacts reach the crouched-but-fighting band, and about seven can reach the 80-point pin threshold. Penalties steepen toward that pin point; infantry and exposed mounted gunners recover below 45 points. Casualty shock and strong blasts remain meaningful, while one lethal rifle event beside a defender does not trigger the brief no-fire pin reaction.
-- Parachutes now drift gently at a capped fraction of the map wind. Players jumping from moving aircraft briefly retain a reduced portion of forward momentum, and multiplayer drift is host-authoritative.
+- Parachutes drift gently at a capped fraction of the map wind, and multiplayer drift is host-authoritative.
 - Ground-vehicle turrets and direct-fire static weapons now use War Thunder-style third-person point aiming with separate camera and bore-direction indicators. The indicators can be hidden independently without disabling the controls. An independent gunner-view option holds local gun elevation in an unzoomed first-person vehicle periscope while retaining horizontal traverse, preventing the cannon or coaxial machine gun from vertically point-aiming there; hull movement still moves the bore naturally. Right-click gunsights retain native reticles and independently offer stabilized or unstabilized aiming.
 - Ground-vehicle third-person freelook no longer moves the turret. Releasing freelook smoothly returns the camera to the commanded aim direction.
 - Added optional aircraft mouse point aiming with a third-person command circle, smooth chase camera, and smooth C-key freelook. The point-aim camera can orbit freely around the aircraft instead of stopping at the rear edge, while the flight target remains bounded to the aircraft's forward command hemisphere. It is confined to the selected mouse-and-keyboard Realistic control scheme, so enabling the option does not replace Simplified flight or its camera. Holding the configurable hold-breath key during freelook provides 0.5x-10x zoom in first- and third-person, defaulting to 4x.

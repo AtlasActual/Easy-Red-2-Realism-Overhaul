@@ -17,24 +17,36 @@ internal static class ParachuteDrift
 
     private static readonly Dictionary<int, PendingMomentum> PendingMomentumBySoldier = new();
     private static readonly Dictionary<int, ActiveMomentum> ActiveMomentumByParachute = new();
+    private static readonly Dictionary<int, CanopyState> Canopies = new();
+    private static float _nextPendingCleanup;
     private static bool _loggedFailure;
 
     private readonly record struct PendingMomentum(Vector3 Velocity, float CapturedAt);
     private readonly record struct ActiveMomentum(Vector3 Velocity, float StartedAt);
+    private readonly record struct CanopyState(ParachuteProfile Profile, float StartedAt);
+    internal readonly record struct DescentStep(bool Active, float Height, float Scale);
 
     internal static void CaptureAircraftExit(Soldier soldier, Seats seat, Vehicle exitingFrom)
     {
         if (soldier == null || seat != null || exitingFrom == null ||
-            !MultiplayerAuthority.CanMutateGameplay() || !soldier.IsPlayer())
+            !MultiplayerAuthority.CanMutateGameplay())
         {
             return;
         }
 
-        if (exitingFrom is not VehiclePlane && exitingFrom is not CargoPlane && exitingFrom is not Glider)
+        if (!Il2CppTypeTests.Is<VehiclePlane>(exitingFrom) &&
+            !Il2CppTypeTests.Is<CargoPlane>(exitingFrom) && !Il2CppTypeTests.Is<Glider>(exitingFrom))
             return;
 
         try
         {
+            if (Time.time >= _nextPendingCleanup)
+            {
+                _nextPendingCleanup = Time.time + 10f;
+                foreach (var entry in PendingMomentumBySoldier.ToArray())
+                    if (Time.time - entry.Value.CapturedAt > PendingMomentumLifetime)
+                        PendingMomentumBySoldier.Remove(entry.Key);
+            }
             var rigidbody = exitingFrom.GetRigidbody();
             var velocity = rigidbody != null
                 ? rigidbody.velocity
@@ -58,7 +70,8 @@ internal static class ParachuteDrift
 
     internal static void AttachAircraftMomentum(Vehicle vehicle, Soldier soldier)
     {
-        if (vehicle is not VehicleParachute parachute || soldier == null ||
+        var parachute = Il2CppTypeTests.As<VehicleParachute>(vehicle);
+        if (parachute == null || soldier == null ||
             !MultiplayerAuthority.CanMutateGameplay())
         {
             return;
@@ -82,16 +95,57 @@ internal static class ParachuteDrift
         }
     }
 
-    internal static void Apply(VehicleParachute parachute)
+    internal static DescentStep Apply(VehicleParachute parachute)
     {
-        if (parachute == null || !MultiplayerAuthority.CanMutateGameplay())
-            return;
+        if (parachute == null || !MultiplayerAuthority.CanMutateGameplay() ||
+            parachute.phase != 0 || !parachute.isMoving)
+            return default;
 
         try
         {
-            var displacement = GetAircraftMomentumDisplacement(parachute) + GetWindDisplacement();
+            int id = parachute.GetInstanceID();
+            if (!Canopies.TryGetValue(id, out var canopy))
+            {
+                canopy = new CanopyState(ParachuteDriftCore.CreateProfile(id), Time.time);
+                Canopies[id] = canopy;
+            }
+            var position = parachute.transform.position;
+            float age = Time.time - canopy.StartedAt;
+            var wind = GetWindVelocity();
+            var drift = ParachuteDriftCore.HorizontalVelocity(canopy.Profile,
+                new System.Numerics.Vector2(wind.x, wind.z),
+                new System.Numerics.Vector2(position.x, position.z), Time.time, age);
+            var displacement = GetAircraftMomentumDisplacement(parachute) +
+                new Vector3(drift.X, 0f, drift.Y) * Time.fixedDeltaTime;
             if (displacement.sqrMagnitude > 0.000001f)
                 parachute.transform.Translate(displacement, Space.World);
+            return new DescentStep(true, position.y,
+                ParachuteDriftCore.DescentScale(canopy.Profile, age));
+        }
+        catch (Exception ex)
+        {
+            LogFailure(ex);
+            return default;
+        }
+    }
+
+    internal static void FinishDescent(VehicleParachute parachute, DescentStep step)
+    {
+        if (!step.Active || parachute == null)
+            return;
+        try
+        {
+            // Native MoveDown owns terrain/building contact and sets phase to 1
+            // on landing. Never alter its landing snap or ejection sequence.
+            if (parachute.phase != 0)
+            {
+                Remove(parachute);
+                return;
+            }
+            var position = parachute.transform.position;
+            float descent = step.Height - position.y;
+            if (float.IsFinite(descent) && descent > 0f)
+                parachute.transform.Translate(Vector3.down * (descent * (step.Scale - 1f)), Space.World);
         }
         catch (Exception ex)
         {
@@ -101,8 +155,12 @@ internal static class ParachuteDrift
 
     internal static void Remove(Vehicle vehicle)
     {
-        if (vehicle is VehicleParachute parachute)
+        var parachute = Il2CppTypeTests.As<VehicleParachute>(vehicle);
+        if (parachute != null)
+        {
             ActiveMomentumByParachute.Remove(parachute.GetInstanceID());
+            Canopies.Remove(parachute.GetInstanceID());
+        }
     }
 
     private static Vector3 GetAircraftMomentumDisplacement(VehicleParachute parachute)
@@ -121,7 +179,7 @@ internal static class ParachuteDrift
         return momentum.Velocity * (Mathf.Clamp01(strength) * Time.fixedDeltaTime);
     }
 
-    private static Vector3 GetWindDisplacement()
+    private static Vector3 GetWindVelocity()
     {
         var stack = VolumeManager.instance?.stack;
         var weather = stack?.GetComponent<ER2VolumetricCloudsVolume>();
@@ -129,6 +187,9 @@ internal static class ParachuteDrift
             return Vector3.zero;
 
         var direction = weather.windDirection.value;
+        if (!float.IsFinite(direction.x) || !float.IsFinite(direction.y) ||
+            !float.IsFinite(weather.windSpeed.value))
+            return Vector3.zero;
         var speed = Mathf.Clamp(
             weather.windSpeed.value * WindDriftFraction,
             0f,
@@ -137,7 +198,7 @@ internal static class ParachuteDrift
             return Vector3.zero;
 
         direction.Normalize();
-        return new Vector3(direction.x, 0f, direction.y) * (speed * Time.fixedDeltaTime);
+        return new Vector3(direction.x, 0f, direction.y) * speed;
     }
 
     private static bool IsFinite(Vector3 value)
@@ -182,10 +243,14 @@ internal static class ParachuteAircraftMomentumAttachPatch
 internal static class ParachuteMoveDownPatch
 {
     [HarmonyPrefix]
-    private static void Prefix(VehicleParachute __instance)
+    private static void Prefix(VehicleParachute __instance, out ParachuteDrift.DescentStep __state)
     {
-        ParachuteDrift.Apply(__instance);
+        __state = ParachuteDrift.Apply(__instance);
     }
+
+    [HarmonyPostfix]
+    private static void Postfix(VehicleParachute __instance, ParachuteDrift.DescentStep __state)
+        => ParachuteDrift.FinishDescent(__instance, __state);
 }
 
 [HarmonyPatch(typeof(Vehicle), "OnDestroy")]

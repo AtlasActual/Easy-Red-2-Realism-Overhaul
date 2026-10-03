@@ -1,6 +1,6 @@
 [h1]Easy Red 2 Realism Overhaul[/h1]
 
-[b]Current mod version:[/b] 1.1.7
+[b]Current mod version:[/b] 1.1.8
 [b]Compatible game version:[/b] 2.1.0 (Steam build 25255578)
 [b]Download:[/b] [url=https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul/releases/]Easy Red 2 Realism Overhaul releases[/url]
 
@@ -69,7 +69,7 @@ This is not a health or damage multiplier mod, and it does not turn the AI into 
 
 [*][b]Physical player-aircraft flight.[/b] Locally controlled Realistic aircraft use native aerodynamics with tuned power, drag, and control authority. Defaults are 0.714x speed, 1x pitch, 1.225x roll, 2x rudder, 4.87/10 engine power, and 1.423x drag. AI and remote-player aircraft retain native flight physics.
 
-[*][b]Wind-driven parachutes.[/b] Parachutes drift with map wind and briefly retain momentum when the player jumps from a moving aircraft.
+[*][b]Wind-driven parachutes.[/b] Parachutes descend more slowly with individual wind response and smooth canopy sway. Players and AI briefly retain momentum when jumping from a moving aircraft.
 
 [*][b]Less intrusive battlefield information.[/b] The optional immersive world HUD can hide floating squad and marked-unit icons in the 3D view while preserving them on the tactical map. Allied multiplayer names remain available when other markers are hidden.
 
@@ -107,7 +107,7 @@ Players using the same mod version also receive the host's settings for the sess
 [*][b]Vehicle freelook.[/b] Holding the vehicle-look key moves only the camera. The weapon keeps its aim and the camera returns smoothly on release.
 [*][b]Aircraft mouse aiming and zoom.[/b] Optional mouse point aiming adds a third-person command circle and smooth chase camera. Hold vehicle look to freelook, then hold the configured hold-breath key for 0.5x-10x zoom in first or third person; default is 4x.
 [*][b]Tuned Realistic flight.[/b] Locally controlled human aircraft use the playtested flight settings; AI and remote-player aircraft remain native.
-[*][b]Parachute drift.[/b] Parachutes follow map wind and briefly retain momentum when jumping from a moving aircraft.
+[*][b]Parachute drift.[/b] Parachutes descend more slowly with individual wind response and smooth canopy sway, and briefly retain momentum when jumping from a moving aircraft.
 [*][b]Smarter tank facing.[/b] Tanks pivot only toward a visible enemy tank and stop once their frontal armour is within the configured facing arc.
 [/list]
 

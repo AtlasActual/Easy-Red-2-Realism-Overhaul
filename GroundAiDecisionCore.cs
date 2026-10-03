@@ -1820,7 +1820,24 @@ internal static class ObjectiveDefenseAreaCore
             MaximumHoldRadiusMeters);
 }
 
+internal static class ObjectiveEligibilityCore
+{
+    // The caller enumerates only the current phase's native AI objectives.
+    internal static bool ShouldInclude(
+        bool nativeCanAttractFaction,
+        bool defendingFaction,
+        bool activeCaptureTask,
+        bool scriptedObjective)
+        => nativeCanAttractFaction ||
+           defendingFaction && activeCaptureTask && !scriptedObjective;
+}
+
 internal readonly record struct ObjectiveCapacityInput(int Id, bool Pressured, bool EnemySecured);
+
+internal readonly record struct CounterAttackSquadSupport(
+    bool Nearby, bool Assigned, bool Engaged, bool AlreadyCommitted);
+
+internal readonly record struct CounterAttackStrength(int SupportingSquads, int ManeuverSquads);
 
 /// <summary>
 /// One recapture candidate for <see cref="ObjectiveCounterAttackPlanCore.SelectCounterAttackTargets"/>.
@@ -1838,18 +1855,17 @@ internal readonly record struct CounterAttackCandidate(int ObjectiveId, bool Ene
 /// strip every other objective; the excess is handed to the remaining
 /// targets so no squad goes unassigned. Every friendly-secured or neutral
 /// target keeps its guaranteed baseline of one squad throughout, since
-/// capacity is only ever added to those targets here, never removed below
-/// the baseline. The attacker branch is returned untouched.
+/// capacity never falls below the baseline. Quiet held points can donate a
+/// surplus squad to bring a recapture up to two. The attacker branch is returned
+/// untouched.
 /// </summary>
 internal static class ObjectiveCounterAttackPlanCore
 {
     internal const int MaxCounterAttackSquadsPerObjective = 2;
 
     /// <summary>
-    /// Shared assessment radius: how far from a lost objective a defender or
-    /// hostile squad counts toward <see cref="ShouldCounterAttack"/>. The caller
-    /// (the Unity-dependent planner) and the deterministic tests both key off
-    /// this one value so they cannot silently drift apart.
+    /// Radius for local support and hostile strength. Assigned reinforcements
+    /// can also contribute from outside it through <see cref="AssessStrength"/>.
     /// </summary>
     internal const float CounterAttackAssessmentRadiusMeters = 125f;
 
@@ -1860,6 +1876,26 @@ internal static class ObjectiveCounterAttackPlanCore
     private const float StrongAdvantageThreshold = 1.35f;
     private const float MarginalAdvantageThreshold = 1.0f;
     private const int MarginalAdvantageMinimumFreeSquads = 2;
+
+    internal static CounterAttackStrength AssessStrength(
+        IReadOnlyList<CounterAttackSquadSupport> squads)
+    {
+        var supporting = 0;
+        var maneuver = 0;
+        foreach (var squad in squads)
+        {
+            // Count the force we can actually send, even outside the local radius.
+            // Contact after departure does not turn an existing attack into a new
+            // launch requiring an idle squad. Tactical safety still controls motion.
+            var canManeuver = squad.Assigned && (!squad.Engaged || squad.AlreadyCommitted);
+            if (squad.Nearby || canManeuver)
+                supporting++;
+            if (canManeuver)
+                maneuver++;
+        }
+
+        return new CounterAttackStrength(supporting, maneuver);
+    }
 
     /// <summary>
     /// A fresh repulse is only a reason to hold off when hostiles are still
@@ -1876,8 +1912,9 @@ internal static class ObjectiveCounterAttackPlanCore
     /// <summary>
     /// Whether a defender should actually launch a counter-attack on a lost
     /// objective, instead of committing squads to every EnemySecured objective
-    /// unconditionally every planning cycle. A clear local advantage attacks at
-    /// once, a marginal advantage needs weight of numbers, and a bad local
+    /// unconditionally every planning cycle. Defender counts include available
+    /// assigned reinforcements approaching from outside the local radius. A clear
+    /// advantage attacks at once, a marginal advantage needs numbers, and a bad
     /// situation makes the defenders consolidate on what they still hold
     /// instead. Every input is plain data the caller already resolved, so this
     /// stays deterministic, Unity-free, and testable.
@@ -1891,6 +1928,11 @@ internal static class ObjectiveCounterAttackPlanCore
     {
         if (freeNearbyDefenderSquadCount <= 0)
             return false;
+
+        // A single available squad can reclaim an unopposed point. Requiring a
+        // two-squad marginal advantage here stranded empty points indefinitely.
+        if (nearbyHostileSquadCount <= 0)
+            return true;
 
         var score = nearbyDefenderSquadCount * FriendlyWeight /
                     MathF.Max(1f, nearbyHostileSquadCount * EnemyWeight);
@@ -1961,7 +2003,34 @@ internal static class ObjectiveCounterAttackPlanCore
 
         ApplyPressureReallocation(capacities, targets);
         CapCounterAttackCapacity(capacities, targets);
+        ReinforceCounterAttackCapacity(capacities, targets);
         return capacities;
+    }
+
+    private static void ReinforceCounterAttackCapacity(
+        Dictionary<int, int> capacities,
+        IReadOnlyList<ObjectiveCapacityInput> targets)
+    {
+        // A quiet held point needs its core garrison, but should not take every
+        // surplus squad while a recapture gets too few to pass the launch gate.
+        foreach (var target in targets.Where(target => target.EnemySecured))
+        {
+            if (capacities[target.Id] >= MaxCounterAttackSquadsPerObjective)
+                continue;
+
+            var donor = targets
+                .Where(candidate => !candidate.EnemySecured && !candidate.Pressured &&
+                                    capacities[candidate.Id] > 1)
+                .OrderByDescending(candidate => capacities[candidate.Id])
+                .ThenBy(candidate => candidate.Id)
+                .Select(candidate => (ObjectiveCapacityInput?)candidate)
+                .FirstOrDefault();
+            if (!donor.HasValue)
+                break;
+
+            capacities[donor.Value.Id]--;
+            capacities[target.Id]++;
+        }
     }
 
     private static void ApplyPressureReallocation(

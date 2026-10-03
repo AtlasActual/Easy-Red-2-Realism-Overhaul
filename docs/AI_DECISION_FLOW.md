@@ -2,8 +2,9 @@
 
 This describes the ground infantry decision changes made on September 16, 2026.
 It maps the current director and contact-response code, rather than proposing a
-replacement for the game's entire AI. Vehicle combat, weapon selection, perception,
-and objective allocation retain their existing policies.
+replacement for the game's entire AI. Vehicle combat, weapon selection, and perception
+retain their existing policies. The objective recovery update below describes
+the subsequent October 3 change to objective allocation.
 
 ## Priority conflicts corrected
 
@@ -141,3 +142,52 @@ enemy to verify reassessment, then clear the contact and verify ordinary movemen
 recovery. Also observe a pinned boarding soldier recovering and a flame
 escape occurring during a reload. The build output alone does not validate native
 pathfinding, animations, or battlefield performance.
+
+## Objective recovery update — October 3, 2026
+
+The native `MissionObjective.CanAttractFaction` rejects secured objectives. Using
+it as an unconditional filter removed captured points before the counterattack
+planner could assess them. Inspection of the installed game's native methods also
+confirmed that `ActiveObjectives(false)` enumerates the current phase and that
+`MissionTaskConquerArea.UpdateTaskStatus` can reduce capture progress when defenders
+occupy the area.
+
+Defenders now also consider enabled, ordinary capture and frontline tasks within
+that active list. Disabled tasks, completed non-capture objectives, and scripted
+objectives rejected by their own attraction rules do not gain this exception.
+The planner never adds objectives from a completed phase.
+
+Squad allocation now precedes counterattack assessment. The assessment counts local
+support plus the available squads actually assigned to approach the lost point,
+including those outside the 125 m local radius. A quiet held point can donate a
+surplus squad to bring a counterattack up to two; each other selected objective
+keeps at least one squad, and a pressured garrison does not donate that extra
+reinforcement. Held objectives take priority when there are too few squads to
+cover every point. Assigned attackers remain committed when contact begins, but
+the strength assessment can still reject an overwhelming enemy force. An unopposed
+point needs only one available assigned squad. A quiet cover relocation no longer
+makes a new reinforcement unavailable.
+
+Planning runs every 6 seconds instead of 24. Unchanged orders still pass through
+the existing continuity check, and individual suppression, close-contact, and
+hazard responses still control movement. This reduces order delay; it does not
+increase soldiers' movement speed.
+
+Regression scenarios cover secured-point eligibility, scripted and disabled-task
+exclusions, reinforcements approaching A from B, commitment during contact, a lone
+squad reclaiming an unopposed point, and preservation of pressured garrisons. The
+187-scenario runner and Release build passed against the local game assemblies.
+Battlefield behavior remains to be checked in game:
+
+1. In a phase with A and B, capture A while B remains held and leave at least three
+   autonomous defending squads alive. Confirm that a viable counterattack returns
+   toward A while B retains a garrison, including when all defenders start more
+   than 125 m from A.
+2. Let those attackers make contact. Confirm they keep their assignment unless the
+   hostile balance becomes overwhelming, and that pinning and immediate danger
+   still interrupt movement normally.
+3. Leave A empty with only two defending squads available. Confirm one can return
+   while the other holds B. Then pressure B and confirm its extra reinforcement is
+   preserved when available.
+4. Advance the mission phase and check a scripted objective with restricted faction
+   attraction. Confirm no counterattack is sent to a retired or excluded point.
