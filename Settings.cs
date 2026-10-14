@@ -377,7 +377,7 @@ internal static class Settings
             new ConfigDescription("Minimum radius of the melee hit capsule. The base game uses 0.25 m; a modest increase forgives small animation and collider misalignments.", new AcceptableValueRange<float>(0.25f, 1f)));
 
         ObjectiveCoordinationEnabled = config.Bind("AI - Objective coordination", "Enabled", true,
-            "Spreads AI attackers across as many active objectives as their squad count can support, keeps one pressure squad on each direct attack, and sends every additional squad on alternating wide flanks. Keeps defenders distributed around nearby cover at every active objective. Uses native synchronized squad orders and never controls player-led or mission-scripted squads.");
+            "Spreads AI attackers across active objectives, leaves a garrison on captured ground when squads are available, and sends surplus assault squads on alternating wide flanks. Keeps defenders distributed around nearby cover at every active objective. Uses native synchronized squad orders and never controls player-led or mission-scripted squads.");
 
         StaticWeaponStaffingEnabled = config.Bind("AI - Defense", "Enabled", true,
             "Proactively sends autonomous AI squads on defend orders to staff viable loaded static weapons in every active hold area, regardless of which faction began the battle on defense.");

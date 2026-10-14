@@ -9,9 +9,10 @@ namespace ER2RealismOverhaul;
 /// <summary>
 /// A deliberately small objective-order layer. It spreads autonomous infantry
 /// squads across active objectives, keeps one squad on each attack's pressure axis
-/// while the others alternate wide flanks, and keeps at least one defending squad on every objective when
-/// enough squads exist. It does not stage attacks, reserve units, claim command
-/// channels, or suppress Easy Red 2's native squad-leader routine.
+/// while the others alternate wide flanks, and keeps a garrison on held objectives
+/// for both sides when enough squads exist. Native leader bookkeeping still
+/// runs; only its objective reselection and order redirection are guarded for
+/// assigned attackers. It does not stage attacks or claim command channels.
 /// </summary>
 internal static class ObjectiveCoordination
 {
@@ -27,6 +28,7 @@ internal static class ObjectiveCoordination
     private const float CounterAttackRecentLossSeconds = 30f;
 
     private static readonly Dictionary<int, OrderStamp> LastOrders = new();
+    private static readonly Dictionary<int, AttackerTaskAssignment> AttackerTasks = new();
     private static readonly Dictionary<int, float> ObjectiveProgress = new();
     private static readonly Dictionary<int, float> ObjectivePressureUntil = new();
     private static readonly Dictionary<string, int> LastPlanSignatures =
@@ -69,6 +71,7 @@ internal static class ObjectiveCoordination
     internal static void ResetBattle()
     {
         LastOrders.Clear();
+        AttackerTasks.Clear();
         ObjectiveProgress.Clear();
         ObjectivePressureUntil.Clear();
         LastPlanSignatures.Clear();
@@ -80,6 +83,9 @@ internal static class ObjectiveCoordination
 
     private static void Plan(BattleManager manager, float now)
     {
+        // A native-order guard is valid only for this planning snapshot. Squads
+        // absent from the next plan immediately return to native task selection.
+        AttackerTasks.Clear();
         var battle = BattleManager.GetCurrentBattleData();
         if (battle == null)
             return;
@@ -97,12 +103,6 @@ internal static class ObjectiveCoordination
                 continue;
 
             var attacking = battle.IsInvaderFaction(pair.Key);
-            if (attacking)
-                objectives.RemoveAll(objective => objective.FriendlySecured);
-
-            if (objectives.Count == 0)
-                continue;
-
             PlanFaction(pair.Key, pair.Value, objectives, attacking, now, battle, squadsByFaction);
         }
 
@@ -196,17 +196,16 @@ internal static class ObjectiveCoordination
                 continue;
 
             // Native CanAttractFaction rejects secured objectives, including
-            // capture points that defenders can still contest in this phase.
+            // capture points that either side can still contest in this phase.
             // Only extend eligibility for enabled, ordinary capture tasks: a
             // completed destruction task or a script's faction restriction must
-            // never become an autonomous counter-attack destination.
+            // never become an autonomous hold or counter-attack destination.
             var task = objective.missionTask;
             var activeCaptureTask = task != null && task.IsTaskEnabled() &&
                 (Il2CppTypeTests.Is<MissionTaskConquerArea>(task) ||
                  Il2CppTypeTests.Is<MissionTaskPushFrontline>(task));
             if (!ObjectiveEligibilityCore.ShouldInclude(
                     objective.CanAttractFaction(faction),
-                    battle.IsDefenderFaction(faction),
                     activeCaptureTask,
                     Il2CppTypeTests.Is<MissionObjectiveScripted>(objective)))
                 continue;
@@ -247,7 +246,8 @@ internal static class ObjectiveCoordination
             var radius = float.IsFinite(objective.objectiveRadius)
                 ? Mathf.Max(12f, objective.objectiveRadius)
                 : 30f;
-            result.Add(new ObjectiveInfo(id, position, radius, friendlySecured, enemySecured, pressured));
+            result.Add(new ObjectiveInfo(
+                id, position, radius, friendlySecured, enemySecured, pressured, objective));
         }
 
         return result;
@@ -328,10 +328,19 @@ internal static class ObjectiveCoordination
 
         var hostileSquads = CollectHostileSquads(battle, faction, squadsByFaction);
 
-        var targetCount = attacking
-            ? Math.Min(objectives.Count, Math.Max(1, (squads.Count + 1) / 2))
-            : Math.Min(objectives.Count, squads.Count);
-        var targets = objectives.Take(targetCount).ToList();
+        List<ObjectiveInfo> targets;
+        if (attacking)
+        {
+            var selectedIds = new HashSet<int>(ObjectiveAttackPlanCore.SelectTargets(
+                squads.Count,
+                objectives.Select(objective => new ObjectiveAttackTarget(
+                    objective.Id, objective.FriendlySecured)).ToList()));
+            targets = objectives.Where(objective => selectedIds.Contains(objective.Id)).ToList();
+        }
+        else
+        {
+            targets = objectives.Take(Math.Min(objectives.Count, squads.Count)).ToList();
+        }
         var capacities = BuildCapacities(squads.Count, targets, attacking);
         var assignments = AssignSquads(squads, targets, capacities);
         if (!attacking)
@@ -368,7 +377,22 @@ internal static class ObjectiveCoordination
 
             assigned.Sort((left, right) => left.Id.CompareTo(right.Id));
 
-            if (ObjectiveCounterAttackPlanCore.ShouldIssueAttackOrder(attacking, target.EnemySecured))
+            if (attacking)
+            {
+                var task = target.NativeObjective.missionTask?.TryCast<SquadTask>();
+                if (task != null)
+                {
+                    foreach (var squad in assigned)
+                    {
+                        AttackerTasks[squad.Id] = new AttackerTaskAssignment(
+                            target.Id, target.NativeObjective, task);
+                        squad.Squad.currentTask = task;
+                    }
+                }
+            }
+
+            if (ObjectiveCounterAttackPlanCore.ShouldIssueAttackOrder(
+                    attacking, target.EnemySecured, target.FriendlySecured))
             {
                 IssueAttackWave(assigned, target);
                 continue;
@@ -384,6 +408,48 @@ internal static class ObjectiveCoordination
         }
 
         TracePlanChange(faction, attacking, squads.Count, targets.Count, flankCount, assignments);
+    }
+
+    /// <summary>
+    /// Keeps native leader bookkeeping on the objective selected for this squad.
+    /// A captured task otherwise triggers native reselection, and an offset
+    /// attack waypoint otherwise looks like a route to the wrong objective.
+    /// Only the scoped native leader task/order helpers consult this guard.
+    /// </summary>
+    internal static bool TryBindAttackerTask(Squad squad)
+    {
+        if (!Settings.ObjectiveCoordinationEnabled.Value || _failedThisBattle ||
+            Time.time >= _nextPlanAt || !MultiplayerAuthority.CanMutateGameplay() ||
+            !BattleManager.IsBattleActive() || squad == null ||
+            !AttackerTasks.TryGetValue(SquadIdentity.GetSquadId(squad), out var assignment))
+        {
+            return false;
+        }
+
+        var battle = BattleManager.GetCurrentBattleData();
+        if (battle == null || !TryDescribeSquad(squad, battle, out var info) ||
+            !battle.IsInvaderFaction(info.Faction) ||
+            !LastOrders.TryGetValue(info.Id, out var order) ||
+            order.ObjectiveId != assignment.ObjectiveId)
+        {
+            return false;
+        }
+
+        var expectedOrder = order.Order == CoordinatedOrder.Defend
+            ? Order.defend
+            : Order.attackFromSide;
+        if (assignment.Objective == null)
+            return false;
+
+        var task = assignment.Objective.missionTask;
+        if (squad.order != expectedOrder || task == null || !task.IsTaskEnabled() ||
+            task.Pointer != assignment.Task.Pointer)
+        {
+            return false;
+        }
+
+        squad.currentTask = assignment.Task;
+        return true;
     }
 
     private static List<SquadInfo> CollectHostileSquads(
@@ -538,6 +604,14 @@ internal static class ObjectiveCoordination
         List<ObjectiveInfo> targets,
         bool attacking)
     {
+        if (attacking)
+        {
+            return ObjectiveAttackPlanCore.BuildCapacities(
+                squadCount,
+                targets.Select(objective => new ObjectiveAttackTarget(
+                    objective.Id, objective.FriendlySecured)).ToList());
+        }
+
         var capacityInputs = targets
             .Select(objective => new ObjectiveCapacityInput(
                 objective.Id, objective.Pressured, objective.EnemySecured))
@@ -985,7 +1059,13 @@ internal static class ObjectiveCoordination
         float Radius,
         bool FriendlySecured,
         bool EnemySecured,
-        bool Pressured);
+        bool Pressured,
+        MissionObjective NativeObjective);
+
+    private readonly record struct AttackerTaskAssignment(
+        int ObjectiveId,
+        MissionObjective Objective,
+        SquadTask Task);
 
     private readonly record struct DefensiveCoverCandidate(
         IntPtr Id,

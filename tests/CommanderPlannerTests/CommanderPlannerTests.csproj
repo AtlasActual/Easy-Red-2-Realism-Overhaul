@@ -13,6 +13,7 @@
     <Compile Include="ParachuteDriftScenarios.cs" />
     <Compile Include="..\..\ParachuteDriftCore.cs" Link="ParachuteDriftCore.cs" />
     <Compile Include="AiPriorityScenarios.cs" />
+    <Compile Include="ObjectiveAttackScenarios.cs" />
     <Compile Include="AircraftAerodynamicsScenarios.cs" />
     <Compile Include="AircraftCameraScenarios.cs" />
     <Compile Include="AircraftMouseInstructorScenarios.cs" />

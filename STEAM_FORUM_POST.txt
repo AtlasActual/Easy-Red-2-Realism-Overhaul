@@ -1,6 +1,6 @@
 [h1]Easy Red 2 Realism Overhaul[/h1]
 
-[b]Current mod version:[/b] 1.1.8
+[b]Current mod version:[/b] 1.1.9
 [b]Compatible game version:[/b] 2.1.0 (Steam build 25255578)
 [b]Download:[/b] [url=https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul/releases/]Easy Red 2 Realism Overhaul releases[/url]
 
@@ -33,7 +33,7 @@ This is not a health or damage multiplier mod, and it does not turn the AI into 
 
 [*][b]Defenders use prepared ground.[/b] Defensive squads deliberately occupy and hold protective trenches, buildings, windows, and fortified positions. They value both survival and the ability to return fire, spread across separate posts, and do not casually abandon strong cover while attackers approach.
 
-[*][b]Forces make better use of multiple objectives.[/b] A lightweight coordinator spreads available attacking squads across active objectives and alternate approach angles while keeping enough strength together to sustain an attack. Defenders cover each objective before reinforcing contested areas. It uses Easy Red 2's native synchronized orders and leaves player-led and mission-scripted squads untouched.
+[*][b]Forces make better use of multiple objectives.[/b] A lightweight coordinator spreads available attacking squads across active objectives, leaves garrisons on captured points, and sends surplus squads toward unfinished objectives using alternating flanks. When squads are scarce, at least one continues the assault. Defenders cover each objective before reinforcing contested areas. It uses Easy Red 2's native synchronized orders and leaves player-led and mission-scripted squads untouched.
 
 [*][b]Static weapons become part of the defence.[/b] Defenders crew viable machine guns, anti-tank guns, and abandoned armed transports in their defence areas. They prioritize anti-armour weapons when armour is present, preserve leaders and essential squad strength, and immediately respect player [b]Get In[/b] orders.
 
@@ -150,7 +150,7 @@ If an unmodded player becomes host after the original host leaves, the host-auth
 
 [h2]Compatibility and feedback[/h2]
 
-Version 1.1.6 is compatible with Easy Red 2 version 2.1.0, Steam public-branch build [b]25255578[/b] (September 11, 2026). It is not compatible with the beta branch.
+Version 1.1.9 is compatible with Easy Red 2 version 2.1.0, Steam public-branch build [b]25255578[/b] (September 11, 2026). It is not compatible with the beta branch.
 
 Game updates can sometimes break BepInEx mods. Please report loading problems, unusual AI behaviour, multiplayer issues, performance regressions, or settings that need adjustment on the [url=https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul/issues]GitHub Issues page[/url].
 

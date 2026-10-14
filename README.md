@@ -6,9 +6,15 @@ ER2RealismOverhaul is built around the rough edges that become hard to ignore af
 
 The goal is to fix those moments without replacing the game underneath them. This is not a health or damage multiplier mod; Easy Red 2's missions, armour system, and basic damage model remain intact.
 
-> **Current release:** 1.1.8
+> **Current release:** 1.1.9
 >
 > **Compatibility:** Tested with Easy Red 2 2.1.0, Steam public-branch build `25255578` (September 11, 2026). Versions 1.1.3 and earlier do not work on 2.1.0.
+
+## What's new in 1.1.9
+
+- Attacking infantry spread across every active objective when enough squads are available, retain garrisons on captured points, and send surplus squads toward unfinished objectives using alternating flanks.
+- With too few squads to cover every point, at least one keeps attacking. Once all selected points are captured, squads hold them while waiting for the next phase.
+- Coordinated attackers retain their assigned objective and orders through native squad-leader updates. Player and mission-script control restrictions remain respected.
 
 ## What's new in 1.1.8
 
@@ -123,7 +129,8 @@ The goal is to fix those moments without replacing the game underneath them. Thi
 
 ### Offensive and defensive AI
 
-- **Squads and vehicles attack and defend under the game's own routing.** Easy Red 2's maps are balanced around vanilla's continuous frontal pressure, so the mod no longer runs its own attack/defense operation planner; the tactical layer below still governs how soldiers fight once native orders send them into position.
+- **Squads and vehicles use the game's native routing and synchronized orders.** Objective coordination distributes autonomous infantry squads, while the tactical layer governs how individual soldiers fight and move into position.
+- **Attacking infantry spread their objectives and secure captured ground.** When enough squads are available, each active point gets a squad: friendly captures retain a garrison while the rest continue the assault. Surplus squads reinforce unfinished objectives using alternating flanks. If squads are scarce, at least one continues attacking so holding captured ground cannot stall the phase.
 - **Attacks are less likely to die after first contact.** Assaulting squads use buildings, trenches, and other strong cover as intermediate bounds or support-by-fire positions, then resume their advance once covering fire is established or the maximum combat halt is reached. A modest configurable attack-posture bonus helps offensive AI maintain pressure without changing health or damage.
 - **Defenders build their plan around fortified ground.** The AI groups nearby cover into positions, values protection and firing lanes above raw distance, and reserves distinct slots. Each defender completes the move into a useful trench or building position. Established positions stay stable during contact; in calm periods, defenders occasionally check for a substantially better protected slot nearby. Without a selected slot, native positioning remains available instead of freezing the soldier at the objective boundary.
 - **Static weapons are a core part of every defence.** Autonomous squads under a defend order proactively crew viable loaded guns across every active hold area, including attacker-side squads ordered to hold ground. Every squad may contribute gunners while retaining its leader and one other mobile soldier, plus its last key specialists. Reported armour makes AP-capable guns the first staffing priority. Empty armed troop transports parked in the position, such as a halftrack with a mounted machine gun, are crewed the same way; tanks, assault guns, and aircraft are not.

@@ -68,8 +68,17 @@ internal static class Program
             (nameof(ObjectiveDefenseRearOffsetStaysMoreConstrainedThanForward), ObjectiveDefenseRearOffsetStaysMoreConstrainedThanForward),
             (nameof(ObjectiveDefenseWithoutAThreatDirectionUsesTheDeterministicFallback), ObjectiveDefenseWithoutAThreatDirectionUsesTheDeterministicFallback),
             (nameof(ObjectiveAttackKeepsOnePressureSquadAndAlternatesWideFlanks), ObjectiveAttackKeepsOnePressureSquadAndAlternatesWideFlanks),
+            (nameof(ObjectiveAttackScenarios.AttackersCoverAllActiveObjectives), ObjectiveAttackScenarios.AttackersCoverAllActiveObjectives),
+            (nameof(ObjectiveAttackScenarios.CaptureKeepsOneGarrisonWhileOthersAdvance), ObjectiveAttackScenarios.CaptureKeepsOneGarrisonWhileOthersAdvance),
+            (nameof(ObjectiveAttackScenarios.RecaptureKeepsOtherGarrisonsAndRestoresAttack), ObjectiveAttackScenarios.RecaptureKeepsOtherGarrisonsAndRestoresAttack),
+            (nameof(ObjectiveAttackScenarios.PhaseTransitionReleasesCompletedObjectives), ObjectiveAttackScenarios.PhaseTransitionReleasesCompletedObjectives),
+            (nameof(ObjectiveAttackScenarios.ScarceSquadsBalanceHoldingAndProgress), ObjectiveAttackScenarios.ScarceSquadsBalanceHoldingAndProgress),
+            (nameof(ObjectiveAttackScenarios.UniformOwnershipUsesNearestAvailableTargets), ObjectiveAttackScenarios.UniformOwnershipUsesNearestAvailableTargets),
+            (nameof(ObjectiveAttackScenarios.FinishedPhaseSpreadsAcrossHeldObjectives), ObjectiveAttackScenarios.FinishedPhaseSpreadsAcrossHeldObjectives),
+            (nameof(ObjectiveAttackScenarios.EmptyPlansDoNotCreateAssignments), ObjectiveAttackScenarios.EmptyPlansDoNotCreateAssignments),
+            (nameof(ObjectiveAttackScenarios.AttackAllocationPreservesCoverageAndSquadCount), ObjectiveAttackScenarios.AttackAllocationPreservesCoverageAndSquadCount),
             (nameof(DefenderRecaptureTargetsGetAttackOrdersInsteadOfDefense), DefenderRecaptureTargetsGetAttackOrdersInsteadOfDefense),
-            (nameof(SecuredCapturePointsRemainEligibleForDefenders), SecuredCapturePointsRemainEligibleForDefenders),
+            (nameof(SecuredCapturePointsRemainEligibleForBothFactions), SecuredCapturePointsRemainEligibleForBothFactions),
             (nameof(DistantReservesCanRetakeAWhileBRetainsAGarrison), DistantReservesCanRetakeAWhileBRetainsAGarrison),
             (nameof(CounterAttackCommitmentSurvivesContact), CounterAttackCommitmentSurvivesContact),
             (nameof(CounterAttackAssessmentDoesNotBorrowOtherGarrisons), CounterAttackAssessmentDoesNotBorrowOtherGarrisons),
@@ -3641,27 +3650,29 @@ internal static class Program
 
     private static void DefenderRecaptureTargetsGetAttackOrdersInsteadOfDefense()
     {
-        True(ObjectiveCounterAttackPlanCore.ShouldIssueAttackOrder(attacking: false, enemySecured: true),
+        True(ObjectiveCounterAttackPlanCore.ShouldIssueAttackOrder(attacking: false, enemySecured: true, friendlySecured: false),
             "A defender did not treat an enemy-secured objective as a recapture target.");
-        False(ObjectiveCounterAttackPlanCore.ShouldIssueAttackOrder(attacking: false, enemySecured: false),
+        False(ObjectiveCounterAttackPlanCore.ShouldIssueAttackOrder(attacking: false, enemySecured: false, friendlySecured: true),
             "A defender abandoned a friendly-secured or neutral objective's defend order.");
-        True(ObjectiveCounterAttackPlanCore.ShouldIssueAttackOrder(attacking: true, enemySecured: false),
+        False(ObjectiveCounterAttackPlanCore.ShouldIssueAttackOrder(attacking: false, enemySecured: false, friendlySecured: false),
+            "A defender abandoned a neutral objective's defend order.");
+        True(ObjectiveCounterAttackPlanCore.ShouldIssueAttackOrder(attacking: true, enemySecured: false, friendlySecured: false),
             "An attacking faction stopped attacking a neutral or friendly-contested objective.");
-        True(ObjectiveCounterAttackPlanCore.ShouldIssueAttackOrder(attacking: true, enemySecured: true),
+        True(ObjectiveCounterAttackPlanCore.ShouldIssueAttackOrder(attacking: true, enemySecured: true, friendlySecured: false),
             "An attacking faction's behavior changed because of the new EnemySecured flag.");
+        False(ObjectiveCounterAttackPlanCore.ShouldIssueAttackOrder(attacking: true, enemySecured: false, friendlySecured: true),
+            "An attacking faction failed to hold its newly secured objective.");
     }
 
-    private static void SecuredCapturePointsRemainEligibleForDefenders()
+    private static void SecuredCapturePointsRemainEligibleForBothFactions()
     {
-        True(ObjectiveEligibilityCore.ShouldInclude(false, true, true, false),
-            "Native attraction filtering removed a secured, active capture point from defense planning.");
-        False(ObjectiveEligibilityCore.ShouldInclude(false, false, true, false),
-            "Attackers were sent back to an objective the native game no longer attracts them to.");
-        False(ObjectiveEligibilityCore.ShouldInclude(false, true, false, false),
+        True(ObjectiveEligibilityCore.ShouldInclude(false, true, false),
+            "Native attraction filtering removed an ordinary active capture point from either faction's planning.");
+        False(ObjectiveEligibilityCore.ShouldInclude(false, false, false),
             "A disabled capture task or completed non-capture objective became a recapture target.");
-        False(ObjectiveEligibilityCore.ShouldInclude(false, true, true, true),
+        False(ObjectiveEligibilityCore.ShouldInclude(false, true, true),
             "Recapture planning bypassed a scripted objective's attraction restriction.");
-        True(ObjectiveEligibilityCore.ShouldInclude(true, true, false, true),
+        True(ObjectiveEligibilityCore.ShouldInclude(true, false, true),
             "A native-authorized scripted objective was excluded.");
     }
 

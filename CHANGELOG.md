@@ -2,6 +2,14 @@
 
 This file records only concrete, player-visible changes in each released version of Easy Red 2 Realism Overhaul. It is a living description of the shipped mod: superseded wording is replaced with the final behavior, and changes that are removed or reverted are deleted instead of retained as historical notes.
 
+## 1.1.9 - 2026-10-13
+
+Easy Red 2 compatibility: version 2.1.0, Steam public branch build `25255578` (September 11, 2026).
+
+- Attacking infantry now cover every active objective when enough autonomous squads are available. Captured points retain one garrison squad while surplus squads reinforce unfinished objectives using the existing alternating flank roles. Ordinary capture and frontline tasks remain eligible for both factions after capture; disabled tasks, retired phases, and scripted attraction restrictions remain respected.
+- When squads are too scarce to garrison every captured point and attack every unfinished objective, allocation reserves at least one squad to continue the assault. Once all selected points are captured, available squads distribute across friendly objectives and hold them until the phase advances.
+- Fixed native squad-leader updates replacing coordinated attacker tasks or redirecting their orders away from the assigned objective. The assignment is retained during a valid coordinated leader pass while native bookkeeping, spotting, charges, and individual tactical responses continue. Stale assignments, ownership changes, and phase resets return control to native task selection; player-led and mission-scripted squads keep their existing control restrictions.
+
 ## 1.1.8 - 2026-10-03
 
 Easy Red 2 compatibility: version 2.1.0, Steam public branch build `25255578` (September 11, 2026).

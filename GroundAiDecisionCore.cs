@@ -1825,11 +1825,10 @@ internal static class ObjectiveEligibilityCore
     // The caller enumerates only the current phase's native AI objectives.
     internal static bool ShouldInclude(
         bool nativeCanAttractFaction,
-        bool defendingFaction,
         bool activeCaptureTask,
         bool scriptedObjective)
         => nativeCanAttractFaction ||
-           defendingFaction && activeCaptureTask && !scriptedObjective;
+           activeCaptureTask && !scriptedObjective;
 }
 
 internal readonly record struct ObjectiveCapacityInput(int Id, bool Pressured, bool EnemySecured);
@@ -1980,10 +1979,10 @@ internal static class ObjectiveCounterAttackPlanCore
     /// Defenders treat an enemy-secured objective as a recapture target and
     /// issue an attack order for the squads committed to it instead of a
     /// defend order. Friendly-secured and neutral objectives are unaffected,
-    /// and an attacking faction always attacks regardless of EnemySecured.
+    /// Invaders hold friendly-secured objectives and attack unfinished ones.
     /// </summary>
-    internal static bool ShouldIssueAttackOrder(bool attacking, bool enemySecured)
-        => attacking || enemySecured;
+    internal static bool ShouldIssueAttackOrder(bool attacking, bool enemySecured, bool friendlySecured)
+        => attacking ? !friendlySecured : enemySecured;
 
     internal static Dictionary<int, int> BuildCapacities(
         int squadCount,

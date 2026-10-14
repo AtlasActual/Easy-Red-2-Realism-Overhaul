@@ -3,8 +3,8 @@
 This describes the ground infantry decision changes made on September 16, 2026.
 It maps the current director and contact-response code, rather than proposing a
 replacement for the game's entire AI. Vehicle combat, weapon selection, and perception
-retain their existing policies. The objective recovery update below describes
-the subsequent October 3 change to objective allocation.
+retain their existing policies. The objective updates below describe the subsequent
+October 3 and October 13 changes to objective allocation.
 
 ## Priority conflicts corrected
 
@@ -191,3 +191,46 @@ Battlefield behavior remains to be checked in game:
    preserved when available.
 4. Advance the mission phase and check a scripted objective with restricted faction
    attraction. Confirm no counterattack is sent to a retired or excluded point.
+
+## Attacker coordination update — October 13, 2026
+
+Enabled, ordinary capture and frontline tasks in the active phase remain eligible
+for both factions after capture. This lets attackers retain captured points while
+continuing toward unfinished objectives. Disabled tasks, retired phases, and
+scripted objectives rejected by their attraction rules remain excluded.
+
+When enough autonomous squads are available, attackers assign one garrison to each
+friendly captured selected point and one squad to each selected unfinished
+objective. Surplus squads reinforce unfinished objectives using the existing
+alternating flank roles. When squads are scarce and unfinished objectives remain,
+the allocation reserves at least one squad to advance; it cannot guarantee a
+garrison at every captured point or an attack on every unfinished point. When all
+selected points are captured, available squads hold friendly objectives while
+waiting for the phase to advance.
+
+During a valid coordinated attacker `SquadLeaderRoutine` pass, `currentTask` is
+bound to the selected objective's live native `missionTask`. Native objective
+reselection and order redirection are suppressed only for that pass, preserving
+the coordinated assignment while leader bookkeeping, spotting, and individual
+tactical movement continue. Calls outside that pass retain their normal behavior.
+Ownership changes, stale assignments, and phase resets disable the guard.
+
+The defender allocation and counterattack assessment from the October 3 update
+are unchanged. Player and mission-script orders retain their existing ownership,
+and individual combat and survival responses still govern movement.
+
+The 196 ground scenarios, 1,134 allocation combinations, and Release build passed.
+In-game validation is still needed:
+
+1. In a phase with A captured by attackers and B unfinished, keep at least two
+   autonomous attacking squads alive. Confirm one holds A while another advances
+   on B, then threaten A and confirm it has not been abandoned by the whole force.
+2. With two unfinished attack points and two available squads, confirm each point
+   receives a squad. Add surplus squads and check their alternating flank roles.
+3. Reduce the force below the number of selected points. Confirm at least one squad
+   advances while an unfinished objective remains. Then capture all points and
+   delay phase advance; confirm the remaining squads hold friendly objectives.
+4. Advance the phase and confirm assignments leave retired objectives. Repeat with
+   disabled tasks and scripted faction-attraction restrictions to confirm they
+   remain excluded, and with player-controlled or script-ordered squads to confirm
+   the planner respects their existing control restrictions.
