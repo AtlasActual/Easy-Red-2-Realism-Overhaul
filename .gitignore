@@ -16,6 +16,7 @@ BepInEx/LogOutput.log
 *.md
 !README.md
 !CHANGELOG.md
+!AGENTS.md
 !docs/AI_DECISION_FLOW.md
 
 # Packaged releases

@@ -442,6 +442,8 @@ internal static class SettingsCatalog
 
     internal static string InferUnit(string key)
     {
+        if (key == "AttackerGarrisonPercent")
+            return "%";
         if (key == "EnginePowerMultiplier")
             return "1-10";
         if (key is "Aggressiveness" or "Accuracy" or "ReactionSpeed" or "Perception" or
@@ -651,6 +653,7 @@ internal static class SettingsCatalog
         "ContextualSquadNameRangeMeters" => ("names appear closer", "names appear farther"),
         "RagdollMomentumMultiplier" => ("less inherited motion", "more inherited motion"),
         "RagdollMomentumMaximumSpeed" => ("lower momentum cap", "higher momentum cap"),
+        "AttackerGarrisonPercent" => ("more squads continue attacking", "more squads guard captured objectives"),
             _ => ("smaller effect", "larger effect")
         };
     }

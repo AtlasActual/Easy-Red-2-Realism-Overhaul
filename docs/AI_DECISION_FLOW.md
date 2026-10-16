@@ -199,7 +199,8 @@ for both factions after capture. This lets attackers retain captured points whil
 continuing toward unfinished objectives. Disabled tasks, retired phases, and
 scripted objectives rejected by their attraction rules remain excluded.
 
-When enough autonomous squads are available, attackers assign one garrison to each
+The original allocation below is superseded by the percentage update documented
+at the end of this file. When enough autonomous squads are available, attackers assign one garrison to each
 friendly captured selected point and one squad to each selected unfinished
 objective. Surplus squads reinforce unfinished objectives using the existing
 alternating flank roles. When squads are scarce and unfinished objectives remain,
@@ -234,3 +235,109 @@ In-game validation is still needed:
    disabled tasks and scripted faction-attraction restrictions to confirm they
    remain excluded, and with player-controlled or script-ordered squads to confirm
    the planner respects their existing control restrictions.
+
+## Defensive reinforcement and large-wave update — October 15, 2026
+
+The report described Italian reinforcements covering only two of three objectives
+on Maramari Invasion at maximum bot count, plus squads waiting at spawn. The
+reporter did not identify which side experienced the spawn stall. Neither symptom
+has been reproduced in-game here; the changes below address confirmed code gaps.
+
+Defenders now bind `currentTask` to their assigned objective and use the same
+scoped native leader guards as attackers (`ObjectiveNativePatches.cs`). Previously
+the coordinator could send defenders to all three points, but native task selection
+could replace those assignments. The defender capacity and counterattack policies
+still keep at least one squad per selected held point when enough squads exist.
+Ordinary held capture points remain eligible, while player and mission-script
+ownership, disabled tasks, stale assignments, and phase resets release the guard.
+
+Order continuity now checks a defend order's native area as well as its order kind.
+Another `HoldArea` at spawn or another objective can no longer look like the
+unchanged planned hold. Attack waypoint movement still does not trigger reorders.
+Defensive-position ownership also records its acquired area and releases an old
+anchor when that area changes. This works even though the old commander's objective
+revision is now constant; incidental soldier displacement still preserves a hold.
+
+The director's twelve-resolution frame limit now rotates its admission window
+through repeated native update waves. The old first-come limit could perpetually
+defer the same soldiers when a large wave repeated in the same order, preventing
+their tactical holds and recovery state from being refreshed. No native work is
+queued, the frame limit is unchanged, and phase resets clear the window. The
+rotation guarantees coverage for a repeated stable wave; changing native schedules
+still determine when each soldier next reaches `SequentialUpdate`.
+
+Verbose objective-plan traces now include objective IDs and assigned squad counts,
+so a future trace can distinguish allocation from movement or native redirection.
+Attacker garrisons now follow the percentage policy documented below.
+
+Validation: 210 ground scenarios pass, including all repeated wave sizes from
+1 through 512 soldiers, changing wave sizes, phase resets, defensive area changes,
+and three-point coverage across all distance rankings and pressure choices with
+3–60 squads. The aircraft, camera, mouse-instructor, and parachute suites also pass.
+The Release plugin builds against the installed game interop with zero warnings
+and errors. Native Harmony guard behavior still requires an in-game check:
+
+1. Restart Maramari Invasion several times as Italians at maximum unit count.
+   With at least three eligible autonomous squads, confirm reinforcements reach
+   A, B, and C and remain assigned through native leader updates.
+2. Watch newly spawned squads on both sides until fully spawned. Confirm squads
+   assigned to reinforce a distant point leave any old spawn-area cover hold.
+   Separate intentional contact, suppression, boarding, or scripted holds from
+   an unresponsive squad. Repeat at low and maximum unit counts.
+3. Capture and recapture points, then advance the phase. Confirm retained garrisons,
+   counterattack gating, attack waypoints, player orders, and scripted squads keep
+   their existing behavior. If a stall remains, record its side, duration, squad
+   ID, current order/area, and verbose objective coverage trace.
+
+## Percentage attacker garrisons — October 15, 2026
+
+`AttackerGarrisonPercent` under `AI - Objective coordination` defaults to 20 and
+accepts 0–100 in the config and F10 AI / Objectives menu. While captured and
+unfinished objectives coexist and the percentage is positive, the shared budget
+is `min(eligibleSquads - 1, max(capturedPoints, floor(eligibleSquads * percent / 100)))`.
+The percentage is a target, with minimum coverage of one guard per captured point
+when possible and at least one squad continuing the assault. Zero explicitly
+disables garrisons during an unfinished phase. This counts the
+coordinator's fully spawned autonomous infantry squads, excluding player-led,
+script-controlled, and vehicle-crew squads; it does not count individual soldiers.
+Ten eligible squads reserve two guards and eight attackers; twenty reserve four
+and sixteen. A six-squad force with one captured point rounds down to one guard and
+five attackers. Five squads with two captured points allocate two guards and three
+attackers, exceeding the percentage only to maintain minimum coverage.
+
+Target selection and capacity allocation use the same percentage and minimum.
+Every selected captured point receives one guard first. Surplus guards are shared
+evenly across pressured captured points, or across all captured points when none
+are pressured. Pressure changes only the distribution within the guard budget;
+it does not withdraw additional squads from ongoing assaults or steal another
+point's minimum guard. Under scarcity, pressured captured points are selected
+before quiet ones, retaining distance ranking within each pressure group.
+Assault squads continue to share unfinished objectives evenly.
+
+Pressure uses the existing capture-progress signal and its 45-second memory;
+this does not add enemy-strength estimation or a new reserve controller. Stable
+objective-ID ordering for surplus allocation keeps capacities unchanged when
+movement changes the faction centroid's distance ranking. Existing assignment
+preservation keeps valid squad destinations, prioritizes engaged squads, and
+avoids reissuing unchanged native orders. Actual ownership, pressure, force-count,
+or selected-target changes can still require reassignment.
+
+The percentage applies once across all captured points. If there are more captured
+points than available squads after reserving one attacker, some points necessarily
+have no coordinated garrison. With no captured points everyone attacks, and with
+all points captured everyone holds, prioritizing surplus guards at pressured points.
+Every planning refresh recalculates from the currently eligible squad count and
+ownership, so casualties, reinforcements, and recaptures resize both groups.
+
+Validation: the 210 ground scenarios include explicit 10/20/50-squad examples,
+rounding down on both sides of whole-squad boundaries, casualty resizing,
+a shared budget across successive captures, and
+0/10/20/35/50/100% settings. Allocation invariants cover all ownership combinations
+for one through six objectives, one through sixty squads, and those six settings
+(45,360 combinations), checking force conservation, percentage targets with
+minimum coverage, balanced distribution, and continued assault. Additional cases
+verify the five-squad/two-capture minimum, scarce pressure priority, pressure
+appearing and clearing, multiple simultaneous threats, no surplus guards, an
+all-held phase, and unchanged capacities across distance reordering. The aircraft,
+camera, mouse-instructor, and parachute suites also pass. These checks validate
+allocation rules; native in-game movement has not been validated here.

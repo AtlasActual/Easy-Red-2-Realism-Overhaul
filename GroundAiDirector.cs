@@ -262,27 +262,14 @@ internal static class GroundAiDirector
     // this never binds; it exists for the waves that land together, which measured
     // 55.7ms in a single frame. 12 is far above the steady-state arrival rate.
     private const int MaxDirectorResolutionsPerFrame = 12;
-    private static int _directorResolutionFrame = -1;
-    private static int _directorResolutionsThisFrame;
+    private static readonly RotatingFrameBudgetCore DirectorBudget =
+        new(MaxDirectorResolutionsPerFrame);
 
-    // Deferring a soldier is indistinguishable from the game's own rolling schedule not
-    // reaching him this frame: he keeps the resolution he already has and runs on his
-    // next SequentialUpdate. The system is built to tolerate exactly that gap.
+    // Rotate the admitted calls when a large wave repeats in native iteration
+    // order. Otherwise the same first twelve soldiers can consume every frame,
+    // leaving later soldiers' tactical holds and recovery state unserviced.
     private static bool TryTakeDirectorBudget()
-    {
-        var frame = Time.frameCount;
-        if (frame != _directorResolutionFrame)
-        {
-            _directorResolutionFrame = frame;
-            _directorResolutionsThisFrame = 0;
-        }
-
-        if (_directorResolutionsThisFrame >= MaxDirectorResolutionsPerFrame)
-            return false;
-
-        _directorResolutionsThisFrame++;
-        return true;
-    }
+        => DirectorBudget.TryTake(Time.frameCount);
 
     internal static void UpdateSoldier(SoldierAI ai, Soldier soldier, float now)
     {
@@ -436,6 +423,7 @@ internal static class GroundAiDirector
 
     internal static void ClearRuntimeState()
     {
+        DirectorBudget.Clear();
         Leases.Clear();
         SoldierResolutions.Clear();
         LastMovementAuthority.Clear();

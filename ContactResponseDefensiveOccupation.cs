@@ -310,7 +310,7 @@ internal static partial class ContactResponse
             // The commander's own stationary-area lease is gone; a squad's native
             // defend order (the same signal TryGetDefensiveArea already falls back
             // to) is now the sole source of a stationary defensive area.
-            var hasStationaryArea = squad != null && TryGetDefensiveArea(soldier, out _, out _);
+            var hasStationaryArea = TryGetDefensiveArea(soldier, out var areaCenter, out var areaRadius);
             var eligible = squad != null &&
                            AiOwnership.IsAutonomous(soldier) &&
                            soldier.IsAlive &&
@@ -334,7 +334,12 @@ internal static partial class ContactResponse
                     state.DefensivePositionObjectiveRevision == revision,
                     squadFullySpawned,
                     externallyControlled,
-                    boardingVehicle));
+                    boardingVehicle,
+                    DefensivePositionOwnershipCore.SameAssignedArea(
+                        new MapPoint(state.DefensivePositionAreaCenter.x, state.DefensivePositionAreaCenter.z),
+                        state.DefensivePositionAreaRadius,
+                        new MapPoint(areaCenter.x, areaCenter.z),
+                        areaRadius)));
             if (!shouldOwn)
             {
                 if (state.DefensivePositionOwned)
@@ -348,6 +353,8 @@ internal static partial class ContactResponse
                 state.DefensivePositionSquadId = squadId;
                 state.DefensivePositionObjectiveRevision = revision;
                 state.DefensivePositionEntryPoint = soldier.transform.position;
+                state.DefensivePositionAreaCenter = areaCenter;
+                state.DefensivePositionAreaRadius = areaRadius;
                 // Area ownership schedules cover selection. It does not halt a
                 // native route before the soldier reaches an actual cover slot.
                 AiState.Trace(
@@ -399,6 +406,8 @@ internal static partial class ContactResponse
         state.DefensivePositionSquadId = 0;
         state.DefensivePositionObjectiveRevision = 0;
         state.DefensivePositionEntryPoint = default;
+        state.DefensivePositionAreaCenter = default;
+        state.DefensivePositionAreaRadius = 0f;
         state.DefensiveUpgradeMovesUsed = 0;
         state.DefensiveUpgradePreviousAnchorId = IntPtr.Zero;
         // Area ownership does not create an engagement hold. Only an actual

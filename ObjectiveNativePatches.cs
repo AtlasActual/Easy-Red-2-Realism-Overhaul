@@ -5,12 +5,12 @@ using HarmonyLib;
 namespace ER2RealismOverhaul;
 
 /// <summary>
-/// Keeps a coordinated attacker's task and order during one native leader pass.
+/// Keeps a coordinated squad's task and order during one native leader pass.
 /// Native squad bookkeeping, individual movement, cover handling and spotting
 /// still run. Calls made by mission scripts outside that pass retain their normal
 /// task-selection and ordering behavior.
 /// </summary>
-internal static class ObjectiveAttackerNativeScope
+internal static class ObjectiveNativeScope
 {
     [ThreadStatic]
     private static HashSet<IntPtr>? _activeSquads;
@@ -20,7 +20,7 @@ internal static class ObjectiveAttackerNativeScope
         try
         {
             var pointer = squad.Pointer;
-            if (pointer == IntPtr.Zero || !ObjectiveCoordination.TryBindAttackerTask(squad))
+            if (pointer == IntPtr.Zero || !ObjectiveCoordination.TryBindAssignedTask(squad))
                 return IntPtr.Zero;
 
             _activeSquads ??= new HashSet<IntPtr>();
@@ -48,7 +48,7 @@ internal static class ObjectiveAttackerNativeScope
         {
             return _activeSquads != null &&
                    _activeSquads.Contains(squad.Pointer) &&
-                   ObjectiveCoordination.TryBindAttackerTask(squad);
+                   ObjectiveCoordination.TryBindAssignedTask(squad);
         }
         catch (Exception)
         {
@@ -58,50 +58,50 @@ internal static class ObjectiveAttackerNativeScope
 }
 
 [HarmonyPatch(typeof(Squad), nameof(Squad.SquadLeaderRoutine))]
-internal static class ObjectiveAttackerLeaderScopePatch
+internal static class ObjectiveLeaderScopePatch
 {
     [HarmonyPrefix]
     private static void Prefix(Squad __instance, out IntPtr __state)
-        => __state = ObjectiveAttackerNativeScope.Enter(__instance);
+        => __state = ObjectiveNativeScope.Enter(__instance);
 
     [HarmonyFinalizer]
     private static void Finalizer(IntPtr __state)
-        => ObjectiveAttackerNativeScope.Exit(__state);
+        => ObjectiveNativeScope.Exit(__state);
 }
 
 [HarmonyPatch(typeof(Squad), nameof(Squad.CalculateSquadTask))]
-internal static class ObjectiveAttackerTaskRetentionPatch
+internal static class ObjectiveTaskRetentionPatch
 {
     [HarmonyPrefix]
     private static bool Prefix(Squad __instance)
-        => !ObjectiveAttackerNativeScope.RetainAssignedTask(__instance);
+        => !ObjectiveNativeScope.RetainAssignedTask(__instance);
 }
 
 // The native leader helper also requests faction-specific charges. Keep that
 // helper active and guard only its strategic HoldArea/AttackFromSide writes;
 // Charge sends units and updates its order directly, so it remains available.
 [HarmonyPatch(typeof(Squad), nameof(Squad.HoldArea))]
-internal static class ObjectiveAttackerHoldOrderRetentionPatch
+internal static class ObjectiveHoldOrderRetentionPatch
 {
     [HarmonyPrefix]
     private static bool Prefix(Squad __instance)
-        => !ObjectiveAttackerNativeScope.RetainAssignedTask(__instance);
+        => !ObjectiveNativeScope.RetainAssignedTask(__instance);
 }
 
 [HarmonyPatch(typeof(Squad), nameof(Squad.AttackFromSide))]
-internal static class ObjectiveAttackerAttackOrderRetentionPatch
+internal static class ObjectiveAttackOrderRetentionPatch
 {
     [HarmonyPrefix]
     private static bool Prefix(Squad __instance)
-        => !ObjectiveAttackerNativeScope.RetainAssignedTask(__instance);
+        => !ObjectiveNativeScope.RetainAssignedTask(__instance);
 }
 
 [HarmonyPatch(typeof(Squad), nameof(Squad.SetHoldFireOrder))]
-internal static class ObjectiveAttackerHoldFireRetentionPatch
+internal static class ObjectiveHoldFireRetentionPatch
 {
     [HarmonyPrefix]
     private static bool Prefix(Squad __instance, bool setEnabled)
         // The native leader may randomly enable hold fire after a rejected
         // strategic reorder. Charge's explicit hold-fire release still runs.
-        => !setEnabled || !ObjectiveAttackerNativeScope.RetainAssignedTask(__instance);
+        => !setEnabled || !ObjectiveNativeScope.RetainAssignedTask(__instance);
 }

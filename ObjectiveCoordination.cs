@@ -12,7 +12,7 @@ namespace ER2RealismOverhaul;
 /// while the others alternate wide flanks, and keeps a garrison on held objectives
 /// for both sides when enough squads exist. Native leader bookkeeping still
 /// runs; only its objective reselection and order redirection are guarded for
-/// assigned attackers. It does not stage attacks or claim command channels.
+/// assigned squads on both sides. It does not stage attacks or claim command channels.
 /// </summary>
 internal static class ObjectiveCoordination
 {
@@ -28,7 +28,7 @@ internal static class ObjectiveCoordination
     private const float CounterAttackRecentLossSeconds = 30f;
 
     private static readonly Dictionary<int, OrderStamp> LastOrders = new();
-    private static readonly Dictionary<int, AttackerTaskAssignment> AttackerTasks = new();
+    private static readonly Dictionary<int, ObjectiveTaskAssignment> AssignedTasks = new();
     private static readonly Dictionary<int, float> ObjectiveProgress = new();
     private static readonly Dictionary<int, float> ObjectivePressureUntil = new();
     private static readonly Dictionary<string, int> LastPlanSignatures =
@@ -71,7 +71,7 @@ internal static class ObjectiveCoordination
     internal static void ResetBattle()
     {
         LastOrders.Clear();
-        AttackerTasks.Clear();
+        AssignedTasks.Clear();
         ObjectiveProgress.Clear();
         ObjectivePressureUntil.Clear();
         LastPlanSignatures.Clear();
@@ -85,7 +85,7 @@ internal static class ObjectiveCoordination
     {
         // A native-order guard is valid only for this planning snapshot. Squads
         // absent from the next plan immediately return to native task selection.
-        AttackerTasks.Clear();
+        AssignedTasks.Clear();
         var battle = BattleManager.GetCurrentBattleData();
         if (battle == null)
             return;
@@ -334,7 +334,8 @@ internal static class ObjectiveCoordination
             var selectedIds = new HashSet<int>(ObjectiveAttackPlanCore.SelectTargets(
                 squads.Count,
                 objectives.Select(objective => new ObjectiveAttackTarget(
-                    objective.Id, objective.FriendlySecured)).ToList()));
+                    objective.Id, objective.FriendlySecured, objective.Pressured)).ToList(),
+                Settings.AttackerGarrisonPercent.Value));
             targets = objectives.Where(objective => selectedIds.Contains(objective.Id)).ToList();
         }
         else
@@ -377,17 +378,17 @@ internal static class ObjectiveCoordination
 
             assigned.Sort((left, right) => left.Id.CompareTo(right.Id));
 
-            if (attacking)
+            // HoldArea does not bind currentTask. Bind defenders as well as
+            // attackers, or their native leader pass can choose another point
+            // and silently replace this plan's reinforcement/hold order.
+            var task = target.NativeObjective.missionTask?.TryCast<SquadTask>();
+            if (task != null)
             {
-                var task = target.NativeObjective.missionTask?.TryCast<SquadTask>();
-                if (task != null)
+                foreach (var squad in assigned)
                 {
-                    foreach (var squad in assigned)
-                    {
-                        AttackerTasks[squad.Id] = new AttackerTaskAssignment(
-                            target.Id, target.NativeObjective, task);
-                        squad.Squad.currentTask = task;
-                    }
+                    AssignedTasks[squad.Id] = new ObjectiveTaskAssignment(
+                        target.Id, target.NativeObjective, task);
+                    squad.Squad.currentTask = task;
                 }
             }
 
@@ -416,19 +417,18 @@ internal static class ObjectiveCoordination
     /// attack waypoint otherwise looks like a route to the wrong objective.
     /// Only the scoped native leader task/order helpers consult this guard.
     /// </summary>
-    internal static bool TryBindAttackerTask(Squad squad)
+    internal static bool TryBindAssignedTask(Squad squad)
     {
         if (!Settings.ObjectiveCoordinationEnabled.Value || _failedThisBattle ||
             Time.time >= _nextPlanAt || !MultiplayerAuthority.CanMutateGameplay() ||
             !BattleManager.IsBattleActive() || squad == null ||
-            !AttackerTasks.TryGetValue(SquadIdentity.GetSquadId(squad), out var assignment))
+            !AssignedTasks.TryGetValue(SquadIdentity.GetSquadId(squad), out var assignment))
         {
             return false;
         }
 
         var battle = BattleManager.GetCurrentBattleData();
         if (battle == null || !TryDescribeSquad(squad, battle, out var info) ||
-            !battle.IsInvaderFaction(info.Faction) ||
             !LastOrders.TryGetValue(info.Id, out var order) ||
             order.ObjectiveId != assignment.ObjectiveId)
         {
@@ -442,7 +442,7 @@ internal static class ObjectiveCoordination
             return false;
 
         var task = assignment.Objective.missionTask;
-        if (squad.order != expectedOrder || task == null || !task.IsTaskEnabled() ||
+        if (!NativeOrderMatches(squad, order, expectedOrder) || task == null || !task.IsTaskEnabled() ||
             task.Pointer != assignment.Task.Pointer)
         {
             return false;
@@ -609,7 +609,8 @@ internal static class ObjectiveCoordination
             return ObjectiveAttackPlanCore.BuildCapacities(
                 squadCount,
                 targets.Select(objective => new ObjectiveAttackTarget(
-                    objective.Id, objective.FriendlySecured)).ToList());
+                    objective.Id, objective.FriendlySecured, objective.Pressured)).ToList(),
+                Settings.AttackerGarrisonPercent.Value);
         }
 
         var capacityInputs = targets
@@ -979,8 +980,18 @@ internal static class ObjectiveCoordination
             : Order.attackFromSide;
         return SquadOrderContinuityCore.ShouldReissue(
             planStampMatches: true,
-            nativeOrderMatches: squad.order == expectedOrder);
+            nativeOrderMatches: NativeOrderMatches(squad, existing, expectedOrder));
     }
+
+    private static bool NativeOrderMatches(Squad squad, OrderStamp stamp, Order expectedOrder)
+        => SquadOrderContinuityCore.NativeOrderMatches(
+            squad.order == expectedOrder,
+            stamp.Order == CoordinatedOrder.Defend,
+            stamp.Order != CoordinatedOrder.Defend ||
+            (IsFinite(squad.moveOrderPosition) &&
+             HorizontalDistanceSquared(stamp.NativeDestination, squad.moveOrderPosition) <= 1f &&
+             float.IsFinite(squad.moveOrderRadius) &&
+             Mathf.Abs(stamp.Radius - squad.moveOrderRadius) <= 0.5f));
 
     private static void TracePlanChange(
         string faction,
@@ -1002,7 +1013,8 @@ internal static class ObjectiveCoordination
             LastPlanSignatures[faction] = signature;
             AiState.Trace(
                 $"Objective plan: {faction} {(attacking ? "attack" : "defense")} " +
-                $"squads={squadCount} objectives={objectiveCount} flanks={flankCount}");
+                $"squads={squadCount} objectives={objectiveCount} flanks={flankCount} " +
+                $"coverage=[{string.Join(", ", assignments.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}:{pair.Value.Count}"))}]");
         }
     }
 
@@ -1062,7 +1074,7 @@ internal static class ObjectiveCoordination
         bool Pressured,
         MissionObjective NativeObjective);
 
-    private readonly record struct AttackerTaskAssignment(
+    private readonly record struct ObjectiveTaskAssignment(
         int ObjectiveId,
         MissionObjective Objective,
         SquadTask Task);

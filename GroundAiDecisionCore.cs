@@ -1715,6 +1715,13 @@ internal static class SquadOrderContinuityCore
 {
     internal static bool ShouldReissue(bool planStampMatches, bool nativeOrderMatches)
         => !planStampMatches || !nativeOrderMatches;
+
+    // Attack waypoints may advance through native stages. A stationary hold's
+    // area, however, is its intent: another HoldArea at spawn or at a different
+    // objective has the same enum but must not masquerade as the planned order.
+    internal static bool NativeOrderMatches(
+        bool orderKindMatches, bool isDefendOrder, bool holdAreaMatches)
+        => orderKindMatches && (!isDefendOrder || holdAreaMatches);
 }
 
 internal static class SquadOrderMovementCore
@@ -2382,7 +2389,8 @@ internal readonly record struct DefensivePositionOwnershipInput(
     bool SameObjectiveRevision,
     bool SquadFullySpawned = true,
     bool ExternallyControlled = false,
-    bool BoardingVehicle = false);
+    bool BoardingVehicle = false,
+    bool SameAssignedArea = true);
 
 internal static class DefensivePositionOwnershipCore
 {
@@ -2403,9 +2411,20 @@ internal static class DefensivePositionOwnershipCore
         // metres of incidental displacement cannot give locomotion back. Only an
         // actual squad/objective/ownership transition releases it.
         return input.AlreadyOwned
-            ? input.SameSquad && input.SameObjectiveRevision
+            ? input.SameSquad && input.SameObjectiveRevision && input.SameAssignedArea
             : input.InsideAssignedArea;
     }
+
+    // Objective revisions no longer change with squad orders. Compare the held
+    // area's identity directly so a spawn-area anchor cannot survive an order
+    // to reinforce a distant objective. Incidental soldier drift is irrelevant.
+    internal static bool SameAssignedArea(
+        MapPoint previousCenter, float previousRadius,
+        MapPoint currentCenter, float currentRadius)
+        => previousCenter.IsFinite && currentCenter.IsFinite &&
+           float.IsFinite(previousRadius) && float.IsFinite(currentRadius) &&
+           DefensivePositioningCore.IsInsideArea(previousCenter, currentCenter, 1f) &&
+           MathF.Abs(previousRadius - currentRadius) <= 0.5f;
 }
 
 internal static class GroundAuthorityCore

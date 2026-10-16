@@ -136,6 +136,8 @@ internal sealed class ContactResponseState
     internal int DefensivePositionSquadId;
     internal int DefensivePositionObjectiveRevision;
     internal Vector3 DefensivePositionEntryPoint;
+    internal Vector3 DefensivePositionAreaCenter;
+    internal float DefensivePositionAreaRadius;
     internal bool PlayerHoldPositionOwned;
     internal Vector3 PlayerHoldCenter;
     internal float PlayerHoldRadius;
