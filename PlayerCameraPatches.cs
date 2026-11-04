@@ -303,28 +303,45 @@ internal static class PlayerThirdPersonAimZoomPatch
     }
 }
 
+/// <summary>
+/// Scopes the vehicle optics zoom to the native gunsight FOV calculation.
+/// PlayerController.GetAimingFOVVehicle asks Turret.GetAimingFOV for the
+/// sight's target FOV, subtracts a fixed hold-breath offset while the native
+/// holdingBreath flag is set, and then interpolates the camera toward that
+/// target. Turret.GetAimingFOV prefers the per-sight TankScopeData FOV cached
+/// in scopeDataFOVCache over the Turret.scopeFOV field, so rewriting scopeFOV
+/// has no effect on tank sights; the result of Turret.GetAimingFOV is rescaled
+/// instead, by <see cref="PlayerVehicleHoldBreathTurretFovPatch"/>.
+/// </summary>
 [HarmonyPatch(typeof(PlayerController), nameof(PlayerController.GetAimingFOVVehicle))]
 internal static class PlayerVehicleHoldBreathZoomPatch
 {
-    private readonly struct ScopeFovState
-    {
-        internal ScopeFovState(Turret turret, float originalFov)
-        {
-            Turret = turret;
-            OriginalFov = originalFov;
-        }
+    // GetAimingFOVVehicle subtracts this many degrees from the gunsight target
+    // FOV when PlayerController.holdingBreath is set while aiming.
+    internal const float NativeVehicleHoldBreathFovOffsetDegrees = 8f;
 
-        internal Turret? Turret { get; }
-        internal float OriginalFov { get; }
+    private static int _activeTurretId;
+    private static float _activeMultiplier = 1f;
+
+    internal static bool TryGetActiveMultiplier(Turret turret, out float multiplier)
+    {
+        multiplier = _activeMultiplier;
+        return _activeTurretId != 0 &&
+               turret != null &&
+               turret.GetInstanceID() == _activeTurretId;
     }
 
     [HarmonyPrefix]
-    private static void Prefix(PlayerController __instance, out ScopeFovState __state)
+    private static void Prefix(PlayerController __instance)
     {
-        __state = default;
+        Clear();
+
+        // Gate on the native flag rather than the raw input so the zoom follows
+        // the game's own stamina, bleeding, and inhale rules exactly, and so the
+        // fixed native offset is compensated only when the game applies it.
         if (__instance == null ||
             !__instance.IsAiming ||
-            !PlayerAimingInput.IsHoldBreathHeld())
+            !__instance.holdingBreath)
             return;
 
         var vehicle = __instance.ControlledVehicle;
@@ -339,23 +356,39 @@ internal static class PlayerVehicleHoldBreathZoomPatch
             return;
 
         var strength = Settings.OpticsZoom.Value;
-        var adjustedMultiplier = 1f -
+        _activeMultiplier = 1f -
             ((1f - PlayerHoldBreathZoomPatch.NativeHoldBreathFovMultiplier) * strength);
-        __state = new ScopeFovState(turret, turret.scopeFOV);
-
-        // Let the native method interpolate from the current camera FOV to the
-        // adjusted gunsight target. Scaling its already-interpolated result would
-        // feed a new value back every frame and make tank optics shake.
-        turret.scopeFOV = Mathf.Clamp(
-            turret.scopeFOV * adjustedMultiplier,
-            1f,
-            179f);
+        _activeTurretId = turret.GetInstanceID();
     }
 
     [HarmonyPostfix]
-    private static void Postfix(ScopeFovState __state)
+    private static void Postfix()
     {
-        if (__state.Turret != null)
-            __state.Turret.scopeFOV = __state.OriginalFov;
+        Clear();
+    }
+
+    private static void Clear()
+    {
+        _activeTurretId = 0;
+        _activeMultiplier = 1f;
+    }
+}
+
+[HarmonyPatch(typeof(Turret), nameof(Turret.GetAimingFOV))]
+internal static class PlayerVehicleHoldBreathTurretFovPatch
+{
+    [HarmonyPostfix]
+    private static void Postfix(Turret __instance, ref float __result)
+    {
+        if (!PlayerVehicleHoldBreathZoomPatch.TryGetActiveMultiplier(__instance, out var multiplier))
+            return;
+
+        // Return the target the native method should settle on, plus the fixed
+        // offset it is about to subtract, so the final gunsight FOV is the
+        // sight's own FOV scaled by the infantry-style hold-breath multiplier.
+        // The native method still performs the frame-by-frame interpolation.
+        var targetFov = Mathf.Clamp(__result * multiplier, 1f, 179f);
+        __result = targetFov +
+                   PlayerVehicleHoldBreathZoomPatch.NativeVehicleHoldBreathFovOffsetDegrees;
     }
 }

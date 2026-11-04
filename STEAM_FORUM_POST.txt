@@ -1,7 +1,7 @@
 [h1]Easy Red 2 Realism Overhaul[/h1]
 
-[b]Current mod version:[/b] 1.2.0
-[b]Compatible game version:[/b] 2.1.0 (Steam build 25255578)
+[b]Current mod version:[/b] 1.2.1
+[b]Compatible game version:[/b] 2.1.1 "Cold Steel" (Steam public build 26375879, November 2, 2026)
 [b]Download:[/b] [url=https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul/releases/]Easy Red 2 Realism Overhaul releases[/url]
 
 Easy Red 2 Realism Overhaul is a configurable BepInEx mod for more believable, tactical, and immersive combined-arms battles.
@@ -89,6 +89,10 @@ Press [b]F10[/b], or open [b]Realism Overhaul Settings[/b] from the main or paus
 
 [*][b]One-click system controls:[/b] Enable All, Disable All, Reset to Defaults, Apply, and Cancel make broad changes manageable without editing configuration files.
 
+[*][b]Persistent modification marks:[/b] Settings that differ from the built-in defaults keep an orange outline after Apply, show their default value, and mark their categories. Pending edits are labeled separately.
+
+[*][b]Search every category:[/b] The F10 search bar finds matching settings across all categories, including their names, descriptions, sections, and slider-effect hints.
+
 [*][b]Optional visual AI diagnostics:[/b] press [b]F8[/b] to inspect perception, target memory, movement, cover, suppression, firing safety, command state, vehicles, recent decisions, and AI update timings. The overlay is local, read-only, and disabled by default.
 
 [*][b]Large-battle performance work:[/b] expensive AI, cover, penetration, explosion, audio, decal, and diagnostic work is bounded or distributed over time, and the release includes a mixed-mod-safe fix for a major late-battle memory and finalizer backlog.
@@ -150,7 +154,7 @@ If an unmodded player becomes host after the original host leaves, the host-auth
 
 [h2]Compatibility and feedback[/h2]
 
-Version 1.2.0 is compatible with Easy Red 2 version 2.1.0, Steam public-branch build [b]25255578[/b] (September 11, 2026). It is not compatible with the beta branch.
+Version 1.2.1 targets Easy Red 2 version 2.1.1 "Cold Steel", Steam public-branch build [b]26375879[/b] (November 2, 2026). It is built against the updated game's regenerated interop assemblies and passes the release build and deterministic scenario suite. The latest local 1.2.1 startup log on this game build reports all 167 patch modules applied without failures; in-game validation of the new 1.2.1 F10 changes and the Optics Zoom fix remains pending. Beta-branch compatibility is not verified.
 
 Game updates can sometimes break BepInEx mods. Please report loading problems, unusual AI behaviour, multiplayer issues, performance regressions, or settings that need adjustment on the [url=https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul/issues]GitHub Issues page[/url].
 

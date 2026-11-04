@@ -75,6 +75,7 @@ internal sealed class MenuSetting
             return true;
 
         return DisplayName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+               SettingsCatalog.CategoryName(Category).Contains(search, StringComparison.OrdinalIgnoreCase) ||
                SectionName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
                Entry.Definition.Key.Contains(search, StringComparison.OrdinalIgnoreCase) ||
                Description.Contains(search, StringComparison.OrdinalIgnoreCase) ||

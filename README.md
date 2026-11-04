@@ -6,9 +6,17 @@ ER2RealismOverhaul is built around the rough edges that become hard to ignore af
 
 The goal is to fix those moments without replacing the game underneath them. This is not a health or damage multiplier mod; Easy Red 2's missions, armour system, and basic damage model remain intact.
 
-> **Current release:** 1.2.0
+> **Current release:** 1.2.1
 >
-> **Compatibility:** Tested with Easy Red 2 2.1.0, Steam public-branch build `25255578` (September 11, 2026). Versions 1.1.3 and earlier do not work on 2.1.0.
+> **Compatibility:** Easy Red 2 **2.1.1 "Cold Steel"**, Steam public-branch build `26375879` (November 2, 2026 update). Built against the updated game's regenerated interop assemblies; the latest local 1.2.1 startup log on this build reports all 167 patch modules applied without failures. Version 1.2.1 passes the release build and deterministic scenario suite; its F10 changes and the Optics Zoom fix still need in-game validation. Versions 1.1.3 and earlier do not work on Easy Red 2 2.1.0 or later.
+
+## What's new in 1.2.1
+
+- F10 settings that differ from the mod's built-in defaults retain their orange outline after Apply and reopening the menu, with a **MODIFIED** label and the default value. Unsaved changes remain separately labeled.
+- Categories containing modified settings show an **\*** and an orange border, including Quick Setup when applicable. Resetting to defaults clears the modified mark; an unsaved reset remains outlined until Apply.
+- Search finds matching settings across every category, lists each setting once, and matches setting names, categories, sections, descriptions, and slider-effect hints. Clear the search or select a category to return to category browsing.
+- Fixed the **Optics Zoom** slider having no effect in tank and static-weapon gunsights. The held-breath zoom now applies to the sight field of view the current game actually uses, 1x still matches the infantry held-breath zoom, and the zoom follows the game's native stamina and bleeding rules.
+- Updated the compatibility target to Easy Red 2 2.1.1 "Cold Steel", Steam build `26375879`.
 
 ## What's new in 1.2.0
 
@@ -160,6 +168,10 @@ The goal is to fix those moments without replacing the game underneath them. Thi
 Press **F10**, or choose **Realism Overhaul Settings** from the main or pause menu. Quick Setup offers three performance starting points: **Quality** restores the recommended defaults, **Balanced** keeps every gameplay system while reducing the main animation/effects/audio costs, and **Large Battle** keeps the core AI and fire-safety systems while minimizing supplemental blast, fragmentation, ricochet, lingering-effect, decal, and audio work. Presets stage ordinary settings rather than hiding them, so every changed value remains individually editable before you press Apply. Audio-capacity changes take effect on the next launch.
 
 Quick Setup and the AI / Core Behavior page also expose centered 0.5x-1.5x sliders for Aggressiveness, Accuracy, Reaction Speed, Perception, and Suppression Resistance; 1.0x is the recommended baseline. Perception coordinates field of view, peripheral awareness, contact memory, and the distance at which an identified enemy stops an advance; it never grants line of sight. Detailed AI options remain available under Objectives, Attack Bonuses, Defense, Infantry Tactics, Vehicle Tactics, Support, and Diagnostics. Defender static-weapon staffing has its own switch on the Defense page. Non-AI settings are unchanged.
+
+Settings that differ from the mod's built-in defaults retain an orange outline and a **MODIFIED** label showing the default value, including after Apply or reopening F10. Categories containing modified settings show an **\*** and an orange border, including Quick Setup when it contains those settings; these marks cover the whole category even when searching or viewing another page. **UNSAVED** labels and the footer separately identify pending edits. Resetting a setting to its default removes its modified mark; its unsaved outline remains until Apply.
+
+The F10 search bar searches all menu settings across every category, matching names, categories, sections, descriptions, and slider-effect hints. Results appear once per setting and use the usual page controls. Clear the search to return to the selected category, or select a category to leave search and browse it. Category reset is available while browsing a category.
 
 The F10 menu also lets you rebind the **Binoculars Key**, **Free Look Key**, and **Compass Key**: select a binding, press the desired key, then Apply to save it. Defaults remain **Caps Lock**, either **Alt** key, and **K**.
 

@@ -29,6 +29,26 @@ internal sealed class SettingsDraft
 
     internal string Get(MenuSetting setting) => _values[setting.Id];
 
+    internal bool HasUnsavedChange(MenuSetting setting) => _values[setting.Id] != _baseline[setting.Id];
+
+    // Applying updates the saved baseline, but must never clear the comparison
+    // against the built-in default. Compare typed values so serialized forms
+    // such as 1, 1.0, or True do not produce false modification markers.
+    internal bool IsChangedFromDefault(MenuSetting setting) =>
+        !TryParse(setting.Entry, Get(setting), out var value, out _) ||
+        !Equals(value, setting.Entry.DefaultValue);
+
+    internal int CountModifiedSettings(SettingsMenuCategory category)
+    {
+        var count = 0;
+        foreach (var setting in SettingsCatalog.All)
+        {
+            if (IsInCategory(setting, category) && IsChangedFromDefault(setting))
+                count++;
+        }
+        return count;
+    }
+
     internal void Set(MenuSetting setting, string value) => _values[setting.Id] = value;
 
     internal void Reset(MenuSetting setting) => _values[setting.Id] = SettingsCatalog.FormatValue(setting.Entry.DefaultValue);

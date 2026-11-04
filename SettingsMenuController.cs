@@ -238,7 +238,7 @@ internal sealed class SettingsMenuController : MonoBehaviour
         var padding = S(12f);
         GUI.Label(
             new Rect(rect.x + padding, rect.y + S(10f), rect.width - padding * 2f, S(24f)),
-            "CATEGORIES",
+            "CATEGORIES  /  * MODIFIED",
             _smallStyle!);
 
         var actionHeight = S(36f);
@@ -269,6 +269,7 @@ internal sealed class SettingsMenuController : MonoBehaviour
         var categoryGap = S(4f);
         var categoryHeight = (categoryBottom - categoryTop - categoryGap * (_categories.Length - 1)) / _categories.Length;
         categoryHeight = Mathf.Clamp(categoryHeight, S(24f), S(43f));
+        var searching = !string.IsNullOrWhiteSpace(_search);
 
         for (var index = 0; index < _categories.Length; index++)
         {
@@ -278,18 +279,20 @@ internal sealed class SettingsMenuController : MonoBehaviour
                 categoryTop + index * (categoryHeight + categoryGap),
                 rect.width - padding * 2f,
                 categoryHeight);
-            var selected = category == _selectedCategory;
+            var selected = !searching && category == _selectedCategory;
             var count = CountSettings(category);
-            var label = $"{SettingsCatalog.CategoryName(category)}   {count}";
+            var modified = _draft?.CountModifiedSettings(category) > 0;
+            var label = $"{(modified ? "* " : string.Empty)}{SettingsCatalog.CategoryName(category)}   {count}";
             if (DrawButton(
                     categoryRect,
                     label,
                     selected ? AccentDarkColor : RaisedColor,
                     selected ? AccentColor : HoverColor,
-                    selected ? AccentColor : BorderColor,
+                    selected || modified ? AccentColor : BorderColor,
                     _categoryStyle!))
             {
                 _selectedCategory = category;
+                _search = string.Empty;
                 _page = 0;
                 _searchFocused = false;
                 _message = string.Empty;
@@ -314,11 +317,14 @@ internal sealed class SettingsMenuController : MonoBehaviour
                 ? "All system switches are already disabled."
                 : $"Disabled {changed} system switches. Your current mix will be restored by ENABLE ALL. Apply to save.";
         }
+        GUI.enabled = wasEnabled && !SettingsSyncController.AreSettingsReadOnly && _draft != null &&
+                      string.IsNullOrWhiteSpace(_search);
         if (DrawButton(resetCategoryRect, "RESET CATEGORY", RaisedColor, HoverColor, BorderColor, _buttonStyle!))
         {
             _draft!.ResetCategory(_selectedCategory);
             _message = "Category reset to compiled defaults. Apply to save.";
         }
+        GUI.enabled = wasEnabled && !SettingsSyncController.AreSettingsReadOnly && _draft != null;
         if (DrawButton(resetAllRect, "RESET EVERYTHING", RaisedColor, DangerColor, BorderColor, _buttonStyle!))
         {
             _draft!.ResetAll();
@@ -335,25 +341,27 @@ internal sealed class SettingsMenuController : MonoBehaviour
 
         var padding = S(12f);
         var headerHeight = S(86f);
+        DrawSearch(rect, padding);
+        var searching = !string.IsNullOrWhiteSpace(_search);
         var titleWidth = rect.width * 0.42f;
         GUI.Label(
             new Rect(rect.x + padding, rect.y + S(8f), titleWidth, S(32f)),
-            SettingsCatalog.CategoryName(_selectedCategory),
+            searching ? "Search Results" : SettingsCatalog.CategoryName(_selectedCategory),
             _headingStyle!);
 
         var visibleCount = CountVisibleSettings();
-        var totalCount = CountSettings(_selectedCategory);
-        var countText = string.IsNullOrWhiteSpace(_search)
-            ? $"{visibleCount} settings"
-            : $"{visibleCount} of {totalCount} settings match";
+        var countText = searching
+            ? $"{visibleCount} matches across all categories"
+            : $"{visibleCount} settings";
+        var modifiedCount = searching ? 0 : _draft?.CountModifiedSettings(_selectedCategory) ?? 0;
+        if (modifiedCount > 0)
+            countText += $" / {modifiedCount} modified in category";
         GUI.Label(
             new Rect(rect.x + padding, rect.y + S(40f), titleWidth, S(22f)),
             countText,
             _mutedStyle!);
 
-        DrawSearch(rect, padding);
-
-        var presetHeight = _selectedCategory == SettingsMenuCategory.QuickSetup ? S(102f) : 0f;
+        var presetHeight = !searching && _selectedCategory == SettingsMenuCategory.QuickSetup ? S(102f) : 0f;
         if (presetHeight > 0f)
         {
             DrawPerformancePresets(new Rect(
@@ -386,10 +394,10 @@ internal sealed class SettingsMenuController : MonoBehaviour
             rect.height - headerHeight - presetHeight - readOnlyHeight - padding);
 
         var cardGap = S(8f);
-        var desiredCardHeight = S(98f);
+        var desiredCardHeight = S(118f);
         _visibleRows = Mathf.Clamp(
             Mathf.FloorToInt((_settingsViewport.height + cardGap) / (desiredCardHeight + cardGap)),
-            4,
+            3,
             8);
 
         var pageCount = PageCount(visibleCount);
@@ -406,7 +414,7 @@ internal sealed class SettingsMenuController : MonoBehaviour
                     _settingsViewport.y + S(24f),
                     _settingsViewport.width - S(40f),
                     S(80f)),
-                "No settings match this search. Clear the filter or choose another category.",
+                "No settings match this search. Try another search or clear it to browse categories.",
                 _headingStyle!);
             return;
         }
@@ -530,7 +538,7 @@ internal sealed class SettingsMenuController : MonoBehaviour
         FillRect(fieldRect, _searchFocused ? HoverColor : RaisedColor);
         DrawOutline(fieldRect, _searchFocused ? AccentColor : BorderColor, S(1f));
         var display = string.IsNullOrEmpty(_search)
-            ? "Type to filter settings..."
+            ? "Search all settings..."
             : _search + (_searchFocused ? "|" : string.Empty);
         GUI.Label(
             new Rect(fieldRect.x + S(10f), fieldRect.y, fieldRect.width - S(20f), fieldRect.height),
@@ -591,10 +599,9 @@ internal sealed class SettingsMenuController : MonoBehaviour
         if (_draft == null)
             return;
 
-        var changed = !string.Equals(
-            _draft.Get(setting),
-            setting.Entry.GetSerializedValue(),
-            StringComparison.Ordinal);
+        var modified = _draft.IsChangedFromDefault(setting);
+        var unsaved = _draft.HasUnsavedChange(setting);
+        var changed = modified || unsaved;
         FillRect(rect, changed ? new Color(0.075f, 0.087f, 0.094f, 1f) : RaisedColor);
         DrawOutline(rect, changed ? AccentColor : BorderColor, changed ? S(2f) : S(1f));
         if (changed)
@@ -624,14 +631,26 @@ internal sealed class SettingsMenuController : MonoBehaviour
             new Rect(rect.x + padding, rect.y + S(23f), textWidth, S(26f)),
             setting.DisplayName,
             _bodyStyle!);
+        var descriptionY = S(49f);
+        if (changed)
+        {
+            var status = modified ? "MODIFIED" : "DEFAULT RESTORED";
+            if (unsaved)
+                status += " / UNSAVED";
+            GUI.Label(
+                new Rect(rect.x + padding, rect.y + descriptionY, textWidth, S(20f)),
+                $"{status} / Default: {FormatDefaultValue(setting)}",
+                _smallStyle!);
+            descriptionY += S(20f);
+        }
         if (!string.IsNullOrWhiteSpace(setting.Description))
         {
             GUI.Label(
                 new Rect(
                     rect.x + padding,
-                    rect.y + S(49f),
+                    rect.y + descriptionY,
                     textWidth,
-                    Mathf.Max(S(18f), rect.height - S(54f))),
+                    Mathf.Max(S(18f), rect.height - descriptionY - S(5f))),
                 setting.Description,
                 _descriptionStyle!);
         }
@@ -652,6 +671,19 @@ internal sealed class SettingsMenuController : MonoBehaviour
                 _capturingKeybindId = null;
         }
         GUI.enabled = wasEnabled;
+    }
+
+    [HideFromIl2Cpp]
+    private static string FormatDefaultValue(MenuSetting setting)
+    {
+        var value = SettingsCatalog.FormatValue(setting.Entry.DefaultValue);
+        if (setting.Entry.SettingType == typeof(bool))
+            return (bool)setting.Entry.DefaultValue ? "ENABLED" : "DISABLED";
+        if (setting.Entry.SettingType == typeof(KeyCode))
+            return SettingsCatalog.HumanizeKeyCode(value);
+        if (!string.IsNullOrEmpty(setting.Unit) && setting.Unit != "0-1")
+            value += " " + setting.Unit;
+        return value;
     }
 
     [HideFromIl2Cpp]
@@ -1114,7 +1146,9 @@ internal sealed class SettingsMenuController : MonoBehaviour
     [HideFromIl2Cpp]
     private bool IsVisible(MenuSetting setting)
     {
-        return SettingsDraft.IsInCategory(setting, _selectedCategory) && setting.Matches(_search);
+        return string.IsNullOrWhiteSpace(_search)
+            ? SettingsDraft.IsInCategory(setting, _selectedCategory)
+            : setting.Matches(_search.Trim());
     }
 
     [HideFromIl2Cpp]

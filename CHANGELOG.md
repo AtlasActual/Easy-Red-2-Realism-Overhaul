@@ -2,6 +2,15 @@
 
 This file records only concrete, player-visible changes in each released version of Easy Red 2 Realism Overhaul. It is a living description of the shipped mod: superseded wording is replaced with the final behavior, and changes that are removed or reverted are deleted instead of retained as historical notes.
 
+## 1.2.1 - 2026-11-04
+
+Easy Red 2 compatibility: version **2.1.1 "Cold Steel"**, Steam public branch build `26375879` (November 2, 2026 update). Built against the updated game's regenerated interop assemblies. The latest local 1.2.1 startup log on this game build reports all 167 patch modules applied without failures; 1.2.1 passes the release build and deterministic scenario suite. In-game validation of the new F10 indicators, global search, and the Optics Zoom fix remains pending.
+
+- Settings changed from the mod's built-in defaults retain their orange outline and a **MODIFIED** label after Apply and reopening F10. The default value appears beside the label for numeric settings, switches, and key bindings; **UNSAVED** labels separately identify pending edits.
+- Categories containing non-default settings show an **\*** and an orange border, and the category header reports the modified count. Quick Setup reflects its shared settings, and category markers cover all pages regardless of the search. Resetting to defaults clears modified markers while retaining an unsaved outline until Apply.
+- The F10 search bar now searches all menu categories instead of only the selected category. Each matching setting appears once, with normal pagination. Search matches names, categories, sections, descriptions, and slider-effect hints. Clearing the search returns to the selected category, and selecting a category exits search. Performance presets are hidden during search, and category reset is available only when browsing a category.
+- Fixed the **Optics Zoom** slider having no effect in tank and static-weapon gunsights. The current game reads each sight's field of view from per-sight scope data instead of the turret value the mod previously adjusted, so the held-breath zoom is now applied to the value the game actually uses. The game's own fixed held-breath zoom step is accounted for, so the slider keeps its documented meaning: 1x matches the infantry held-breath zoom and higher values zoom further in. The zoom also follows the game's native held-breath rules for stamina and bleeding, the same as infantry.
+
 ## 1.2.0 - 2026-10-15
 
 Easy Red 2 compatibility: version 2.1.0, Steam public branch build `25255578` (September 11, 2026).
