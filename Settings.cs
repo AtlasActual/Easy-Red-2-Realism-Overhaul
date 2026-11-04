@@ -741,8 +741,7 @@ internal static class Settings
             "In the unzoomed first-person gunner/periscope view, allows horizontal turret traversal but prevents the mouse or stick from changing gun elevation. The gun holds its local elevation, so hull movement still moves the bore naturally. The right-click optical gunsight, third-person view, commander and driver seats, AI, and remote players are unchanged.");
         UnstabilizedGunsightEnabled = config.Bind("7g. Vehicle aiming", "UnstabilizedGunsightEnabled", true,
             "While using the right-click optical gunsight, directly moves the selected weapon with relative mouse or stick input and attaches the view to the physical gun. This removes the artificial vertical stabilization that otherwise makes the gun chase a world aim point while the vehicle moves. Disable this option to keep the native stabilized point-aim behavior inside the gunsight. Third-person aiming is unchanged.");
-        OpticsZoom = config.Bind("7g. Vehicle aiming", "OpticsZoom", 1.646f,
-            new ConfigDescription("Strength of the extra zoom while the hold-breath input is active in tank and static-weapon gunsights. One matches the base game's infantry hold-breath zoom. Third-person vehicle view is unchanged.", new AcceptableValueRange<float>(0.5f, 2f)));
+        OpticsZoom = BindOpticsZoom(config);
         ThirdPersonZoom = BindThirdPersonZoom(config);
         BinocularsEnabled = config.Bind("7e. First-person view", "BinocularsEnabled", true,
             "Enables first-person binoculars while alive and on foot.");
@@ -886,6 +885,37 @@ internal static class Settings
         config.Remove(legacyDefinition);
         config.Save();
         return current;
+    }
+
+    private static ConfigEntry<float> BindOpticsZoom(ConfigFile config)
+    {
+        const string section = "7g. Vehicle aiming";
+        const string key = "OpticsZoom";
+        const float defaultValue = 3f;
+
+        // Before 1.2.1 this key stored a 0.5-2 "strength" of the infantry
+        // hold-breath step rather than a magnification. Saved values are kept
+        // as magnifications, but the old default is replaced by the new one so
+        // existing installs do not start out with an unintended 1.646x marked
+        // as a modified setting.
+        const float legacyDefaultValue = 1.646f;
+
+        var existed = ConfigFileContainsSetting(config.ConfigFilePath, section, key);
+        var entry = config.Bind(
+            section,
+            key,
+            defaultValue,
+            new ConfigDescription(
+                "Magnification of tank and static-weapon gunsights while the hold-breath input is held, relative to the unzoomed gunsight. 1x gives no held-breath zoom; the base game's own fixed step is roughly 1.5x on a typical sight. Third-person vehicle view is unchanged.",
+                new AcceptableValueRange<float>(1f, 5f)));
+
+        if (existed && Math.Abs(entry.Value - legacyDefaultValue) < 0.0005f)
+        {
+            entry.Value = defaultValue;
+            config.Save();
+        }
+
+        return entry;
     }
 
     private static ConfigEntry<float> BindThirdPersonZoom(ConfigFile config)

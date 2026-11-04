@@ -355,9 +355,11 @@ internal static class PlayerVehicleHoldBreathZoomPatch
         if (turret == null)
             return;
 
-        var strength = Settings.OpticsZoom.Value;
-        _activeMultiplier = 1f -
-            ((1f - PlayerHoldBreathZoomPatch.NativeHoldBreathFovMultiplier) * strength);
+        // The setting is an optical magnification of the unzoomed gunsight, so
+        // the target FOV is the sight's own FOV divided by it. 1x therefore
+        // yields no held-breath zoom at all once the native step is compensated.
+        var magnification = Mathf.Max(1f, Settings.OpticsZoom.Value);
+        _activeMultiplier = 1f / magnification;
         _activeTurretId = turret.GetInstanceID();
     }
 
@@ -385,8 +387,8 @@ internal static class PlayerVehicleHoldBreathTurretFovPatch
 
         // Return the target the native method should settle on, plus the fixed
         // offset it is about to subtract, so the final gunsight FOV is the
-        // sight's own FOV scaled by the infantry-style hold-breath multiplier.
-        // The native method still performs the frame-by-frame interpolation.
+        // sight's own FOV divided by the configured magnification. The native
+        // method still performs the frame-by-frame interpolation.
         var targetFov = Mathf.Clamp(__result * multiplier, 1f, 179f);
         __result = targetFov +
                    PlayerVehicleHoldBreathZoomPatch.NativeVehicleHoldBreathFovOffsetDegrees;
