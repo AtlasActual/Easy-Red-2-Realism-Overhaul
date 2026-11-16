@@ -1263,6 +1263,9 @@ internal static partial class ContactResponse
         state.HaltSpacingNextRetryAt = 0f;
         state.HasHaltSpacingTarget = false;
         state.HaltSpacingTarget = default;
+        state.IdleOverlapNextCheckAt = 0f;
+        state.IdleOverlapSince = 0f;
+        state.ArrivalCoverNextSearchAt = 0f;
         state.ContactUntil = 0f;
         state.ContactCrouchOwned = false;
         ClearCoverClearancePose(state);
@@ -1400,6 +1403,9 @@ internal static partial class ContactResponse
         state.HaltSpacingNextRetryAt = 0f;
         state.HasHaltSpacingTarget = false;
         state.HaltSpacingTarget = default;
+        state.IdleOverlapNextCheckAt = 0f;
+        state.IdleOverlapSince = 0f;
+        state.ArrivalCoverNextSearchAt = 0f;
         ResetManeuverCoverHold(state);
         ResetDefensiveOwnershipState(state);
         ResetAttackFireEvidence(state);

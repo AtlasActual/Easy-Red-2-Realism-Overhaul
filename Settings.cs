@@ -93,6 +93,8 @@ internal static class Settings
     internal static ConfigEntry<float> GrenadeFriendlySafetyRadius = null!;
     internal static ConfigEntry<float> GrenadeCooldownSeconds = null!;
     internal static ConfigEntry<bool> AntiTankGrenadeThrowsEnabled = null!;
+    internal static ConfigEntry<float> GrenadeThrowLikelihood = null!;
+    internal static ConfigEntry<float> MortarFireLikelihood = null!;
 
     internal static ConfigEntry<float> LauncherMaximumEngagementDistance = null!;
     internal static ConfigEntry<float> LauncherAccuracySpreadMultiplier = null!;
@@ -340,7 +342,7 @@ internal static class Settings
         ContactResponseEnabled = config.Bind("AI - Infantry tactics - Contact response", "Enabled", true,
             "Coordinates cover selection, forward relocations, and close engagement halts when infantry make contact.");
         HaltSpacingEnabled = config.Bind("AI - Infantry tactics - Contact response", "StepClearOfStackedSquadmates", true,
-            "When a soldier is about to take a fighting halt on top of a squadmate, he first takes one short sideways or rear-side step into a distinct open position, and keeps taking a short step clear every few seconds for as long as he is still physically overlapping a squadmate. A soldier actually occupying his own reserved slot keeps it against an unanchored AI intruder. If two slot occupants physically overlap, one deterministically yields; AI also yield to an overlapping player-controlled neighbour. Cover-slot spacing is handled separately by the cover-search crowding penalty and is unaffected by this setting.");
+            "When a soldier is about to take a fighting halt on top of a squadmate, he first takes one short sideways or rear-side step into a distinct open position, and keeps taking a short step clear every few seconds for as long as he is still physically overlapping a squadmate. A soldier whose route has ended and who finds no free cover also spreads out from friendlies crowding him. A soldier actually occupying his own reserved slot keeps it against an unanchored AI intruder. If two slot occupants physically overlap, one deterministically yields; AI also yield to an overlapping player-controlled neighbour. Cover-slot spacing is handled separately by the cover-search crowding penalty and is unaffected by this setting.");
         ImprovisedCoverEnabled = config.Bind("AI - Infantry tactics - Contact response", "ImprovisedCover", true,
             "When no placed cover slot (Combat Cover prop, building or trench node) protects a soldier, he probes the ground within about 20 m for walls, banks, crater lips and trench floors that actually stop bullets from the threat's direction and takes position there. Placed cover slots are always preferred when one protects him.");
         InfantrySeparationDistance = config.Bind("AI - Infantry tactics - Contact response", "MinimumSoldierSeparationMeters", 3.02f,
@@ -454,6 +456,10 @@ internal static class Settings
         GrenadeCooldownSeconds = config.Bind("AI - Infantry tactics - Combat safety", "GrenadeCooldownSeconds", 13.035f,
             new ConfigDescription("Minimum time between explosive-grenade throws by one AI soldier. The recommended baseline is centered on this slider.", new AcceptableValueRange<float>(5f, 21.07f)));
 
+        GrenadeThrowLikelihood = config.Bind("AI - Infantry tactics - Combat safety", "GrenadeThrowLikelihood", 0.5f,
+            new ConfigDescription("Chance that an AI soldier throws a frag grenade once a throw is safe and in range. Rolled once per grenade cooldown, so 0.5 roughly halves how many grenades the AI throws, 1 throws at every safe opportunity, and 0 stops AI frag grenades. Does not affect smoke or anti-tank grenades.", new AcceptableValueRange<float>(0f, 1f)));
+        MortarFireLikelihood = config.Bind("AI - Infantry tactics - Combat safety", "KneeMortarFireLikelihood", 0.5f,
+            new ConfigDescription("Chance that an AI knee-mortar crewman fires a round when he has a target. A crewman who fails the roll holds fire for about 10 seconds before trying again, so lower values thin out the barrage from a mortar section. 1 fires at every opportunity and 0 stops AI knee mortars.", new AcceptableValueRange<float>(0f, 1f)));
         AntiTankGrenadeThrowsEnabled = config.Bind("AI - Infantry tactics - Combat safety", "AntiTankGrenadeThrows", true,
             "AI infantry carrying an anti-tank grenade throw it at a visible enemy tank inside throwing range even while their selected target is an infantryman. Without this the game only considers the throw while the tank itself is the soldier's current target. Friendly soldiers beside the tank still prevent the throw.");
 

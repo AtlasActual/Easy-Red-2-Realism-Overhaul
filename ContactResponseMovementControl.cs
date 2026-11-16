@@ -355,6 +355,142 @@ internal static partial class ContactResponse
     }
 
     /// <summary>
+    /// Stops soldiers bunching where their route ended. Calm defenders with no slot and
+    /// soldiers at the end of a native route are never halted by this mod, so the
+    /// halt-time correction cannot reach them. Once settled, each takes the nearest free
+    /// cover; if none is free he spreads out from whoever is crowding him instead.
+    /// </summary>
+    internal static void UpdateArrivalPositioning(
+        SoldierAI ai,
+        Soldier soldier,
+        ProposalSource movementSource,
+        float now)
+    {
+        if (!Settings.ContactResponseEnabled.Value && !Settings.HaltSpacingEnabled.Value)
+            return;
+
+        var soldierId = soldier.GetInstanceID();
+        var state = AiState.GetContactState(soldierId);
+        if (now < state.IdleOverlapNextCheckAt)
+            return;
+        state.IdleOverlapNextCheckAt = now + HaltSpacingCore.IdleOverlapCheckIntervalSeconds;
+
+        try
+        {
+            var busy = soldier.IsReloading ||
+                       GroundAiDirector.HasProtectedInfantryAssignment(soldier) ||
+                       GroundAiDirector.HasNativeVehicleBoardingOrder(soldier) ||
+                       GroundAiDirector.HasNativeMedicOrder(soldier);
+            var owner = ResolveMovementOwner(soldier, state, soldierId, now, MovementOwner.Free);
+            if (!HaltSpacingCore.IdleOverlapEligible(
+                    owner, movementSource, soldier.IsMoving(0.2f), busy))
+            {
+                state.IdleOverlapSince = 0f;
+                return;
+            }
+
+            state.IdleOverlapSince = HaltSpacingCore.NextIdleOverlapSince(
+                true, state.IdleOverlapSince, now);
+            if (!HaltSpacingCore.IdleOverlapDwellElapsed(state.IdleOverlapSince, now))
+                return;
+
+            state.IdleOverlapNextCheckAt = now + HaltSpacingCore.IdleSpreadRetrySeconds;
+            var hasLiveRoute = HasCommittedDestination(soldier);
+            var onCover = IsOnUsableCover(soldier);
+            if (Settings.ContactResponseEnabled.Value &&
+                HaltSpacingCore.ShouldSeekCoverOnArrival(
+                    hasLiveRoute, onCover, IsAtAuthoredDestination(soldier),
+                    now >= state.ArrivalCoverNextSearchAt) &&
+                TryAssignNearestFreeCover(ai, soldier, state, soldierId, now))
+            {
+                state.IdleOverlapSince = 0f;
+                return;
+            }
+
+            if (!Settings.HaltSpacingEnabled.Value)
+                return;
+
+            // Someone on cover or still en route only reacts to an actual body overlap.
+            var crowdRadius = onCover || hasLiveRoute
+                ? HaltSpacingCore.ClippingRadiusMeters
+                : InfantryCoverPolicy.OccupancyRadiusMeters;
+            if (!TryStartSpacingStep(
+                    ai, soldier, state, soldierId, now, crowdRadius, idleOverlap: true))
+            {
+                return;
+            }
+
+            // No halt path is running to commit this grant, so commit it here.
+            ApplyMovementDecision(ai, soldier, Time.deltaTime, now, MovementOwner.Free, "idle-overlap");
+            AiState.Trace($"Halt spacing: soldier {soldierId} spread out from a crowded arrival");
+        }
+        catch (NullReferenceException) { state.IdleOverlapSince = 0f; }
+        catch (Il2CppException) { state.IdleOverlapSince = 0f; }
+        catch (ObjectCollectedException) { state.IdleOverlapSince = 0f; }
+    }
+
+    private static bool IsAtAuthoredDestination(Soldier soldier)
+    {
+        var destination = soldier.targetDestination;
+        return soldier.HasDestinationAssigned && destination != null && !destination.WasCollected &&
+               !Il2CppTypeTests.Is<DestinationWithoutCover>(destination);
+    }
+
+    private static bool TryAssignNearestFreeCover(
+        SoldierAI ai,
+        Soldier soldier,
+        ContactResponseState state,
+        int soldierId,
+        float now)
+    {
+        state.ArrivalCoverNextSearchAt = now + HaltSpacingCore.ArrivalCoverRetrySeconds;
+        var position = soldier.transform.position;
+        if (!TryGetDefensiveArea(soldier, out var center, out var radius))
+        {
+            center = position;
+            radius = 0f;
+        }
+
+        var cover = FindCover(
+            soldier,
+            GetDefensiveApproachPoint(soldier, state, center, radius),
+            Settings.ContactCoverSearchRadius.Value,
+            state,
+            now,
+            CoverSelectionMode.Normal,
+            null,
+            respectAttackWaypoint: true,
+            evaluateFiringQuality: false,
+            out _,
+            out var searchDeferred,
+            out _,
+            nearestFreeOnly: true);
+        if (searchDeferred)
+        {
+            state.ArrivalCoverNextSearchAt = DeferredCoverRetryAt(soldierId, now);
+            return false;
+        }
+
+        if (cover == null)
+            return false;
+
+        // Deliberately an ordinary native destination, not a Relocating move: a soldier
+        // whose movement proposal is Native would have that cancelled on his next update.
+        // The CoverPosition guard still applies its occupancy and reservation checks.
+        ExecuteOwnedCoverWrite(soldier, () => soldier.CoverPosition(cover));
+        if (!soldier.HasDestinationAssigned ||
+            !SameNativeDestination(soldier.targetDestination, cover))
+        {
+            MarkFailedCover(state, cover.Pointer, now);
+            return false;
+        }
+
+        ai.UpdatePath();
+        AiState.Trace($"Arrival cover: soldier {soldierId} took the nearest free cover");
+        return true;
+    }
+
+    /// <summary>
     /// <paramref name="crowdRadius"/> only gates whether a nearby friendly counts as
     /// "crowding" this soldier (the full separation distance on a rising edge or cover
     /// conflict, the tight clipping radius on a retry). The candidate search itself
@@ -369,7 +505,8 @@ internal static partial class ContactResponse
         ContactResponseState state,
         int soldierId,
         float now,
-        float crowdRadius)
+        float crowdRadius,
+        bool idleOverlap = false)
     {
         var separation = InfantryCoverPolicy.OccupancyRadiusMeters;
         var position = soldier.transform.position;
@@ -378,14 +515,27 @@ internal static partial class ContactResponse
             neighbourSoldier == null)
             return false;
 
+        // Someone walking past is not a crowd he needs to get away from.
+        if (idleOverlap && neighbourSoldier.IsMoving(0.2f))
+            return false;
+
         var neighbourId = neighbourSoldier.GetInstanceID();
         var holdsSlot = HoldsPhysicalCoverSlot(soldier, state, soldierId, now);
         var neighbourHoldsSlot = AiState.ContactStates.TryGetValue(neighbourId, out var neighbourState) &&
                                  HoldsPhysicalCoverSlot(neighbourSoldier, neighbourState, neighbourId, now);
         var physicallyClipping = HorizontalDistanceSqr(position, neighbour) <=
                                  HaltSpacingCore.ClippingRadiusMeters * HaltSpacingCore.ClippingRadiusMeters;
-        if (!HaltSpacingCore.ShouldYieldToNeighbour(holdsSlot, neighbourHoldsSlot,
-                AiOwnership.IsAutonomous(neighbourSoldier), physicallyClipping, soldierId, neighbourId))
+        var neighbourCanYield = AiOwnership.IsAutonomous(neighbourSoldier);
+        var yields = idleOverlap
+            // Idle soldiers often stand on a native slot that has no mod reservation.
+            ? HaltSpacingCore.ShouldYieldIdleOverlap(
+                holdsSlot || IsOnUsableCover(soldier),
+                neighbourHoldsSlot || neighbourCanYield && IsOnUsableCover(neighbourSoldier),
+                neighbourCanYield, physicallyClipping, HasCommittedDestination(soldier),
+                soldierId, neighbourId)
+            : HaltSpacingCore.ShouldYieldToNeighbour(holdsSlot, neighbourHoldsSlot,
+                neighbourCanYield, physicallyClipping, soldierId, neighbourId);
+        if (!yields)
             return false;
 
         var self = new MapPoint(position.x, position.z);
@@ -394,7 +544,9 @@ internal static partial class ContactResponse
         var target = default(Vector3);
         var stepLength = 0f;
         var foundTarget = false;
-        for (var pass = 0; pass < 2 && !foundTarget; pass++)
+        // The short fallback only clears a body overlap; it cannot restore full spacing.
+        var passCount = idleOverlap && !physicallyClipping ? 1 : 2;
+        for (var pass = 0; pass < passCount && !foundTarget; pass++)
         {
             var passStepMeters = pass == 0
                 ? separation + HaltSpacingCore.DestinationClearanceMeters
@@ -449,6 +601,11 @@ internal static partial class ContactResponse
         // cover run keeps its destination so the regular executor can resume it.
         if (!state.Relocating && state.ReservedCoverId != IntPtr.Zero)
             ReleaseContestedOccupiedCover(soldier, state, soldierId, state.ReservedCoverId, now);
+        // An arrived soldier's native route would otherwise pull him straight back.
+        // Clearing it lets the next native assignment pick an unoccupied position.
+        else if (idleOverlap && !state.Relocating && soldier.HasDestinationAssigned &&
+                 !HasCommittedDestination(soldier))
+            ExecuteOwnedCoverWrite(soldier, () => soldier.CoverPosition(null!));
 
         var stepWindow = Mathf.Clamp(
             stepLength / 1.5f + 0.35f,

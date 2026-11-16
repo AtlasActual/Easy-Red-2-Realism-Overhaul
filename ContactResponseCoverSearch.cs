@@ -779,7 +779,8 @@ internal static partial class ContactResponse
         out float bestFortifiedScore,
         out bool searchDeferred,
         out CoverPositionQuality selectedQuality,
-        CoverPositionQuality? defensiveUpgradeFrom = null)
+        CoverPositionQuality? defensiveUpgradeFrom = null,
+        bool nearestFreeOnly = false)
     {
         bestFortifiedScore = float.NegativeInfinity;
         selectedQuality = default;
@@ -821,7 +822,7 @@ internal static partial class ContactResponse
             true);
         if (candidates == null)
         {
-            return defensiveUpgradeFrom.HasValue
+            return defensiveUpgradeFrom.HasValue || nearestFreeOnly
                 ? null
                 : FindFieldCover(
                     soldier, position, targetPosition, towardThreat, state, now, selectionMode,
@@ -930,6 +931,25 @@ internal static partial class ContactResponse
             return left.Destination.Pointer.ToInt64()
                 .CompareTo(right.Destination.Pointer.ToInt64());
         });
+
+        if (nearestFreeOnly)
+        {
+            // The list is already nearest-first and free of reservations, so the first
+            // slot with nobody standing on it is the answer. No ballistic scoring.
+            var occupancyChecks = Mathf.Min(
+                coarseCandidates.Count, InfantryCoverPolicy.DetailedCandidateLimit);
+            for (var index = 0; index < occupancyChecks; index++)
+            {
+                var coarse = coarseCandidates[index];
+                if (!coarse.Destination.WasCollected &&
+                    !CoverOccupancy.IsOccupiedByOther(coarse.Position, soldier))
+                {
+                    return coarse.Destination;
+                }
+            }
+
+            return null;
+        }
 
         AiDestination? best = null;
         var bestScore = float.MaxValue;

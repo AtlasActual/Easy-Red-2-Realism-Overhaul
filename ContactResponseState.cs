@@ -88,6 +88,11 @@ internal sealed class ContactResponseState
     internal float HaltSpacingNextRetryAt;
     internal bool HasHaltSpacingTarget;
     internal Vector3 HaltSpacingTarget;
+    // Slow arrival check for soldiers outside any fighting halt: the next due time, when
+    // he settled (zero while moving), and when he may next search for free cover.
+    internal float IdleOverlapNextCheckAt;
+    internal float IdleOverlapSince;
+    internal float ArrivalCoverNextSearchAt;
     internal bool SuppressionMovementOwned;
     internal bool SuppressionPoseOwned;
     internal bool SuppressionFireInhibited;

@@ -251,6 +251,14 @@ internal static class HandheldFriendlyFirePatch
                 return false;
             }
 
+            if (KneeMortarFireLimiter.ShouldWithhold(shooter, __instance))
+            {
+                AiDebugTelemetry.RecordDecision(AiDebugCategory.Combat, shooter.GetInstanceID(),
+                    "Fire withheld: mortar section already firing on this area");
+                __result = false;
+                return false;
+            }
+
             var origin = __instance.GetBulletGenerationPosition();
             if (ContactResponse.TryPreventBlockedCoverShot(
                     shooter, origin, shooter.GetFireDir()))
@@ -450,6 +458,18 @@ internal static class SafeAiGrenadeThrowPatch
         {
             AiDebugTelemetry.RecordDecision(AiDebugCategory.Danger, id,
                 "Grenade rejected: friendly inside blast safety radius");
+            return false;
+        }
+
+        // The opportunity is safe. Whether this soldier takes it is rolled once per
+        // cooldown: a failed roll waits out a full cooldown, so the likelihood scales
+        // how many grenades are thrown instead of every soldier eventually throwing.
+        if (!ExplosiveLikelihoodCore.Passes(
+                Settings.GrenadeThrowLikelihood.Value, UnityEngine.Random.value))
+        {
+            AiState.NextGrenadeThrow[id] = now + AiBehaviorTuning.GrenadeCooldownSeconds;
+            AiDebugTelemetry.RecordDecision(AiDebugCategory.Danger, id,
+                "Grenade held back: throw likelihood roll failed");
             return false;
         }
 

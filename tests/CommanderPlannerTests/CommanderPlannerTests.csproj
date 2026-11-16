@@ -28,6 +28,7 @@
     <Compile Include="..\..\RememberedGrenadeDecisionCore.cs" Link="RememberedGrenadeDecisionCore.cs" />
     <Compile Include="..\..\AntiTankGrenadeDecisionCore.cs" Link="AntiTankGrenadeDecisionCore.cs" />
     <Compile Include="..\..\FragGrenadeDecisionCore.cs" Link="FragGrenadeDecisionCore.cs" />
+    <Compile Include="..\..\ExplosiveLikelihoodCore.cs" Link="ExplosiveLikelihoodCore.cs" />
     <Compile Include="..\..\FieldCoverProbeCore.cs" Link="FieldCoverProbeCore.cs" />
     <Compile Include="..\..\InfantryCoverDecisionCore.cs" Link="InfantryCoverDecisionCore.cs" />
     <Compile Include="..\..\GroundAiDecisionCore.cs" Link="GroundAiDecisionCore.cs" />

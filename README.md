@@ -6,9 +6,16 @@ ER2RealismOverhaul is built around the rough edges that become hard to ignore af
 
 The goal is to fix those moments without replacing the game underneath them. This is not a health or damage multiplier mod; Easy Red 2's missions, armour system, and basic damage model remain intact.
 
-> **Current release:** 1.2.1
+> **Current release:** 1.2.2
 >
-> **Compatibility:** Easy Red 2 **2.1.1 "Cold Steel"**, Steam public-branch build `26375879` (November 2, 2026 update). Built against the updated game's regenerated interop assemblies; the latest local 1.2.1 startup log on this build reports all 167 patch modules applied without failures. Version 1.2.1 passes the release build and deterministic scenario suite; its F10 changes and the Optics Zoom fix still need in-game validation. Versions 1.1.3 and earlier do not work on Easy Red 2 2.1.0 or later.
+> **Compatibility:** Easy Red 2 **2.1.1 "Cold Steel"**, Steam public-branch build `26375879` (November 2, 2026 update). Built against the updated game's regenerated interop assemblies. Version 1.2.2 passes the release build and deterministic scenario suite; its AI arrival cover and spacing fix, the new grenade and mortar likelihood sliders, and the 1.2.1 F10 changes and Optics Zoom fix still need in-game validation. Versions 1.1.3 and earlier do not work on Easy Red 2 2.1.0 or later.
+
+## What's new in 1.2.2
+
+- Added **Grenade Throw Likelihood** (default 0.5) under AI / Infantry Tactics / Combat Safety: the chance that an AI soldier takes a safe frag-grenade opportunity, rolled once per grenade cooldown. Lower it to cut grenade spam, set 1 for the previous behavior or 0 to stop AI frag grenades.
+- Added **Knee Mortar Fire Likelihood** (default 0.5) in the same category, so a mortar section no longer fires every round at once. Mortarmen also hold fire while a friendly soldier, including the player, is within 25 m of the target.
+- Added Linux and Steam Deck installation instructions (Proton).
+- Fixed AI infantry bunching up or stacking inside one another where their route ended. About two seconds after stopping in the open, a soldier moves to the nearest free cover; when none is free, crowded soldiers spread out one at a time. The player's own squadmates remain on the vanilla AI.
 
 ## What's new in 1.2.1
 
@@ -201,7 +208,7 @@ Large-calibre gun, shell, anti-tank weapon, and bomb ballistics remain research-
 
 ### Requirements
 
-- Easy Red 2 on Windows.
+- Easy Red 2 on Windows, or on Linux and Steam Deck through Proton (see **Linux and Steam Deck** below).
 - **BepInEx 6 for Unity IL2CPP, Windows x64.** Download a build whose filename contains `Unity.IL2CPP-win-x64` from the [official BepInEx builds page](https://builds.bepinex.dev/projects/bepinex_be). The [official IL2CPP installation guide](https://docs.bepinex.dev/master/articles/user_guide/installation/unity_il2cpp.html) is available if this is your first BepInEx mod.
 - The latest `ER2RealismOverhaul.dll` from the [Releases page](../../releases/latest).
 
@@ -226,6 +233,22 @@ Easy Red 2
 ```
 
 Do not place the DLL in `Easy Red 2_Data`.
+
+### Linux and Steam Deck (Proton)
+
+Easy Red 2 runs on Linux through Steam's Proton, so the Windows x64 IL2CPP BepInEx package is the one to use. BepInEx loads through `winhttp.dll`, which Proton ignores unless it is told to use the file in the game folder. Without the launch option below BepInEx never starts, even when everything is installed correctly, and the F10 menu does not appear.
+
+1. Install the mod exactly as described under **Setup** above, into the game's folder (`~/.local/share/Steam/steamapps/common/Easy Red 2` on most installs). The Windows x64 BepInEx release ZIP can be extracted there directly.
+2. In Steam, right-click **Easy Red 2** and select **Properties > General > Launch Options**.
+3. Enter this exactly, then close the dialog:
+
+   ```text
+   WINEDLLOVERRIDES="winhttp=n,b" %command%
+   ```
+
+4. Make sure the game is set to run through Proton (**Properties > Compatibility**), then launch it. The first launch is slower while BepInEx generates its files. Press **F10** in game to confirm the mod loaded.
+
+If the menu does not appear, check that `BepInEx/LogOutput.log` exists in the game folder; if it is missing, the launch option was not applied. Thanks to xxvertigoxx for reporting the launch option. This setup has not been validated on every distribution.
 
 ### Updating
 

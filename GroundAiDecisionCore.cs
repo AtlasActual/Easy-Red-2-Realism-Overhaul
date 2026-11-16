@@ -762,6 +762,65 @@ internal static class HaltSpacingCore
     internal static bool MayIgnoreDepartureBody(bool self, bool friendly, bool clippingAtStart)
         => self || friendly && clippingAtStart;
 
+    // Fighting halts probe for stacking as they begin, but a soldier the mod is not
+    // holding (a calm defender with no slot, a finished native route) never enters one.
+    // Once such a soldier has stood still for the dwell he takes the nearest free
+    // cover; spreading out is only the fallback when no cover is free.
+    internal const float IdleOverlapCheckIntervalSeconds = 1f;
+    internal const float IdleOverlapDwellSeconds = 1.5f;
+    internal const float IdleSpreadRetrySeconds = 2f;
+    internal const float ArrivalCoverRetrySeconds = 8f;
+
+    internal static bool IdleOverlapEligible(
+        MovementOwner owner,
+        ProposalSource movementSource,
+        bool physicallyMoving,
+        bool busy)
+        => owner == MovementOwner.Free && !physicallyMoving && !busy &&
+           movementSource is not (ProposalSource.External or ProposalSource.Hazard or
+               ProposalSource.ActionSafety or ProposalSource.VehicleBoarding or
+               ProposalSource.ProtectedAssignment);
+
+    /// <summary>Returns when the soldier settled; zero means he has not.</summary>
+    internal static float NextIdleOverlapSince(bool settled, float since, float now)
+        => !settled ? 0f : since > 0f ? since : now;
+
+    internal static bool IdleOverlapDwellElapsed(float since, float now)
+        => since > 0f && now - since >= IdleOverlapDwellSeconds;
+
+    // A soldier standing at an authored slot has already arrived at cover, even when
+    // native cover status flickers; searching again would hop him between slots.
+    internal static bool ShouldSeekCoverOnArrival(
+        bool hasLiveRoute,
+        bool onCover,
+        bool atAuthoredDestination,
+        bool searchDue)
+        => !hasLiveRoute && !onCover && !atAuthoredDestination && searchDue;
+
+    /// <summary>
+    /// Exactly one of two settled, crowded soldiers moves. Unlike a fighting halt,
+    /// neither is busy, so moving both would only scatter them twice as far. Merely
+    /// being near someone never evicts a soldier from cover or stops a live route;
+    /// only an actual body overlap does.
+    /// </summary>
+    internal static bool ShouldYieldIdleOverlap(
+        bool holdsCover,
+        bool neighbourHoldsCover,
+        bool neighbourCanYield,
+        bool physicallyClipping,
+        bool hasLiveRoute,
+        int soldierId,
+        int neighbourId)
+    {
+        if (!physicallyClipping && (holdsCover || hasLiveRoute))
+            return false;
+        if (!neighbourCanYield)
+            return physicallyClipping;
+        if (holdsCover != neighbourHoldsCover)
+            return neighbourHoldsCover;
+        return soldierId > neighbourId;
+    }
+
     internal static bool ShouldAttempt(
         bool attemptedThisEpisode, MovementOwner owner, bool holdsCoverSlot)
         => !attemptedThisEpisode && !holdsCoverSlot &&

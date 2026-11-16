@@ -549,6 +549,8 @@ internal static class SettingsCatalog
         "GrenadeMaximumRangeMeters" => ("shorter throws only", "allow longer throws"),
         "GrenadeFriendlySafetyRadiusMeters" => ("less ally clearance", "more ally clearance"),
         "GrenadeCooldownSeconds" => ("throw more often", "throw less often"),
+        "GrenadeThrowLikelihood" => ("throw fewer grenades", "throw more grenades"),
+        "KneeMortarFireLikelihood" => ("fire fewer rounds", "fire more rounds"),
 
         "AwarenessDistanceMeters" => ("react only closer", "react from farther"),
         "RetreatDistanceMeters" => ("hide only closer", "hide from farther"),

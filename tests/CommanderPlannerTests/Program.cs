@@ -30,6 +30,7 @@ internal static class Program
             (nameof(AntiTankGrenadesNeedOnlyAVisibleTankInNativeReach), AntiTankGrenadesNeedOnlyAVisibleTankInNativeReach),
             (nameof(FragGrenadesUseConfirmedOpportunitiesWithoutRequiringSuppression), FragGrenadesUseConfirmedOpportunitiesWithoutRequiringSuppression),
             (nameof(FragGrenadesRespectOrdersAndThrowingReach), FragGrenadesRespectOrdersAndThrowingReach),
+            (nameof(ExplosiveLikelihoodScalesHowOftenSafeOpportunitiesAreTaken), ExplosiveLikelihoodScalesHowOftenSafeOpportunitiesAreTaken),
             (nameof(ImprovisedCoverOnlyProposesGroundThatFacesAwayFromTheThreat), ImprovisedCoverOnlyProposesGroundThatFacesAwayFromTheThreat),
             (nameof(ImprovisedCoverShortlistIsSmallNearAndSpread), ImprovisedCoverShortlistIsSmallNearAndSpread),
             (nameof(TracerRetentionHonorsMachineGunAndEndpointRules), TracerRetentionHonorsMachineGunAndEndpointRules),
@@ -148,6 +149,7 @@ internal static class Program
             (nameof(HaltSpacingStepsOffTheThreatAxisOnlyWhenStacked), HaltSpacingStepsOffTheThreatAxisOnlyWhenStacked),
             (nameof(HaltSpacingOnlyProtectsAnActuallyOccupiedReservation), HaltSpacingOnlyProtectsAnActuallyOccupiedReservation),
             (nameof(HaltSpacingResolvesTwoOverlappingSlotOwners), HaltSpacingResolvesTwoOverlappingSlotOwners),
+            (nameof(IdleOverlapMovesOnlyOneSettledSoldier), IdleOverlapMovesOnlyOneSettledSoldier),
             (nameof(HaltSpacingCanExitAnOverlappingBodyButNotCrossOthers), HaltSpacingCanExitAnOverlappingBodyButNotCrossOthers),
             (nameof(HaltSpacingRetriesOnlyWhileStillClipping), HaltSpacingRetriesOnlyWhileStillClipping),
             (nameof(FourSimultaneousFiringHaltsChooseDistinctSpacingTargets), FourSimultaneousFiringHaltsChooseDistinctSpacingTargets),
@@ -397,6 +399,28 @@ internal static class Program
         {
             False(FragGrenadeDecisionCore.ShouldAttempt(blocked),
                 "Missing visual confirmation, inventory, availability, or cooldown allowed a frag attempt.");
+        }
+    }
+
+    private static void ExplosiveLikelihoodScalesHowOftenSafeOpportunitiesAreTaken()
+    {
+        False(ExplosiveLikelihoodCore.Passes(0f, 0f), "A likelihood of zero still allowed an action.");
+        False(ExplosiveLikelihoodCore.Passes(float.NaN, 0f), "A non-finite likelihood allowed an action.");
+        True(ExplosiveLikelihoodCore.Passes(1f, 0.999f), "A likelihood of one skipped an opportunity.");
+        True(ExplosiveLikelihoodCore.Passes(2f, 0.999f), "A likelihood above one skipped an opportunity.");
+
+        foreach (var likelihood in new[] { 0.25f, 0.5f, 0.75f })
+        {
+            var passes = 0;
+            const int rolls = 1000;
+            for (var i = 0; i < rolls; i++)
+            {
+                if (ExplosiveLikelihoodCore.Passes(likelihood, (i + 0.5f) / rolls))
+                    passes++;
+            }
+
+            True(Math.Abs(passes / (float)rolls - likelihood) < 0.01f,
+                "A likelihood of " + likelihood + " acted on " + passes + " of " + rolls + " opportunities.");
         }
     }
 
@@ -1808,6 +1832,78 @@ internal static class Program
                 MovementOwner.OrderedMove,
                 HaltSpacingCore.RearmTravelMeters),
             "Physical movement did not rearm spacing for a later fighting halt.");
+    }
+
+    private static void IdleOverlapMovesOnlyOneSettledSoldier()
+    {
+        True(HaltSpacingCore.IdleOverlapEligible(
+                MovementOwner.Free, ProposalSource.Native, false, false),
+            "A soldier the mod is not holding was left stacked after his native route ended.");
+        True(HaltSpacingCore.IdleOverlapEligible(
+                MovementOwner.Free, ProposalSource.DefensivePosition, false, false),
+            "A calm defender with no slot was left stacked.");
+        False(HaltSpacingCore.IdleOverlapEligible(
+                MovementOwner.EngagementHold, ProposalSource.Contact, false, false),
+            "The idle check competed with the fighting-halt correction.");
+        False(HaltSpacingCore.IdleOverlapEligible(
+                MovementOwner.PinnedHold, ProposalSource.Suppression, false, false),
+            "A pinned soldier was walked sideways.");
+        False(HaltSpacingCore.IdleOverlapEligible(
+                MovementOwner.Free, ProposalSource.Native, true, false),
+            "A soldier walking through a squadmate was treated as settled.");
+        False(HaltSpacingCore.IdleOverlapEligible(
+                MovementOwner.Free, ProposalSource.Native, false, true),
+            "A reloading, boarding, or healing soldier was moved.");
+        False(HaltSpacingCore.IdleOverlapEligible(
+                MovementOwner.Free, ProposalSource.External, false, false),
+            "A scripted soldier was moved.");
+        False(HaltSpacingCore.IdleOverlapEligible(
+                MovementOwner.Free, ProposalSource.VehicleBoarding, false, false),
+            "A soldier boarding a vehicle was moved.");
+
+        var since = HaltSpacingCore.NextIdleOverlapSince(true, 0f, 10f);
+        Equal(10f, since, "The moment a soldier settled was not recorded.");
+        Equal(10f, HaltSpacingCore.NextIdleOverlapSince(true, since, 11f),
+            "Standing still restarted the arrival dwell.");
+        Equal(0f, HaltSpacingCore.NextIdleOverlapSince(false, since, 11f),
+            "Moving again kept the arrival dwell.");
+        False(HaltSpacingCore.IdleOverlapDwellElapsed(since, 11f),
+            "A brief pause was treated as the end of a route.");
+        True(HaltSpacingCore.IdleOverlapDwellElapsed(
+                since, since + HaltSpacingCore.IdleOverlapDwellSeconds),
+            "A settled soldier never acted on his arrival.");
+        False(HaltSpacingCore.IdleOverlapDwellElapsed(0f, 100f),
+            "A soldier who had not settled acted on an arrival.");
+
+        True(HaltSpacingCore.ShouldSeekCoverOnArrival(false, false, false, true),
+            "A soldier whose route ended in the open did not seek free cover.");
+        False(HaltSpacingCore.ShouldSeekCoverOnArrival(true, false, false, true),
+            "A soldier still on his route was redirected to cover.");
+        False(HaltSpacingCore.ShouldSeekCoverOnArrival(false, true, false, true),
+            "A soldier already on cover searched for another slot.");
+        False(HaltSpacingCore.ShouldSeekCoverOnArrival(false, false, true, true),
+            "Flickering cover status hopped a soldier off his authored slot.");
+        False(HaltSpacingCore.ShouldSeekCoverOnArrival(false, false, false, false),
+            "A failed cover search retried without waiting.");
+
+        True(HaltSpacingCore.ShouldYieldIdleOverlap(false, false, true, false, false, 20, 10)
+             != HaltSpacingCore.ShouldYieldIdleOverlap(false, false, true, false, false, 10, 20),
+            "Two soldiers crowding in the open did not agree on exactly one to move.");
+        True(HaltSpacingCore.ShouldYieldIdleOverlap(true, true, true, true, false, 20, 10)
+             != HaltSpacingCore.ShouldYieldIdleOverlap(true, true, true, true, false, 10, 20),
+            "Two overlapping soldiers on cover did not agree on exactly one to move.");
+        False(HaltSpacingCore.ShouldYieldIdleOverlap(true, false, true, true, false, 20, 10),
+            "A soldier on cover gave way to one standing in the open.");
+        True(HaltSpacingCore.ShouldYieldIdleOverlap(false, true, true, false, false, 10, 20),
+            "A soldier in the open did not give way to one on cover.");
+        False(HaltSpacingCore.ShouldYieldIdleOverlap(true, true, true, false, false, 20, 10),
+            "Ordinary trench spacing evicted a soldier from his cover.");
+        False(HaltSpacingCore.ShouldYieldIdleOverlap(false, false, true, false, true, 20, 10),
+            "Nearby soldiers interrupted a live route without any body overlap.");
+        True(HaltSpacingCore.ShouldYieldIdleOverlap(true, false, false, true, false, 10, 20),
+            "An AI soldier stayed inside a player-owned soldier who cannot be moved.");
+        False(HaltSpacingCore.ShouldYieldIdleOverlap(false, false, false, false, false, 20, 10),
+            "An AI soldier hopped away from a player who was merely standing nearby.");
     }
 
     private static void HaltSpacingOnlyProtectsAnActuallyOccupiedReservation()

@@ -1,6 +1,6 @@
 [h1]Easy Red 2 Realism Overhaul[/h1]
 
-[b]Current mod version:[/b] 1.2.1
+[b]Current mod version:[/b] 1.2.2
 [b]Compatible game version:[/b] 2.1.1 "Cold Steel" (Steam public build 26375879, November 2, 2026)
 [b]Download:[/b] [url=https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul/releases/]Easy Red 2 Realism Overhaul releases[/url]
 
@@ -125,7 +125,7 @@ Direct player-controlled vehicle and stationary-gun aiming is included in v1.0.9
 
 [h2]Installation[/h2]
 
-[b]Windows x64 only.[/b] ER2RealismOverhaul requires BepInEx 6 for Unity IL2CPP.
+[b]Windows x64 package.[/b] ER2RealismOverhaul requires BepInEx 6 for Unity IL2CPP. Linux and Steam Deck players use the same Windows package through Proton, with the extra launch option described below.
 
 [olist]
 [*]Download the latest release ZIP from the [url=https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul/releases/]Releases page[/url]. New users can use the larger file ending in [b]Windows-x64-BepInEx.zip[/b]. If BepInEx 6 for Unity IL2CPP is already installed, use the smaller [b]Windows-x64-No-BepInEx.zip[/b] package.
@@ -139,6 +139,12 @@ Direct player-controlled vehicle and stationary-gun aiming is included in v1.0.9
 After installation, this file should exist:
 
 [code]Easy Red 2\BepInEx\plugins\ER2RealismOverhaul\ER2RealismOverhaul.dll[/code]
+
+[b]Linux / Steam Deck (Proton):[/b] install as above, then in Steam open Easy Red 2 > Properties > General > Launch Options and enter:
+
+[code]WINEDLLOVERRIDES="winhttp=n,b" %command%[/code]
+
+Without it Proton ignores BepInEx's winhttp.dll and the mod never loads. Thanks to xxvertigoxx for the tip.
 
 To update while preserving custom settings, close the game and replace the existing DLL or extract the latest release ZIP over the game folder. To uninstall the mod, remove [b]BepInEx\plugins\ER2RealismOverhaul[/b]. Saved settings are stored in [b]BepInEx\config\ca.antoi.er2.tacticalai.cfg[/b].
 
@@ -154,7 +160,7 @@ If an unmodded player becomes host after the original host leaves, the host-auth
 
 [h2]Compatibility and feedback[/h2]
 
-Version 1.2.1 targets Easy Red 2 version 2.1.1 "Cold Steel", Steam public-branch build [b]26375879[/b] (November 2, 2026). It is built against the updated game's regenerated interop assemblies and passes the release build and deterministic scenario suite. The latest local 1.2.1 startup log on this game build reports all 167 patch modules applied without failures; in-game validation of the new 1.2.1 F10 changes and the Optics Zoom fix remains pending. Beta-branch compatibility is not verified.
+Version 1.2.2 targets Easy Red 2 version 2.1.1 "Cold Steel", Steam public-branch build [b]26375879[/b] (November 2, 2026). It is built against the updated game's regenerated interop assemblies and passes the release build and deterministic scenario suite. In-game validation of the 1.2.2 AI arrival cover and spacing fix, the new grenade and mortar likelihood sliders, and the 1.2.1 F10 changes and Optics Zoom fix remains pending. Beta-branch compatibility is not verified.
 
 Game updates can sometimes break BepInEx mods. Please report loading problems, unusual AI behaviour, multiplayer issues, performance regressions, or settings that need adjustment on the [url=https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul/issues]GitHub Issues page[/url].
 

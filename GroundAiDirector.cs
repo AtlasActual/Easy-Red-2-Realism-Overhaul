@@ -388,6 +388,8 @@ internal static class GroundAiDirector
                 now);
         }
 
+        ContactResponse.UpdateArrivalPositioning(ai, soldier, movementSource, now);
+
         ContactResponse.ApplyMovementProgressWatchdog(
             ai,
             soldier,
