@@ -435,6 +435,7 @@ internal static class GroundAiDirector
         StaticGunInfantryTargeting.ResetBattle();
         SoldierFireDanger.Reset();
         ObjectiveCoordination.ResetBattle();
+        FlankStagingChargePatch.ResetBattle();
     }
 
     private static SoldierTacticalSnapshot CaptureSnapshot(

@@ -8,10 +8,11 @@ The goal is to fix those moments without replacing the game underneath them. Thi
 
 > **Current release:** 1.2.2
 >
-> **Compatibility:** Easy Red 2 **2.1.1 "Cold Steel"**, Steam public-branch build `26375879` (November 2, 2026 update). Built against the updated game's regenerated interop assemblies. Version 1.2.2 passes the release build and deterministic scenario suite; its AI arrival cover and spacing fix, the new grenade and mortar likelihood sliders, and the 1.2.1 F10 changes and Optics Zoom fix still need in-game validation. Versions 1.1.3 and earlier do not work on Easy Red 2 2.1.0 or later.
+> **Compatibility:** Easy Red 2 **2.1.1 "Cold Steel"**, Steam public-branch build `26375879` (November 2, 2026 update). Built against the updated game's regenerated interop assemblies. Version 1.2.2 passes the release build and deterministic scenario suite, and its flanking rework was seen working in one battle; its AI arrival cover and spacing fix, the new grenade and mortar likelihood sliders, and the 1.2.1 F10 changes and Optics Zoom fix still need in-game validation. Versions 1.1.3 and earlier do not work on Easy Red 2 2.1.0 or later.
 
 ## What's new in 1.2.2
 
+- Flanking squads now actually flank. The game was sending every "flanking" squad straight at the objective centre; flankers now first move to a staging point off to one side and short of the objective, then attack from there. Contact does not cancel the detour, the game's leader can no longer turn it into a straight charge, and squads keep their flank side until they stop attacking. Added **Flank Width** (default 40%) under AI / Objective Coordination; 0 restores straight-in attacks.
 - Added **Grenade Throw Likelihood** (default 0.5) under AI / Infantry Tactics / Combat Safety: the chance that an AI soldier takes a safe frag-grenade opportunity, rolled once per grenade cooldown. Lower it to cut grenade spam, set 1 for the previous behavior or 0 to stop AI frag grenades.
 - Added **Knee Mortar Fire Likelihood** (default 0.5) in the same category, so a mortar section no longer fires every round at once. Mortarmen also hold fire while a friendly soldier, including the player, is within 25 m of the target.
 - Added Linux and Steam Deck installation instructions (Proton).

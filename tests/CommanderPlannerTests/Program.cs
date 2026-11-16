@@ -76,6 +76,9 @@ internal static class Program
             (nameof(ObjectiveDefenseRearOffsetStaysMoreConstrainedThanForward), ObjectiveDefenseRearOffsetStaysMoreConstrainedThanForward),
             (nameof(ObjectiveDefenseWithoutAThreatDirectionUsesTheDeterministicFallback), ObjectiveDefenseWithoutAThreatDirectionUsesTheDeterministicFallback),
             (nameof(ObjectiveAttackKeepsOnePressureSquadAndAlternatesWideFlanks), ObjectiveAttackKeepsOnePressureSquadAndAlternatesWideFlanks),
+            (nameof(ObjectiveAttackRolesStayStableWhenSquadsComeAndGo), ObjectiveAttackRolesStayStableWhenSquadsComeAndGo),
+            (nameof(FlankStagingPointSwingsWideToTheAssignedSide), FlankStagingPointSwingsWideToTheAssignedSide),
+            (nameof(FlankStagingReleasesOnArrivalTimeoutOrOvershoot), FlankStagingReleasesOnArrivalTimeoutOrOvershoot),
             (nameof(ObjectiveAttackScenarios.AttackersCoverAllActiveObjectives), ObjectiveAttackScenarios.AttackersCoverAllActiveObjectives),
             (nameof(ObjectiveAttackScenarios.CaptureKeepsProportionalGarrisonWhileOthersAdvance), ObjectiveAttackScenarios.CaptureKeepsProportionalGarrisonWhileOthersAdvance),
             (nameof(ObjectiveAttackScenarios.GarrisonScalesWithAvailableSquads), ObjectiveAttackScenarios.GarrisonScalesWithAvailableSquads),
@@ -3736,6 +3739,97 @@ internal static class Program
         var offset = Distance(area.Center, objective);
         Near(ObjectiveDefenseAreaCore.MaximumAnchorOffset(objectiveRadius) * 0.75f, offset, 0.01f,
             "The no-threat-direction fallback did not use three quarters of the forward allowance.");
+    }
+
+    private static void ObjectiveAttackRolesStayStableWhenSquadsComeAndGo()
+    {
+        var none = new Dictionary<int, ObjectiveAttackRole>();
+        var first = ObjectiveAttackPlanCore.SelectRoles(new[] { 10, 20, 30 }, 20, none);
+        Equal(1, first.Values.Count(role => !role.IsFlank), "A fresh attack did not get exactly one pressure squad.");
+        Equal(1, first.Values.Count(role => role.IsFlank && role.Side < 0), "Fresh flankers were not split across sides.");
+        Equal(1, first.Values.Count(role => role.IsFlank && role.Side > 0), "Fresh flankers were not split across sides.");
+
+        // The pressure squad dies and a new squad arrives with a lower id.
+        var pressure = first.Single(pair => !pair.Value.IsFlank).Key;
+        var survivors = first.Where(pair => pair.Key != pressure)
+            .ToDictionary(pair => pair.Key, pair => pair.Value);
+        var ids = survivors.Keys.Append(5).OrderBy(id => id).ToList();
+        var second = ObjectiveAttackPlanCore.SelectRoles(ids, 20, survivors);
+        foreach (var pair in survivors)
+            Equal(pair.Value, second[pair.Key], "A flanking squad changed role or side mid-manoeuvre.");
+        False(second[5].IsFlank, "The new arrival did not take over the vacant pressure role.");
+
+        // A new flanker joins the side with fewer squads.
+        var third = ObjectiveAttackPlanCore.SelectRoles(ids.Append(40).ToList(), 20, second);
+        var left = second.Values.Count(role => role.IsFlank && role.Side < 0);
+        var right = second.Values.Count(role => role.IsFlank && role.Side > 0);
+        if (left != right)
+            Equal(left < right ? -1 : 1, third[40].Side, "A new flanker did not join the thinner side.");
+
+        var lone = ObjectiveAttackPlanCore.SelectRoles(new[] { 7 }, 20, none);
+        False(lone[7].IsFlank, "A lone squad was sent on a flank.");
+    }
+
+    private static void FlankStagingPointSwingsWideToTheAssignedSide()
+    {
+        // Squad 200 m south of the objective, heading north (+Z). Right is +X.
+        var squad = new MapPoint(0f, 0f);
+        var objective = new MapPoint(0f, 200f);
+        True(FlankStagingCore.TryComputeStagingPoint(squad, objective, 49f, 1, 40, out var right),
+            "No staging point for a squad 200 m out.");
+        True(FlankStagingCore.TryComputeStagingPoint(squad, objective, 49f, -1, 40, out var left),
+            "No left staging point for a squad 200 m out.");
+        Near(80f, right.X, 0.5f, "The right staging point was not 40% of the distance to the right.");
+        Near(-80f, left.X, 0.5f, "The left staging point was not 40% of the distance to the left.");
+        True(right.Z < objective.Z - 49f, "The staging point was not short of the objective edge.");
+        True(right.Z > squad.Z, "The staging point lay behind the squad.");
+
+        True(FlankStagingCore.TryComputeStagingPoint(squad, new MapPoint(0f, 2000f), 49f, 1, 40, out var far),
+            "No staging point for a distant objective.");
+        Near(FlankStagingCore.MaximumLateralMeters, far.X, 0.5f, "A distant flank was not capped.");
+
+        False(FlankStagingCore.TryComputeStagingPoint(squad, new MapPoint(0f, 100f), 49f, 1, 40, out _),
+            "A squad already near the objective edge was sent on a detour.");
+        False(FlankStagingCore.TryComputeStagingPoint(squad, objective, 49f, 1, 0, out _),
+            "A zero flank width still produced a detour.");
+    }
+
+    private static void FlankStagingReleasesOnArrivalTimeoutOrOvershoot()
+    {
+        var objective = new MapPoint(0f, 200f);
+        var staging = new MapPoint(80f, 130f);
+        Equal(FlankStagingCore.Release.None,
+            FlankStagingCore.ShouldRelease(new MapPoint(0f, 0f), staging, objective, 10f),
+            "A squad still on its way was released early.");
+        Equal(FlankStagingCore.Release.None,
+            FlankStagingCore.ShouldRelease(new MapPoint(0f, 0f), staging, objective, FlankStagingCore.StuckSeconds - 1f),
+            "A detour that made progress within the stuck window was cut short.");
+        Equal(FlankStagingCore.Release.Arrived,
+            FlankStagingCore.ShouldRelease(new MapPoint(70f, 120f), staging, objective, 0f),
+            "A squad at its staging point was not released.");
+        Equal(FlankStagingCore.Release.Stuck,
+            FlankStagingCore.ShouldRelease(new MapPoint(0f, 0f), staging, objective, FlankStagingCore.StuckSeconds),
+            "A stuck squad was never released.");
+        Equal(FlankStagingCore.Release.PastStagingPoint,
+            FlankStagingCore.ShouldRelease(new MapPoint(0f, 170f), staging, objective, 0f),
+            "A squad that got past its staging point was sent back out.");
+
+        // Contact pauses the stuck clock indefinitely; only movement out of contact counts.
+        var (best, last) = (120f, 0f);
+        for (var t = 6f; t <= 300f; t += 6f)
+            (best, last) = FlankStagingCore.TrackProgress(best, last, 120f, engaged: true, t);
+        Equal(FlankStagingCore.Release.None,
+            FlankStagingCore.ShouldRelease(new MapPoint(0f, 0f), staging, objective, 300f - last),
+            "A flanker in a five-minute firefight was released from its detour.");
+
+        (best, last) = FlankStagingCore.TrackProgress(best, last, 118f, engaged: false, 306f);
+        Equal(300f, last, "Two metres of creep counted as progress.");
+        (best, last) = FlankStagingCore.TrackProgress(best, last, 110f, engaged: false, 312f);
+        Equal(312f, last, "Real progress toward the staging point did not reset the stuck clock.");
+        Equal(110f, best, "The best distance to the staging point was not recorded.");
+
+        Near(80f, FlankStagingCore.LateralOffset(new MapPoint(0f, 0f), objective, new MapPoint(80f, 100f)), 0.01f,
+            "A squad to the right of its start line was not reported as right of it.");
     }
 
     private static void ObjectiveAttackKeepsOnePressureSquadAndAlternatesWideFlanks()

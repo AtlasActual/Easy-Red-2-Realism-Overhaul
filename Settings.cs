@@ -54,6 +54,7 @@ internal static class Settings
 
     internal static ConfigEntry<bool> ObjectiveCoordinationEnabled = null!;
     internal static ConfigEntry<int> AttackerGarrisonPercent = null!;
+    internal static ConfigEntry<int> FlankWidthPercent = null!;
     internal static ConfigEntry<bool> StaticWeaponStaffingEnabled = null!;
 
     internal static ConfigEntry<bool> SuppressionAwarenessEnabled = null!;
@@ -383,6 +384,8 @@ internal static class Settings
             "Spreads AI attackers across active objectives, leaves a garrison on captured ground when squads are available, and sends surplus assault squads on alternating wide flanks. Keeps defenders distributed around nearby cover at every active objective. Uses native synchronized squad orders and never controls player-led or mission-scripted squads.");
         AttackerGarrisonPercent = config.Bind("AI - Objective coordination", "AttackerGarrisonPercent", ObjectiveAttackPlanCore.DefaultGarrisonPercent,
             new ConfigDescription("Target percentage of eligible attacking AI squads guarding captured objectives while the phase is unfinished. Rounded down, with at least one guard per captured point when possible and always one squad left attacking. Pressured points receive surplus guards first, without increasing the budget further. Zero disables garrisons. Under scarcity, pressured points take priority, then nearer points. All squads hold when every objective is secured.", new AcceptableValueRange<int>(0, 100)));
+        FlankWidthPercent = config.Bind("AI - Objective coordination", "FlankWidthPercent", FlankStagingCore.DefaultWidthPercent,
+            new ConfigDescription("How wide flanking squads swing out before attacking an objective, as a share of their distance to it (clamped to 50-150 m sideways). A flanking squad first moves to a point off to its side and short of the objective, then attacks from there once it arrives. Contact never cuts the detour short; only a squad out of contact that makes no progress toward the point for 30 seconds gives up and attacks from where it is. One squad per objective always attacks directly. Zero sends flankers straight at the objective like the direct squad.", new AcceptableValueRange<int>(0, 80)));
 
         StaticWeaponStaffingEnabled = config.Bind("AI - Defense", "Enabled", true,
             "Proactively sends autonomous AI squads on defend orders to staff viable loaded static weapons in every active hold area, regardless of which faction began the battle on defense.");

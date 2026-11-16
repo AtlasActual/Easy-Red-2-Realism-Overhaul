@@ -103,6 +103,77 @@ internal static class ObjectiveAttackPlanCore
         }
     }
 
+    /// <summary>
+    /// Roles for the squads attacking one objective, kept stable across plan passes.
+    /// A squad keeps the role it already had on this objective, so a death or a new
+    /// arrival does not turn a flanking squad around mid-manoeuvre. One squad holds
+    /// the direct pressure axis; new flankers go to whichever side has fewer.
+    /// </summary>
+    /// <param name="squadIds">Squads assigned to the objective, in a stable order.</param>
+    /// <param name="previous">Roles these squads held on this same objective last pass.</param>
+    internal static Dictionary<int, ObjectiveAttackRole> SelectRoles(
+        IReadOnlyList<int> squadIds,
+        int objectiveId,
+        IReadOnlyDictionary<int, ObjectiveAttackRole> previous)
+    {
+        var roles = new Dictionary<int, ObjectiveAttackRole>();
+        if (squadIds.Count == 0)
+            return roles;
+
+        var frontal = new ObjectiveAttackRole(false, 0, 0f);
+        if (squadIds.Count == 1)
+        {
+            roles[squadIds[0]] = frontal;
+            return roles;
+        }
+
+        // Keep the existing pressure squad. Otherwise give the role to a squad that
+        // has not started a flank, and only as a last resort turn a flanker inward.
+        int? keptPressure = null;
+        int? fresh = null;
+        foreach (var id in squadIds)
+        {
+            if (previous.TryGetValue(id, out var role))
+            {
+                if (!role.IsFlank && keptPressure == null)
+                    keptPressure = id;
+            }
+            else if (fresh == null)
+            {
+                fresh = id;
+            }
+        }
+
+        var pressureId = keptPressure ?? fresh ?? squadIds[0];
+
+        roles[pressureId] = frontal;
+        var firstSide = (objectiveId & 1) == 0 ? -1 : 1;
+        var left = 0;
+        var right = 0;
+        foreach (var id in squadIds)
+        {
+            if (id == pressureId || !previous.TryGetValue(id, out var role) || !role.IsFlank)
+                continue;
+
+            roles[id] = role;
+            if (role.Side < 0) left++;
+            else right++;
+        }
+
+        foreach (var id in squadIds)
+        {
+            if (roles.ContainsKey(id))
+                continue;
+
+            var side = left == right ? firstSide : left < right ? -1 : 1;
+            roles[id] = new ObjectiveAttackRole(true, side, FlankAngleDegrees);
+            if (side < 0) left++;
+            else right++;
+        }
+
+        return roles;
+    }
+
     internal static ObjectiveAttackRole SelectRole(
         int squadIndex,
         int squadCount,

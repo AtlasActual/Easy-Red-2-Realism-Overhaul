@@ -29,6 +29,9 @@ internal static class ObjectiveCoordination
 
     private static readonly Dictionary<int, OrderStamp> LastOrders = new();
     private static readonly Dictionary<int, ObjectiveTaskAssignment> AssignedTasks = new();
+    private static readonly Dictionary<int, (int ObjectiveId, ObjectiveAttackRole Role)> AttackRoles = new();
+    private static readonly Dictionary<int, FlankState> FlankStates = new();
+    private static readonly HashSet<int> AttackingThisPass = new();
     private static readonly Dictionary<int, float> ObjectiveProgress = new();
     private static readonly Dictionary<int, float> ObjectivePressureUntil = new();
     private static readonly Dictionary<string, int> LastPlanSignatures =
@@ -72,6 +75,9 @@ internal static class ObjectiveCoordination
     {
         LastOrders.Clear();
         AssignedTasks.Clear();
+        AttackRoles.Clear();
+        FlankStates.Clear();
+        AttackingThisPass.Clear();
         ObjectiveProgress.Clear();
         ObjectivePressureUntil.Clear();
         LastPlanSignatures.Clear();
@@ -86,6 +92,7 @@ internal static class ObjectiveCoordination
         // A native-order guard is valid only for this planning snapshot. Squads
         // absent from the next plan immediately return to native task selection.
         AssignedTasks.Clear();
+        AttackingThisPass.Clear();
         var battle = BattleManager.GetCurrentBattleData();
         if (battle == null)
             return;
@@ -108,6 +115,12 @@ internal static class ObjectiveCoordination
 
         foreach (var staleId in LastOrders.Keys.Where(id => !activeSquadIds.Contains(id)).ToArray())
             LastOrders.Remove(staleId);
+
+        // Roles and flank progress last only while the squad keeps attacking.
+        foreach (var staleId in AttackRoles.Keys.Where(id => !AttackingThisPass.Contains(id)).ToArray())
+            AttackRoles.Remove(staleId);
+        foreach (var staleId in FlankStates.Keys.Where(id => !AttackingThisPass.Contains(id)).ToArray())
+            FlankStates.Remove(staleId);
     }
 
     private static Dictionary<string, List<SquadInfo>> CollectSquadsByFaction(BattleData battle)
@@ -362,10 +375,21 @@ internal static class ObjectiveCoordination
 
         void IssueAttackWave(List<SquadInfo> assigned, ObjectiveInfo target)
         {
-            for (var index = 0; index < assigned.Count; index++)
+            var previous = new Dictionary<int, ObjectiveAttackRole>();
+            foreach (var squad in assigned)
             {
-                var role = ObjectiveAttackPlanCore.SelectRole(index, assigned.Count, target.Id);
-                IssueAttack(assigned[index], target, role);
+                if (AttackRoles.TryGetValue(squad.Id, out var held) && held.ObjectiveId == target.Id)
+                    previous[squad.Id] = held.Role;
+            }
+
+            var roles = ObjectiveAttackPlanCore.SelectRoles(
+                assigned.Select(squad => squad.Id).ToList(), target.Id, previous);
+            foreach (var squad in assigned)
+            {
+                var role = roles[squad.Id];
+                AttackRoles[squad.Id] = (target.Id, role);
+                AttackingThisPass.Add(squad.Id);
+                IssueAttack(squad, target, role, now);
                 if (role.IsFlank)
                     flankCount++;
             }
@@ -409,6 +433,23 @@ internal static class ObjectiveCoordination
         }
 
         TracePlanChange(faction, attacking, squads.Count, targets.Count, flankCount, assignments);
+    }
+
+    /// <summary>
+    /// True while this squad is heading for its flank staging point and has not
+    /// been released onto the objective yet.
+    /// </summary>
+    internal static bool IsOnFlankStagingLeg(Squad squad, out int squadId)
+    {
+        squadId = 0;
+        if (squad == null || !Settings.ObjectiveCoordinationEnabled.Value || _failedThisBattle ||
+            Settings.FlankWidthPercent.Value <= 0 || !MultiplayerAuthority.CanMutateGameplay())
+        {
+            return false;
+        }
+
+        squadId = SquadIdentity.GetSquadId(squad);
+        return FlankStates.TryGetValue(squadId, out var state) && !state.Released;
     }
 
     /// <summary>
@@ -681,31 +722,43 @@ internal static class ObjectiveCoordination
     private static void IssueAttack(
         SquadInfo squad,
         ObjectiveInfo objective,
-        ObjectiveAttackRole role)
+        ObjectiveAttackRole role,
+        float now)
     {
-        var direction = Flatten(objective.Position - squad.Position);
-        if (direction.sqrMagnitude < 1f)
-            direction = Vector3.forward;
-        else
-            direction.Normalize();
+        // Native AttackFromSide sends the squad to the position it is given and
+        // ignores the direction, so a flank is a detour through a staging point.
+        var staging = role.IsFlank ? ResolveFlankStaging(squad, objective, role, now) : null;
+        var destination = staging ?? objective.Position;
+        var radius = staging.HasValue ? FlankStagingCore.ArrivalMeters : objective.Radius;
 
-        if (role.IsFlank)
-            direction = RotateHorizontal(direction, role.Side * role.AngleDegrees);
+        var direction = Flatten(destination - squad.Position);
+        if (direction.sqrMagnitude < 1f)
+            direction = Flatten(objective.Position - squad.Position);
+        direction = direction.sqrMagnitude < 1f ? Vector3.forward : direction.normalized;
 
         var proposed = new OrderStamp(
             objective.Id,
             role.IsFlank
                 ? role.Side < 0 ? CoordinatedOrder.FlankLeft : CoordinatedOrder.FlankRight
                 : CoordinatedOrder.DirectAttack,
-            objective.Position,
-            objective.Radius,
+            destination,
+            radius,
             Vector3.zero);
         if (!NeedsOrder(squad.Squad, proposed))
             return;
 
+        if (AiState.TraceEnabled && LastOrders.TryGetValue(squad.Id, out var repeated) &&
+            repeated.ObjectiveId == proposed.ObjectiveId && repeated.Order == proposed.Order &&
+            HorizontalDistanceSquared(repeated.Destination, proposed.Destination) <= 1f)
+        {
+            // Diagnostic: the plan did not change, so the game replaced the order.
+            AiState.Trace($"Objective order reissued: squad {squad.Id} native order was " +
+                          $"{squad.Squad.order} instead of {Order.attackFromSide}");
+        }
+
         try
         {
-            squad.Squad.AttackFromSide(direction, objective.Position, objective.Radius);
+            squad.Squad.AttackFromSide(direction, destination, radius);
             LastOrders[squad.Id] = proposed with
             {
                 NativeDestination = squad.Squad.moveOrderPosition
@@ -714,11 +767,76 @@ internal static class ObjectiveCoordination
                 $"Objective order: squad {squad.Id} " +
                 $"{(role.IsFlank ? $"flank {(role.Side < 0 ? "left" : "right")} {role.AngleDegrees:0}°" : "attack")} " +
                 $"-> {objective.Id}");
+            if (AiState.TraceEnabled)
+                TraceAttackGeometry(squad, objective, role, staging.HasValue);
         }
         catch (ObjectCollectedException)
         {
             LastOrders.Remove(squad.Id);
         }
+    }
+
+    /// <summary>
+    /// The staging point this flanking squad should still be heading for, or null
+    /// once it has been released onto the objective (or is too close to detour).
+    /// A release is permanent for that objective and side.
+    /// </summary>
+    private static Vector3? ResolveFlankStaging(
+        SquadInfo squad, ObjectiveInfo objective, ObjectiveAttackRole role, float now)
+    {
+        var width = Settings.FlankWidthPercent.Value;
+        if (width <= 0)
+            return null;
+
+        var squadPoint = new MapPoint(squad.Position.x, squad.Position.z);
+        var objectivePoint = new MapPoint(objective.Position.x, objective.Position.z);
+        if (!FlankStates.TryGetValue(squad.Id, out var state) ||
+            state.ObjectiveId != objective.Id || state.Side != role.Side)
+        {
+            var released = !FlankStagingCore.TryComputeStagingPoint(
+                squadPoint, objectivePoint, objective.Radius, role.Side, width, out var point);
+            state = new FlankState(
+                objective.Id, role.Side,
+                new Vector3(point.X, objective.Position.y, point.Z), now, released,
+                squadPoint, float.PositiveInfinity, now);
+            FlankStates[squad.Id] = state;
+            if (!released)
+            {
+                AiState.Trace($"Flank staging: squad {squad.Id} {(role.Side < 0 ? "left" : "right")} " +
+                              $"-> objective {objective.Id} via ({point.X:0}, {point.Z:0})");
+            }
+        }
+
+        if (state.Released)
+            return null;
+
+        var stagingPoint = new MapPoint(state.Staging.x, state.Staging.z);
+        var toStaging = Mathf.Sqrt(HorizontalDistanceSquared(squad.Position, state.Staging));
+        var (best, lastProgressAt) = FlankStagingCore.TrackProgress(
+            state.BestDistance, state.LastProgressAt, toStaging, squad.Engaged, now);
+        state = state with { BestDistance = best, LastProgressAt = lastProgressAt };
+
+        var release = FlankStagingCore.ShouldRelease(
+            squadPoint, stagingPoint, objectivePoint, now - state.LastProgressAt);
+        if (release != FlankStagingCore.Release.None)
+        {
+            FlankStates[squad.Id] = state with { Released = true };
+            var lateral = FlankStagingCore.LateralOffset(state.Start, objectivePoint, squadPoint);
+            AiState.Trace($"Flank staging: squad {squad.Id} released onto objective {objective.Id} " +
+                          $"({release}) after {now - state.StartedAt:0}s, {lateral:+0;-0;0}m off the direct line, " +
+                          $"{toStaging:0}m from its staging point");
+            return null;
+        }
+
+        FlankStates[squad.Id] = state;
+        if (AiState.TraceEnabled)
+        {
+            AiState.Trace($"Flank progress: squad {squad.Id} {toStaging:0}m to staging point, " +
+                          $"{FlankStagingCore.LateralOffset(state.Start, objectivePoint, squadPoint):+0;-0;0}m off the direct line, " +
+                          $"{(squad.Engaged ? "in contact" : $"no progress for {now - state.LastProgressAt:0}s")}");
+        }
+
+        return state.Staging;
     }
 
     private static void IssueDefense(
@@ -1026,23 +1144,56 @@ internal static class ObjectiveCoordination
         return total / squads.Count;
     }
 
-    private static Vector3 RotateHorizontal(Vector3 direction, float degrees)
-    {
-        var radians = degrees * Mathf.Deg2Rad;
-        var cosine = Mathf.Cos(radians);
-        var sine = Mathf.Sin(radians);
-        return new Vector3(
-            direction.x * cosine - direction.z * sine,
-            0f,
-            direction.x * sine + direction.z * cosine).normalized;
-    }
-
     private static float StableAngleOffset(int objectiveId)
     {
         unchecked
         {
             var hash = (uint)objectiveId * 2654435761u;
             return (hash % 360u) * Mathf.Deg2Rad;
+        }
+    }
+
+    /// <summary>
+    /// Diagnostic only: where the native AttackFromSide actually sent the squad.
+    /// "lateral" is how far the waypoint sits to the side of the straight squad ->
+    /// objective line (positive = right of the squad's heading), and "heading" is the
+    /// angle between that line and the squad's path to its waypoint. A flank that
+    /// shows only a few metres or degrees here is a frontal attack in practice.
+    /// </summary>
+    private static void TraceAttackGeometry(
+        SquadInfo squad, ObjectiveInfo objective, ObjectiveAttackRole role, bool staging)
+    {
+        try
+        {
+            var waypoint = squad.Squad.moveOrderPosition;
+            if (!IsFinite(waypoint))
+            {
+                AiState.Trace($"Flank geometry: squad {squad.Id} -> {objective.Id}: no native waypoint");
+                return;
+            }
+
+            var toObjective = Flatten(objective.Position - squad.Position);
+            var toWaypoint = Flatten(waypoint - squad.Position);
+            var distance = toObjective.magnitude;
+            var forward = distance > 0.01f ? toObjective / distance : Vector3.forward;
+            var right = new Vector3(forward.z, 0f, -forward.x);
+            var lateral = Vector3.Dot(toWaypoint, right);
+            var along = Vector3.Dot(toWaypoint, forward);
+            var heading = toWaypoint.sqrMagnitude > 0.01f
+                ? Vector3.SignedAngle(forward, toWaypoint, Vector3.up)
+                : 0f;
+            var waypointToObjective = Mathf.Sqrt(HorizontalDistanceSquared(waypoint, objective.Position));
+
+            AiState.Trace(
+                $"Flank geometry: squad {squad.Id} " +
+                $"{(role.IsFlank ? $"flank {(role.Side < 0 ? "left" : "right")} ({(staging ? "to staging point" : "final attack")})" : "frontal")} " +
+                $"-> objective {objective.Id} (radius {objective.Radius:0}m): " +
+                $"squad {distance:0}m out, waypoint {along:0}m ahead, lateral {lateral:+0;-0;0}m, " +
+                $"heading {heading:+0;-0;0}°, waypoint {waypointToObjective:0}m from objective centre");
+        }
+        catch (Exception ex) when (ex is NullReferenceException or Il2CppException or ObjectCollectedException)
+        {
+            // Diagnostic only; a squad lost mid-call has nothing to report.
         }
     }
 
@@ -1083,6 +1234,16 @@ internal static class ObjectiveCoordination
         IntPtr Id,
         Vector3 Position,
         bool HasAuthoredPose);
+
+    private readonly record struct FlankState(
+        int ObjectiveId,
+        int Side,
+        Vector3 Staging,
+        float StartedAt,
+        bool Released,
+        MapPoint Start,
+        float BestDistance,
+        float LastProgressAt);
 
     private readonly record struct OrderStamp(
         int ObjectiveId,
