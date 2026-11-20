@@ -13,23 +13,16 @@ namespace ER2RealismOverhaul;
 /// </summary>
 internal sealed class PlayerHeadshotBlackoutController : MonoBehaviour
 {
-    private const float LethalHeadHitWindowSeconds = 0.35f;
-    private const float MaximumBlackoutSeconds = 12f;
-    private const float RecoveryFadeSeconds = 0.35f;
     private const int BlackoutGuiDepth = -5000;
 
     private static PlayerHeadshotBlackoutController? _instance;
-    private static float _lastPlayerHeadHitAt = float.NegativeInfinity;
+    private HeadshotBlackoutState _state;
 
     private GameObject? _panelLayerObject;
     private Image? _panelLayer;
     private DeathPanel? _layerOwner;
-    private bool _blackoutActive;
-    private bool _recovering;
     private bool _ownsAudioVolume;
     private float _blackness;
-    private float _blackoutStartedAt;
-    private float _recoveryStartedAt;
     private float _nativeAudioVolume;
     private float _appliedAudioVolume;
     private string _lastErrorSignature = string.Empty;
@@ -39,38 +32,50 @@ internal sealed class PlayerHeadshotBlackoutController : MonoBehaviour
         _instance = this;
     }
 
-    internal static void NotePlayerHeadHit()
+    internal static bool IsPresenting => _instance != null && _instance._state.Active;
+
+    internal static void NotePlayerHeadHit(int soldierId)
     {
-        _lastPlayerHeadHitAt = Time.unscaledTime;
+        if (_instance != null)
+            _instance._state.RecordHeadHit(soldierId, Time.realtimeSinceStartupAsDouble);
     }
 
-    internal static void NotePlayerKilled()
+    internal static void NotePlayerKilled(int soldierId)
     {
         var instance = _instance;
         if (instance == null ||
             !Settings.HeadshotDeathBlackoutEnabled.Value ||
-            Time.unscaledTime - _lastPlayerHeadHitAt > LethalHeadHitWindowSeconds)
+            !instance._state.TryBegin(soldierId, Time.realtimeSinceStartupAsDouble))
         {
             return;
         }
 
-        _lastPlayerHeadHitAt = float.NegativeInfinity;
-        instance.BeginBlackout();
+        try
+        {
+            instance.BeginBlackout();
+        }
+        catch (Exception ex)
+        {
+            instance.Restore();
+            instance.ReportError(ex);
+        }
     }
 
     internal static void RefreshDeathPanelLayer()
     {
         var instance = _instance;
-        if (instance == null || !instance._blackoutActive)
+        if (instance == null || !instance._state.Active)
             return;
 
         try
         {
             instance.EnsurePanelLayer();
+            instance.PlaceDeathTextAboveLayer();
             instance.Apply(instance._blackness);
         }
         catch (Exception ex)
         {
+            instance.Restore();
             instance.ReportError(ex);
         }
     }
@@ -80,37 +85,44 @@ internal sealed class PlayerHeadshotBlackoutController : MonoBehaviour
         _instance?.Restore();
     }
 
+    internal static void OnSquadSelection()
+    {
+        var instance = _instance;
+        if (instance == null)
+            return;
+        try
+        {
+            if (IsSquadPickerOpen())
+                instance.Restore();
+        }
+        catch (Exception ex)
+        {
+            instance.Restore();
+            instance.ReportError(ex);
+        }
+    }
+
     private void LateUpdate()
     {
-        if (!_blackoutActive)
+        if (!_state.Active)
+        {
+            if (_ownsAudioVolume)
+                Restore();
             return;
+        }
 
         try
         {
+            var controlled = Soldier.CurrentControlledSoldierOrNull();
+            var livingId = controlled != null && controlled.IsAlive ? controlled.GetInstanceID() : 0;
+            var blackness = _state.Opacity(Time.realtimeSinceStartupAsDouble, livingId, IsSquadPickerOpen());
+            if (blackness <= 0f || !Settings.HeadshotDeathBlackoutEnabled.Value)
+            {
+                Restore();
+                return;
+            }
+
             EnsurePanelLayer();
-
-            var now = Time.unscaledTime;
-            if (!_recovering && ShouldRecover(now))
-            {
-                _recovering = true;
-                _recoveryStartedAt = now;
-            }
-
-            var blackness = 1f;
-            if (_recovering)
-            {
-                var progress = RecoveryFadeSeconds <= 0f
-                    ? 1f
-                    : Mathf.Clamp01((now - _recoveryStartedAt) / RecoveryFadeSeconds);
-                if (progress >= 1f)
-                {
-                    Restore();
-                    return;
-                }
-
-                blackness = 1f - progress;
-            }
-
             Apply(blackness);
         }
         catch (Exception ex)
@@ -124,7 +136,7 @@ internal sealed class PlayerHeadshotBlackoutController : MonoBehaviour
     {
         // The damage call can happen before DeathPanel is activated. This covers
         // that first frame, then yields to the panel-owned uGUI layer.
-        if (!_blackoutActive ||
+        if (!_state.Active ||
             (_panelLayerObject != null && _panelLayerObject.activeInHierarchy) ||
             _blackness <= 0.001f ||
             Event.current == null || Event.current.type != EventType.Repaint)
@@ -171,30 +183,16 @@ internal sealed class PlayerHeadshotBlackoutController : MonoBehaviour
             _ownsAudioVolume = true;
         }
 
-        _blackoutActive = true;
-        _recovering = false;
-        _blackoutStartedAt = Time.unscaledTime;
         EnsurePanelLayer();
         Apply(1f);
-
-        Plugin.LogSource.LogInfo(
-            $"Headshot blackout started using {(_panelLayer != null ? "the native death panel" : "the one-frame fallback")}.");
     }
 
     [HideFromIl2Cpp]
-    private bool ShouldRecover(float now)
+    private static bool IsSquadPickerOpen()
     {
-        if (!Settings.HeadshotDeathBlackoutEnabled.Value ||
-            now - _blackoutStartedAt >= MaximumBlackoutSeconds)
-        {
-            return true;
-        }
-
-        if (SkipPromptGUI.active)
-            return false;
-
-        var controlled = Soldier.CurrentControlledSoldierOrNull();
-        return controlled != null && controlled.IsAlive;
+        var gui = PlayerGUI.instance;
+        var mask = gui != null ? gui.squadGUIMask : null;
+        return mask != null && mask.gameObject.activeInHierarchy && PlayerGUI.GetGUISquad() != null;
     }
 
     [HideFromIl2Cpp]
@@ -206,8 +204,6 @@ internal sealed class PlayerHeadshotBlackoutController : MonoBehaviour
             _panelLayer.color = new Color(0f, 0f, 0f, _blackness);
             if (!_panelLayerObject.activeSelf)
                 _panelLayerObject.SetActive(true);
-
-            PlaceDeathTextAboveLayer();
         }
 
         var currentVolume = AudioListener.volume;
@@ -221,25 +217,32 @@ internal sealed class PlayerHeadshotBlackoutController : MonoBehaviour
     [HideFromIl2Cpp]
     private void Restore()
     {
-        _blackoutActive = false;
-        _recovering = false;
+        _state = default;
         _blackness = 0f;
 
         try
         {
-            if (_panelLayerObject != null)
+            if (_panelLayerObject != null && _panelLayerObject.activeSelf)
                 _panelLayerObject.SetActive(false);
-
-            if (_ownsAudioVolume)
-            {
-                AudioListener.volume = _nativeAudioVolume;
-                _appliedAudioVolume = _nativeAudioVolume;
-                _ownsAudioVolume = false;
-            }
         }
         catch
         {
             // Scene teardown can destroy the panel between checks.
+        }
+
+        if (_ownsAudioVolume)
+        {
+            try
+            {
+                if (Mathf.Approximately(AudioListener.volume, _appliedAudioVolume))
+                    AudioListener.volume = _nativeAudioVolume;
+                _ownsAudioVolume = false;
+            }
+            catch (Exception ex)
+            {
+                // A scene change can briefly make the listener unavailable.
+                ReportError(ex);
+            }
         }
     }
 
@@ -248,7 +251,11 @@ internal sealed class PlayerHeadshotBlackoutController : MonoBehaviour
     {
         var panel = DeathPanel.instance;
         if (panel == null)
+        {
+            if (_panelLayerObject != null)
+                DestroyPanelLayer();
             return;
+        }
 
         if (_panelLayer != null && _layerOwner != null &&
             _layerOwner.GetInstanceID() == panel.GetInstanceID())
@@ -259,13 +266,17 @@ internal sealed class PlayerHeadshotBlackoutController : MonoBehaviour
         DestroyPanelLayer();
 
         var layerObject = new GameObject("ER2 Headshot Blackout Layer");
+        // A panel can disappear during initialization. Keep the layer hidden until
+        // Apply and retain ownership even if creating a component fails.
+        layerObject.SetActive(false);
+        _panelLayerObject = layerObject;
         layerObject.layer = panel.gameObject.layer;
         var rectTransform = layerObject
             .AddComponent(Il2CppType.Of<RectTransform>())
             .TryCast<RectTransform>();
         if (rectTransform == null)
         {
-            UnityEngine.Object.Destroy(layerObject);
+            DestroyPanelLayer();
             throw new InvalidOperationException("could not create the death-panel blackout rect");
         }
 
@@ -281,14 +292,13 @@ internal sealed class PlayerHeadshotBlackoutController : MonoBehaviour
         var image = layerObject.AddComponent(Il2CppType.Of<Image>()).TryCast<Image>();
         if (image == null)
         {
-            UnityEngine.Object.Destroy(layerObject);
+            DestroyPanelLayer();
             throw new InvalidOperationException("could not create the death-panel blackout image");
         }
 
         image.raycastTarget = false;
         image.color = new Color(0f, 0f, 0f, _blackness);
 
-        _panelLayerObject = layerObject;
         _panelLayer = image;
         _layerOwner = panel;
         PlaceDeathTextAboveLayer();
@@ -317,7 +327,10 @@ internal sealed class PlayerHeadshotBlackoutController : MonoBehaviour
     private void DestroyPanelLayer()
     {
         if (_panelLayerObject != null)
+        {
+            _panelLayerObject.SetActive(false);
             UnityEngine.Object.Destroy(_panelLayerObject);
+        }
 
         _panelLayerObject = null;
         _panelLayer = null;
@@ -335,6 +348,19 @@ internal sealed class PlayerHeadshotBlackoutController : MonoBehaviour
         Plugin.LogSource.LogWarning(
             $"Headshot death presentation failed (further identical errors suppressed): {exception.Message}");
     }
+}
+
+[HarmonyPatch(typeof(SkipPromptGUI), nameof(SkipPromptGUI.Draw))]
+internal static class HeadshotBlackoutSkipPromptPatch
+{
+    // Draw is presentation only. The native skip input and respawn coroutine keep running.
+    private static bool Prefix() => !PlayerHeadshotBlackoutController.IsPresenting;
+}
+
+[HarmonyPatch(typeof(PlayerGUI), nameof(PlayerGUI.StartSquadSelection))]
+internal static class HeadshotBlackoutSquadSelectionPatch
+{
+    private static void Postfix() => PlayerHeadshotBlackoutController.OnSquadSelection();
 }
 
 [HarmonyPatch(typeof(DeathPanel), nameof(DeathPanel.ShowDeath))]

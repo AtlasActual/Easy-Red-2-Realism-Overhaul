@@ -32,7 +32,8 @@ internal sealed class LeaveSquadRedeployController : MonoBehaviour
 
     private void OnGUI()
     {
-        if (!_visible)
+        // A lethal hit can land between Update and this IMGUI event.
+        if (!_visible || PlayerHeadshotBlackoutController.IsPresenting)
             return;
 
         try
@@ -73,7 +74,7 @@ internal sealed class LeaveSquadRedeployController : MonoBehaviour
     [HideFromIl2Cpp]
     private static bool ShouldShow()
     {
-        if (!Settings.LeaveSquadRedeployEnabled.Value)
+        if (!Settings.LeaveSquadRedeployEnabled.Value || PlayerHeadshotBlackoutController.IsPresenting)
             return false;
 
         // IsSelectingSquad throws inside the game whenever PlayerGUI or its

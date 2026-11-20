@@ -1,6 +1,6 @@
 [h1]Easy Red 2 Realism Overhaul[/h1]
 
-[b]Current mod version:[/b] 1.2.2
+[b]Current mod version:[/b] 1.2.3
 [b]Compatible game version:[/b] 2.1.1 "Cold Steel" (Steam public build 26375879, November 2, 2026)
 [b]Download:[/b] [url=https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul/releases/]Easy Red 2 Realism Overhaul releases[/url]
 
@@ -75,7 +75,7 @@ This is not a health or damage multiplier mod, and it does not turn the AI into 
 
 [*][b]Expanded visual and audio tuning.[/b] Configure distant animation quality, smoke and dust duration, impact decals, tracers, battle chatter, weapon and vehicle audio, simultaneous sound capacity, player footsteps, weather particles, first-person shadows, ragdoll momentum, and player suppression effects.
 
-[*][b]Optional lethal-headshot presentation.[/b] A bullet to the head that kills the player can cut the view to black and silence immediately while keeping the native death information readable. Other deaths remain unchanged, and sight and audio return through the normal respawn flow.
+[*][b]Optional lethal-headshot presentation.[/b] A lethal bullet to the head blacks out the view and silences combat audio for 2.5 seconds, followed by a 0.5-second fade. The death information remains readable, and the squadmate picker, takeover or deployment clears the effect immediately.
 [/list]
 
 [h2]Configuration, performance, and diagnostics[/h2]
@@ -140,7 +140,7 @@ After installation, this file should exist:
 
 [code]Easy Red 2\BepInEx\plugins\ER2RealismOverhaul\ER2RealismOverhaul.dll[/code]
 
-[b]Linux / Steam Deck (Proton):[/b] install as above, then in Steam open Easy Red 2 > Properties > General > Launch Options and enter:
+[b]Linux / Steam Deck (Proton):[/b] Extract 1.2.3 beside Easy Red 2.exe in Steam's Browse local files folder. Verify that [code]BepInEx/plugins/ER2RealismOverhaul/ER2RealismOverhaul.dll[/code] exists. The release fixes older ZIPs that extracted the entire path as one filename. Then open Easy Red 2 > Properties > General > Launch Options and enter:
 
 [code]WINEDLLOVERRIDES="winhttp=n,b" %command%[/code]
 
@@ -160,7 +160,7 @@ If an unmodded player becomes host after the original host leaves, the host-auth
 
 [h2]Compatibility and feedback[/h2]
 
-Version 1.2.2 targets Easy Red 2 version 2.1.1 "Cold Steel", Steam public-branch build [b]26375879[/b] (November 2, 2026). It is built against the updated game's regenerated interop assemblies and passes the release build and deterministic scenario suite. In-game validation of the 1.2.2 AI arrival cover and spacing fix, the new grenade and mortar likelihood sliders, and the 1.2.1 F10 changes and Optics Zoom fix remains pending. Beta-branch compatibility is not verified.
+Version 1.2.3 targets Easy Red 2 version 2.1.1 "Cold Steel", Steam public-branch build [b]26375879[/b] (November 2, 2026). Combat stress tests showed fewer battlefield scans during volleys and bursts of casualties. Frame-time improvement on PCs that reported stuttering still needs in-game measurement. The blackout was tested in simulated squadmate selection and respawn flows.
 
 Game updates can sometimes break BepInEx mods. Please report loading problems, unusual AI behaviour, multiplayer issues, performance regressions, or settings that need adjustment on the [url=https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul/issues]GitHub Issues page[/url].
 

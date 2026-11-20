@@ -59,7 +59,9 @@ internal static class QuitTimeSoldierDestroyPatch
         // the state leaked. Purging by id from both sides is idempotent.
         try
         {
-            AiState.RemoveSoldierById(__instance.GetInstanceID(), __instance.Pointer);
+            var soldierId = __instance.GetInstanceID();
+            CasualtySuppression.ForgetSoldier(soldierId);
+            AiState.RemoveSoldierById(soldierId, __instance.Pointer);
         }
         catch (Exception ex)
         {

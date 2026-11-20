@@ -9,6 +9,9 @@ namespace ER2RealismOverhaul;
 /// </summary>
 internal static class CoverCandidateSamplingCore
 {
+    internal static bool StopRefining(int evaluated, bool hasProtectiveCover, bool countSpent, bool timeSpent)
+        => (evaluated >= 3 && countSpent) || (evaluated >= 2 && hasProtectiveCover && timeSpent);
+
     internal static int[] SelectIndices(int candidateCount, int budget, int nearestCount)
     {
         if (candidateCount <= 0 || budget <= 0)

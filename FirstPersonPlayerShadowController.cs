@@ -9,6 +9,7 @@ internal sealed class FirstPersonPlayerShadowController : MonoBehaviour
     private const float RendererRefreshInterval = 0.20f;
 
     private readonly Dictionary<int, RendererState> _suppressedRenderers = new();
+    private readonly Il2CppSystem.Collections.Generic.List<Renderer> _rendererScratch = new();
     private int _suppressedSoldierId;
     private SuppressionScope _scope;
     private float _nextRendererRefreshAt;
@@ -94,9 +95,11 @@ internal sealed class FirstPersonPlayerShadowController : MonoBehaviour
     [HideFromIl2Cpp]
     private void SuppressNewRenderers(GameObject root)
     {
-        var renderers = root.GetComponentsInChildren<Renderer>(true);
-        foreach (var renderer in renderers)
+        root.GetComponentsInChildren<Renderer>(true, _rendererScratch);
+        var count = _rendererScratch.Count;
+        for (var i = 0; i < count; i++)
         {
+            var renderer = _rendererScratch[i];
             if (renderer == null)
                 continue;
 
@@ -110,10 +113,10 @@ internal sealed class FirstPersonPlayerShadowController : MonoBehaviour
                     NativeEnabled = renderer.enabled
                 };
                 _suppressedRenderers[id] = state;
+                ApplySuppression(state);
             }
-
-            ApplySuppression(state);
         }
+        _rendererScratch.Clear();
     }
 
     [HideFromIl2Cpp]
@@ -139,9 +142,10 @@ internal sealed class FirstPersonPlayerShadowController : MonoBehaviour
                 // The game may re-enable this renderer during a stance or LOD
                 // transition. Remember that native state, then suppress it again.
                 if (renderer.enabled)
+                {
                     state.NativeEnabled = true;
-
-                renderer.enabled = false;
+                    renderer.enabled = false;
+                }
                 return;
             }
 
@@ -158,8 +162,9 @@ internal sealed class FirstPersonPlayerShadowController : MonoBehaviour
             // so disable shadow-only renderers instead.
             state.NativeMode = currentMode;
             state.NativeEnabled = renderer.enabled;
-            state.DisabledForSuppression = renderer.enabled;
-            renderer.enabled = false;
+            state.DisabledForSuppression = state.NativeEnabled;
+            if (state.DisabledForSuppression)
+                renderer.enabled = false;
             return;
         }
 

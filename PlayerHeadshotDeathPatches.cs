@@ -18,7 +18,7 @@ internal static class PlayerHeadHitPatch
         try
         {
             if (bPart != BodyPartType.head || hitType != HitType.Projectile ||
-                __instance == null || !Settings.HeadshotDeathBlackoutEnabled.Value)
+                __instance == null || !Settings.HeadshotDeathBlackoutEnabled.Value || !__instance.IsAlive)
             {
                 return;
             }
@@ -28,7 +28,7 @@ internal static class PlayerHeadHitPatch
                 return;
 
             __state = true;
-            PlayerHeadshotBlackoutController.NotePlayerHeadHit();
+            PlayerHeadshotBlackoutController.NotePlayerHeadHit(__instance.GetInstanceID());
         }
         catch (Exception ex)
         {
@@ -47,7 +47,7 @@ internal static class PlayerHeadHitPatch
             if (!__state || __instance == null || __instance.IsAlive)
                 return;
 
-            PlayerHeadshotBlackoutController.NotePlayerKilled();
+            PlayerHeadshotBlackoutController.NotePlayerKilled(__instance.GetInstanceID());
         }
         catch (Exception ex)
         {
@@ -77,7 +77,7 @@ internal static class PlayerHeadshotDeathPatch
             if (player == null || player.GetInstanceID() != __instance.GetInstanceID())
                 return;
 
-            PlayerHeadshotBlackoutController.NotePlayerKilled();
+            PlayerHeadshotBlackoutController.NotePlayerKilled(__instance.GetInstanceID());
         }
         catch (Exception ex)
         {

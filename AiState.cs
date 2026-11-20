@@ -72,9 +72,10 @@ internal static class AiState
     /// </summary>
     private static readonly Dictionary<int, string> SoldierFactions = new();
 
-    internal static string FactionOf(Soldier soldier)
+    internal static string FactionOf(Soldier soldier) => FactionOf(soldier, soldier.GetInstanceID());
+
+    internal static string FactionOf(Soldier soldier, int id)
     {
-        var id = soldier.GetInstanceID();
         if (SoldierFactions.TryGetValue(id, out var faction))
             return faction;
 

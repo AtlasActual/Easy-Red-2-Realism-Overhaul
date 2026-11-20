@@ -2,10 +2,35 @@ using ER2RealismOverhaul;
 
 internal static class Program
 {
+    private static void MountedAimUsesNativeSensitivityAndAdjustableZoom()
+    {
+        Equal(1f, MountedAimSensitivityCore.InputGain(1f), "Native sensitivity at maximum");
+        Equal(1f, MountedAimSensitivityCore.InputGain(2f), "Legacy slider capped at native sensitivity");
+        Equal(0.5f, MountedAimSensitivityCore.InputGain(0.5f), "Half mounted sensitivity");
+        Equal(1f, MountedAimSensitivityCore.ZoomGain(30f, 60f, 0f), "No extra slowdown");
+        Equal(1f, MountedAimSensitivityCore.ZoomGain(60f, 60f, 100f), "Unmagnified view");
+        foreach (var percent in new[] { 25f, 50f, 100f })
+            if (Math.Abs(MountedAimSensitivityCore.ZoomGain(30f, 60f, percent) -
+                (1f - 0.5359f * percent / 100f)) > 0.0001f)
+                throw new Exception("Incorrect optical scaling");
+        foreach (int fps in new[] { 30, 60, 144, 360 })
+        {
+            float travel = 60f / fps;
+            Equal(-0.25f, MountedAimSensitivityCore.ManualAxis(-travel / 4, travel), "Frame-independent traverse");
+        }
+        Equal(0f, MountedAimSensitivityCore.ManualAxis(1f, 0f), "Stalled turret");
+        Equal(1f, MountedAimSensitivityCore.ManualAxis(4f, 1f), "Traverse limit");
+    }
+
     private static int Main()
     {
         var tests = new (string Name, Action Run)[]
         {
+            (nameof(MountedAimUsesNativeSensitivityAndAdjustableZoom), MountedAimUsesNativeSensitivityAndAdjustableZoom),
+            (nameof(HeadshotBlackoutExpiresOnItsOriginalDeadline), HeadshotBlackoutExpiresOnItsOriginalDeadline),
+            (nameof(HeadshotBlackoutYieldsToSquadmates), HeadshotBlackoutYieldsToSquadmates),
+            (nameof(HeadshotBlackoutIsBoundToOneLethalHit), HeadshotBlackoutIsBoundToOneLethalHit),
+            (nameof(SlowCoverChecksKeepLookingUntilTheyHaveProtection), SlowCoverChecksKeepLookingUntilTheyHaveProtection),
             (nameof(AiReinforcementScenarios.LargeRepeatedWavesServiceEverySoldier), AiReinforcementScenarios.LargeRepeatedWavesServiceEverySoldier),
             (nameof(AiReinforcementScenarios.ChangingWavesKeepTheFrameLimitAndRecoverAfterBursts), AiReinforcementScenarios.ChangingWavesKeepTheFrameLimitAndRecoverAfterBursts),
             (nameof(AiReinforcementScenarios.PhaseResetRestartsBudgetWithoutOldWaveOffsets), AiReinforcementScenarios.PhaseResetRestartsBudgetWithoutOldWaveOffsets),
@@ -240,6 +265,60 @@ internal static class Program
 
         Console.WriteLine($"{tests.Length - failures}/{tests.Length} deterministic scenarios passed.");
         return failures == 0 ? 0 : 1;
+    }
+
+    private static void HeadshotBlackoutExpiresOnItsOriginalDeadline()
+    {
+        var state = new HeadshotBlackoutState();
+        const double start = 123456.25;
+        state.RecordHeadHit(1, start);
+        True(state.TryBegin(1, start), "The lethal head hit did not start the effect.");
+        Equal(1f, state.Opacity(start + 2.5, 0, false), "The initial blackout was shortened.");
+        Equal(0.5f, state.Opacity(start + 2.75, 0, false), "The recovery fade missed its midpoint.");
+        Equal(0f, state.Opacity(start + 3, 0, false), "No soldier or respawn UI should be needed for recovery.");
+        Equal(0f, state.Opacity(start + 15, 0, false), "A delayed first update must not start a new fade.");
+    }
+
+    private static void HeadshotBlackoutYieldsToSquadmates()
+    {
+        var state = new HeadshotBlackoutState();
+        state.RecordHeadHit(5, 10);
+        True(state.TryBegin(5, 10), "Expected a blackout.");
+        Equal(1f, state.Opacity(10, 5, false), "The dying soldier can still look alive inside Kill.");
+        Equal(0f, state.Opacity(10.1, 0, true), "The squad picker opened under the blackout.");
+        Equal(0f, state.Opacity(10.1, 7, false), "A living squadmate inherited the blackout.");
+        state = default;
+        False(state.Active, "Ending presentation must release prompt suppression.");
+        Equal(0f, state.Opacity(10.1, 0, false), "A late death-panel refresh must not repaint black.");
+    }
+
+    private static void HeadshotBlackoutIsBoundToOneLethalHit()
+    {
+        var state = new HeadshotBlackoutState();
+        False(state.TryBegin(4, 1), "A death without a head hit started a blackout.");
+        state.RecordHeadHit(4, 1);
+        False(state.TryBegin(9, 1.02), "A different soldier consumed the head hit.");
+        True(state.TryBegin(4, 1.04), "The matching delayed kill did not start a blackout.");
+        False(state.TryBegin(4, 1.05), "The damage postfix restarted the kill prefix's blackout.");
+        state.RecordHeadHit(4, 1.1);
+        False(state.TryBegin(4, 1.12), "A repeat kill on the victim extended the deadline.");
+        state = default;
+        state.RecordHeadHit(4, 3);
+        False(state.TryBegin(4, 3.5), "An old nonlethal hit affected a later death.");
+    }
+
+    private static void SlowCoverChecksKeepLookingUntilTheyHaveProtection()
+    {
+        False(CoverCandidateSamplingCore.StopRefining(1, true, true, true),
+            "A busy frame discarded the distributed comparison after just the nearest slot.");
+        True(CoverCandidateSamplingCore.StopRefining(2, true, false, true),
+            "A slow search kept refining after comparing nearby and distributed cover.");
+        False(CoverCandidateSamplingCore.StopRefining(3, false, false, true),
+            "Elapsed time declared an unprotected position good enough.");
+        True(CoverCandidateSamplingCore.StopRefining(3, false, true, true),
+            "An unsuccessful search bypassed the existing count limit.");
+        False(CoverCandidateSamplingCore.StopRefining(4, true, false, false),
+            "The normal search lost candidates with both budgets available.");
     }
 
     private static void PerformancePresetsOnlyTouchKnownCostDrivers()

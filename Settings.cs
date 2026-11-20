@@ -248,6 +248,13 @@ internal static class Settings
     internal static ConfigEntry<bool> GunnerViewElevationLockEnabled = null!;
     internal static ConfigEntry<bool> UnstabilizedGunsightEnabled = null!;
     internal static ConfigEntry<float> OpticsZoom = null!;
+    internal static ConfigEntry<float> MountedAimSensitivity = null!;
+    internal static ConfigEntry<float> GunnerCameraStrengthPercent = null!;
+    internal static ConfigEntry<float> GunnerCameraFullEffectDegrees = null!;
+    internal static ConfigEntry<float> GunnerCameraHeightMeters = null!;
+    internal static ConfigEntry<float> GunnerCameraSideOffsetMeters = null!;
+    internal static ConfigEntry<float> GunnerCameraSetbackMeters = null!;
+    internal static ConfigEntry<float> ZoomSensitivityReductionPercent = null!;
     internal static ConfigEntry<float> ThirdPersonZoom = null!;
     internal static ConfigEntry<bool> BinocularsEnabled = null!;
     internal static ConfigEntry<KeyCode> BinocularsKey = null!;
@@ -751,6 +758,20 @@ internal static class Settings
         UnstabilizedGunsightEnabled = config.Bind("7g. Vehicle aiming", "UnstabilizedGunsightEnabled", true,
             "While using the right-click optical gunsight, directly moves the selected weapon with relative mouse or stick input and attaches the view to the physical gun. This removes the artificial vertical stabilization that otherwise makes the gun chase a world aim point while the vehicle moves. Disable this option to keep the native stabilized point-aim behavior inside the gunsight. Third-person aiming is unchanged.");
         OpticsZoom = BindOpticsZoom(config);
+        GunnerCameraStrengthPercent = config.Bind("7g. Vehicle aiming", "GunnerCameraStrengthPercent", 100f,
+            new ConfigDescription("Strength of the upward third-person camera in every vehicle seat adjustment. Set to zero for the original camera orbit.", new AcceptableValueRange<float>(0f, 100f)));
+        GunnerCameraFullEffectDegrees = config.Bind("7g. Vehicle aiming", "GunnerCameraFullEffectDegrees", 90f,
+            new ConfigDescription("Elevation where the camera reaches its final position beside the barrel or occupied seat. Lower values bring it in sooner.", new AcceptableValueRange<float>(15f, 90f)));
+        GunnerCameraHeightMeters = config.Bind("7g. Vehicle aiming", "GunnerCameraHeightMeters", 0.35f,
+            new ConfigDescription("Height of the exterior camera above the muzzle or occupied seat, measured along the vehicle's up axis.", new AcceptableValueRange<float>(0f, 3f)));
+        GunnerCameraSideOffsetMeters = config.Bind("7g. Vehicle aiming", "GunnerCameraSideOffsetMeters", 0.55f,
+            new ConfigDescription("Sideways distance from the muzzle or occupied seat at full elevation. Negative moves left and positive moves right.", new AcceptableValueRange<float>(-3f, 3f)));
+        GunnerCameraSetbackMeters = config.Bind("7g. Vehicle aiming", "GunnerCameraSetbackMeters", 0f,
+            new ConfigDescription("Distance behind the muzzle or occupied seat at full elevation, measured parallel to the vehicle deck. Increase to see more of the mount.", new AcceptableValueRange<float>(0f, 5f)));
+        MountedAimSensitivity = config.Bind("7g. Vehicle aiming", "MountedAimSensitivity", 1f,
+            new ConfigDescription("Scales native aim input for player-operated ground turrets and emplaced guns. 1.0 uses your game sensitivity. Lower values slow mounted aiming.", new AcceptableValueRange<float>(0.1f, 1f)));
+        ZoomSensitivityReductionPercent = config.Bind("7g. Vehicle aiming", "ZoomSensitivityReductionPercent", 0f,
+            new ConfigDescription("Extra slowdown in mounted gunsights as magnification increases. 0% keeps native sensitivity, 100% applies full optical scaling.", new AcceptableValueRange<float>(0f, 100f)));
         ThirdPersonZoom = BindThirdPersonZoom(config);
         BinocularsEnabled = config.Bind("7e. First-person view", "BinocularsEnabled", true,
             "Enables first-person binoculars while alive and on foot.");
@@ -771,7 +792,7 @@ internal static class Settings
         CompassUseMils = config.Bind("7e. First-person view", "CompassUseMils", true,
             "Uses NATO angular mils (0-6400) on the scrolling compass. Disable this option to show 0-360 degree bearings instead.");
         HeadshotDeathBlackoutEnabled = config.Bind("7e. First-person view", "HeadshotDeathBlackout", true,
-            "Cuts the screen to black and drops all sound to zero the instant a bullet to the head kills you, instead of the death camera lingering on your body. Other deaths are unchanged, and the view and sound always return when you take control of a soldier again, or within a few seconds at the latest.");
+            "A lethal headshot blacks out the view and mutes sound for 2.5 seconds, then fades both back over 0.5 seconds. The effect clears immediately when squadmate selection, deployment, or a living soldier becomes available.");
 
         KeepMultiplayerPlayerNamesWithHudDisabled = config.Bind("7f. Multiplayer nameplates", "KeepPlayerNamesWithHudDisabled", true,
             "Keeps names above living allied remote players in multiplayer when the base-game HUD or 3D markers are disabled. Enemy and local-player names remain hidden.");

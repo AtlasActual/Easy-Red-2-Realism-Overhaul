@@ -22,7 +22,8 @@ internal static class CombatSafety
         Vector3 origin,
         Vector3 direction,
         float laneRadius,
-        float fallbackDistance)
+        float fallbackDistance,
+        bool insideTimedUpdate = false)
     {
         if (shooter == null || direction.sqrMagnitude < 0.001f)
             return false;
@@ -48,8 +49,18 @@ internal static class CombatSafety
                 return cached.FriendlyPresent;
             }
 
-            var friendlyPresent = FriendlyInFiringLaneCore(
-                shooter, origin, direction, laneRadius, fallbackDistance);
+            // Director and suppression updates already account for their full runtime.
+            var started = insideTimedUpdate ? 0L : ModTimeProbe.Begin();
+            bool friendlyPresent;
+            try
+            {
+                friendlyPresent = FriendlyInFiringLaneCore(
+                    shooter, origin, normalizedDirection, laneRadius, fallbackDistance);
+            }
+            finally
+            {
+                ModTimeProbe.End(ModTimeSite.FiringLane, started);
+            }
             FiringLaneSamples[shooterId] = new FiringLaneSample(
                 origin,
                 normalizedDirection,
@@ -78,8 +89,6 @@ internal static class CombatSafety
         float laneRadius,
         float fallbackDistance)
     {
-
-        direction.Normalize();
         var target = shooter.GetCurrentBestVisibleEnemy();
         var targetDistance = fallbackDistance;
         if (target != null && TryGetCenterOfUnit(target, out var targetCenter))
@@ -89,40 +98,7 @@ internal static class CombatSafety
                 targetDistance = Mathf.Min(fallbackDistance, projected + 2f);
         }
 
-        var creatures = Creature.aliveCreatures;
-        if (creatures == null)
-            return false;
-
-        var shootersVehicle = shooter.GetCurrentVehicle();
-        var radiusSqr = laneRadius * laneRadius;
-        foreach (var creature in creatures)
-        {
-            var friendly = Il2CppTypeTests.As<Soldier>(creature);
-            if (friendly == null || friendly == shooter || !friendly.IsAlive ||
-                !SameFaction(friendly.faction, shooter.faction))
-            {
-                continue;
-            }
-
-            // A turret muzzle can be ahead of passengers in the same vehicle; those
-            // passengers are not actually occupying the external firing lane.
-            if (shootersVehicle != null && friendly.GetCurrentVehicle() == shootersVehicle)
-                continue;
-
-            if (!TryGetCenterOfUnit(friendly, out var friendlyCenter))
-                continue;
-
-            var offset = friendlyCenter - origin;
-            var along = Vector3.Dot(offset, direction);
-            if (along <= 0.35f || along >= targetDistance)
-                continue;
-
-            var lateral = offset - direction * along;
-            if (lateral.sqrMagnitude <= radiusSqr)
-                return true;
-        }
-
-        return false;
+        return FiringLaneRoster.IsBlocked(shooter, origin, direction, laneRadius, targetDistance);
     }
 
     internal static bool FriendlyNear(Vector3 position, string faction, float radius, Soldier? ignore = null)
@@ -139,7 +115,7 @@ internal static class CombatSafety
         {
             var friendly = Il2CppTypeTests.As<Soldier>(creature);
             if (friendly == null || friendly == ignore || !friendly.IsAlive ||
-                !SameFaction(friendly.faction, faction))
+                !SameFaction(AiState.FactionOf(friendly), faction))
             {
                 continue;
             }
@@ -195,6 +171,13 @@ internal static class CombatSafety
     internal static bool SameFaction(string? a, string? b)
         => !string.IsNullOrEmpty(a) && !string.IsNullOrEmpty(b) &&
            string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
+    internal static void ResetBattle()
+    {
+        FiringLaneRoster.Reset();
+        FiringLaneSamples.Clear();
+        _nextFiringLaneCacheClearAt = 0f;
+    }
 
     internal static bool TryGetDebugFiringLane(
         int soldierId,

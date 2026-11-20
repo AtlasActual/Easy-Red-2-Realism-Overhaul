@@ -31,7 +31,6 @@ $noBepStage = Join-Path $projectRoot "artifacts\ER2RealismOverhaul-v$modVersion-
 $fullStage = Join-Path $projectRoot "artifacts\ER2RealismOverhaul-v$modVersion-Windows-x64-BepInEx"
 
 $requiredPaths = @($GameDir, $compactStage, $noBepStage, $fullStage)
-if (-not $PackageOnly) { $requiredPaths += $MirrorRoot }
 foreach ($requiredPath in $requiredPaths) {
     if (-not (Test-Path -LiteralPath $requiredPath)) {
         throw "Required path does not exist: $requiredPath"
@@ -59,17 +58,7 @@ if ($builtVersion -ne $expectedFileVersion) {
     throw "Built DLL version is $builtVersion; expected $expectedFileVersion."
 }
 
-$runningGame = Get-Process -ErrorAction SilentlyContinue | Where-Object {
-    try {
-        $_.Path -and $_.Path.StartsWith($GameDir, [StringComparison]::OrdinalIgnoreCase)
-    }
-    catch {
-        $false
-    }
-}
-if ($runningGame -and -not $PackageOnly) {
-    throw 'Easy Red 2 is running. Close it before deploying the consolidated DLL.'
-}
+& (Join-Path $projectRoot 'tests\Test-PhysicsQueryBuffers.ps1') -GameDir $GameDir -PluginDll $buildDll
 
 $pluginRelativePath = 'BepInEx\plugins\ER2RealismOverhaul\ER2RealismOverhaul.dll'
 $deployedDlls = @(
@@ -77,18 +66,6 @@ $deployedDlls = @(
     (Join-Path $noBepStage $pluginRelativePath),
     (Join-Path $fullStage $pluginRelativePath)
 )
-if (-not $PackageOnly) {
-    $deployedDlls += (Join-Path $MirrorRoot 'bin\Release\net6.0\ER2RealismOverhaul.dll')
-    $deployedDlls += (Join-Path $GameDir $pluginRelativePath)
-}
-
-# Keep the historical game-root copy synchronized if it exists, even though BepInEx
-# loads the DLL from BepInEx\plugins\ER2RealismOverhaul.
-$legacyGameRootDll = Join-Path $GameDir 'ER2RealismOverhaul.dll'
-if (-not $PackageOnly -and (Test-Path -LiteralPath $legacyGameRootDll)) {
-    $deployedDlls += $legacyGameRootDll
-}
-
 foreach ($destination in $deployedDlls) {
     $destinationDirectory = Split-Path -Parent $destination
     New-Item -ItemType Directory -Path $destinationDirectory -Force | Out-Null
@@ -148,15 +125,33 @@ $packages = @(
     [pscustomobject]@{
         Stage = $fullStage
         Zip = Join-Path $releaseDir "ER2RealismOverhaul-v$modVersion-Windows-x64-BepInEx.zip"
-    },
-    [pscustomobject]@{
-        Stage = $compactStage
-        Zip = Join-Path $releaseDir 'ER2RealismOverhaul.zip'
     }
 )
 
+Add-Type -AssemblyName System.IO.Compression.FileSystem
 foreach ($package in $packages) {
-    Compress-Archive -Path (Join-Path $package.Stage '*') -DestinationPath $package.Zip -Force
+    # ZIP member names use '/' on every OS. Windows Compress-Archive wrote '\'
+    # into the names, which several Linux extractors preserved as literal text.
+    $stagePrefix = (Get-Item -LiteralPath $package.Stage).FullName + [IO.Path]::DirectorySeparatorChar
+    $temporaryZip = $package.Zip + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
+    try {
+        $archive = [IO.Compression.ZipFile]::Open($temporaryZip, [IO.Compression.ZipArchiveMode]::Create)
+        try {
+            foreach ($item in Get-ChildItem -LiteralPath $package.Stage -Recurse -Force | Sort-Object FullName) {
+                $memberName = $item.FullName.Substring($stagePrefix.Length).Replace('\', '/')
+                if ($item.PSIsContainer) {
+                    $null = $archive.CreateEntry("$memberName/")
+                } else {
+                    $null = [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $item.FullName, $memberName, [IO.Compression.CompressionLevel]::Optimal)
+                }
+            }
+        } finally { $archive.Dispose() }
+        if ([IO.File]::Exists($package.Zip)) {
+            [IO.File]::Replace($temporaryZip, $package.Zip, [System.Management.Automation.Language.NullString]::Value)
+        } else {
+            [IO.File]::Move($temporaryZip, $package.Zip)
+        }
+    } finally { [IO.File]::Delete($temporaryZip) }
 }
 
 $expectedHash = (Get-FileHash -LiteralPath $buildDll -Algorithm SHA256).Hash
@@ -168,17 +163,26 @@ foreach ($dll in $deployedDlls) {
     }
 }
 
-Add-Type -AssemblyName System.IO.Compression.FileSystem
 foreach ($package in $packages) {
     $archive = [IO.Compression.ZipFile]::OpenRead($package.Zip)
     try {
-        $entry = $archive.Entries | Where-Object {
-            $_.FullName.Replace('\', '/') -eq 'BepInEx/plugins/ER2RealismOverhaul/ER2RealismOverhaul.dll'
-        } | Select-Object -First 1
-        if (-not $entry) {
-            throw "Package is missing the plugin DLL: $($package.Zip)"
+        $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($member in $archive.Entries) {
+            $path = $member.FullName
+            if ($path.Contains('\') -or $path -match '(^/|//|:|(^|/)\.{1,2}(/|$))' -or -not $names.Add($path)) {
+                throw "Invalid ZIP path '$path' in $($package.Zip)"
+            }
+        }
+        $pluginEntry = 'BepInEx/plugins/ER2RealismOverhaul/ER2RealismOverhaul.dll'
+        $required = @($pluginEntry, 'BepInEx/plugins/ER2RealismOverhaul/ER2RealismOverhaul-CHANGELOG.md', 'INSTALL.txt')
+        if ($package.Stage -eq $fullStage) {
+            $required += @('winhttp.dll', 'doorstop_config.ini', '.doorstop_version', 'BepInEx/core/BepInEx.Unity.IL2CPP.dll', 'dotnet/coreclr.dll', 'dotnet/.version')
+        }
+        foreach ($path in $required) {
+            if (-not $names.Contains($path)) { throw "Missing case-sensitive ZIP path '$path' in $($package.Zip)" }
         }
 
+        $entry = $archive.GetEntry($pluginEntry)
         $stream = $entry.Open()
         try {
             $sha256 = [Security.Cryptography.SHA256]::Create()
@@ -202,8 +206,27 @@ foreach ($package in $packages) {
     }
 }
 
-Write-Host ''
-Write-Host "Consolidated v$modVersion successfully."
+# The unversioned download is an exact copy of the verified compact package.
+$aliasZip = Join-Path $releaseDir 'ER2RealismOverhaul.zip'
+Copy-Item -LiteralPath $packages[0].Zip -Destination $aliasZip -Force
+$packagePaths = @($packages | ForEach-Object { $_.Zip }) + @($aliasZip)
+$hashes = foreach ($path in $packagePaths) {
+    $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+    "$hash  $([IO.Path]::GetFileName($path))"
+}
+if ($hashes[0].Substring(0, 64) -ne $hashes[-1].Substring(0, 64)) { throw 'Compact package alias checksum mismatch.' }
+[IO.File]::WriteAllLines((Join-Path $releaseDir "ER2RealismOverhaul-v$modVersion-SHA256SUMS.txt"), [string[]]$hashes, [Text.Encoding]::ASCII)
+
+Write-Host "Packaged v$modVersion successfully."
 Write-Host "DLL SHA256: $expectedHash"
-Write-Host "Verified DLL copies: $($deployedDlls.Count)"
-Write-Host "Verified packages: $($packages.Count)"
+Write-Host "Verified packages: $($packagePaths.Count)"
+
+if (-not $PackageOnly) {
+    & (Join-Path $PSScriptRoot 'Install-Release.ps1') -GameDir $GameDir -ExpectedDllHash $expectedHash
+    if ($MirrorRoot -and (Test-Path -LiteralPath $MirrorRoot -PathType Container)) {
+        $mirrorDll = Join-Path $MirrorRoot 'bin\Release\net6.0\ER2RealismOverhaul.dll'
+        New-Item -ItemType Directory -Path (Split-Path -Parent $mirrorDll) -Force | Out-Null
+        Copy-Item -LiteralPath $buildDll -Destination $mirrorDll -Force
+        if ((Get-FileHash -LiteralPath $mirrorDll -Algorithm SHA256).Hash -ne $expectedHash) { throw "Mirror checksum mismatch: $mirrorDll" }
+    }
+}

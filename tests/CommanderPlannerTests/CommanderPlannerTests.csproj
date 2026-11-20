@@ -10,9 +10,11 @@
 
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="..\..\HeadshotBlackoutState.cs" Link="HeadshotBlackoutState.cs" />
     <Compile Include="ParachuteDriftScenarios.cs" />
     <Compile Include="..\..\ParachuteDriftCore.cs" Link="ParachuteDriftCore.cs" />
     <Compile Include="AiPriorityScenarios.cs" />
+    <Compile Include="..\..\MountedAimSensitivityCore.cs" Link="MountedAimSensitivityCore.cs" />
     <Compile Include="ObjectiveAttackScenarios.cs" />
     <Compile Include="AiReinforcementScenarios.cs" />
     <Compile Include="..\..\RotatingFrameBudgetCore.cs" Link="RotatingFrameBudgetCore.cs" />

@@ -372,6 +372,8 @@ internal static class GunfireAwarenessBattleResetPatch
         KneeMortarFireLimiter.ResetBattle();
         ContactResponse.ResetBattleAttackEvidence();
         CasualtySuppression.ResetBattle();
+        CombatSafety.ResetBattle();
+        CoverOccupancy.ResetBattle();
     }
 }
 

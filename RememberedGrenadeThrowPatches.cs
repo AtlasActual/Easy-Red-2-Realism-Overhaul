@@ -1,5 +1,6 @@
 using HarmonyLib;
 using Il2CppInterop.Runtime;
+using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using UnityEngine;
 
 namespace ER2RealismOverhaul;
@@ -27,7 +28,7 @@ internal static class RememberedGrenadeThrows
     private const float FacingToleranceDegrees = 12f;
     private const int ArcSegments = 7;
     private const float EndpointTolerance = 0.55f;
-    private static readonly RaycastHit[] ArcHits = new RaycastHit[24];
+    private static readonly Il2CppStructArray<RaycastHit> ArcHits = new(24);
 
     internal static void Schedule(SoldierAI ai, Soldier soldier, float now)
     {
@@ -53,7 +54,7 @@ internal static class RememberedGrenadeThrows
         }
 
         var state = GetState(id);
-        if (state.Active || now < state.NextAttemptAt)
+        if (state.Active || now < state.NextAttemptAt || !AiState.CooldownReady(AiState.NextGrenadeThrow, id, now))
             return;
 
         if (!TryGetFreshMemory(soldier, id, now, out var memory, out var memorySeconds) ||
@@ -62,7 +63,6 @@ internal static class RememberedGrenadeThrows
             return;
         }
 
-        var grenade = FindFragmentationGrenade(soldier);
         var hasDirectSight = HasActualVisualTarget(ai, soldier);
         if (hasDirectSight)
             return;
@@ -71,13 +71,18 @@ internal static class RememberedGrenadeThrows
         var distance = Vector3.Distance(soldier.GetCenterOfUnit(), targetPosition);
         var withinRange = distance >= Settings.GrenadeMinimumRange.Value &&
                           distance <= Settings.GrenadeMaximumRange.Value;
+        if (!withinRange)
+            return;
+        var grenade = FindFragmentationGrenade(soldier);
+        if (grenade == null || grenade.Pointer == IntPtr.Zero)
+            return;
         var blastAreaClear = !CombatSafety.FriendlyNear(
             targetPosition,
             AiState.FactionOf(soldier),
             Settings.GrenadeFriendlySafetyRadius.Value,
             soldier);
-        var hasClearArc = TryBuildThrowArc(
-            soldier, targetPosition, out var throwLookRotation);
+        var throwLookRotation = default(Quaternion);
+        var hasClearArc = blastAreaClear && TryBuildThrowArc(soldier, targetPosition, out throwLookRotation);
         var input = new RememberedGrenadeDecisionInput(
             systemEnabled,
             hasAuthority,
@@ -85,7 +90,7 @@ internal static class RememberedGrenadeThrows
             alive,
             stationary,
             availableForThrow,
-            grenade != null && grenade.Pointer != IntPtr.Zero,
+            HasFragmentationGrenade: true,
             memory.HasConfirmedTarget,
             memory.TargetToken != IntPtr.Zero &&
             memory.TargetToken == memory.ConfirmedLastKnownTargetToken,
@@ -96,8 +101,7 @@ internal static class RememberedGrenadeThrows
             blastAreaClear,
             hasClearArc);
 
-        if (!RememberedGrenadeDecisionCore.ShouldAttempt(input) ||
-            !AiState.CooldownReady(AiState.NextGrenadeThrow, id, now))
+        if (!RememberedGrenadeDecisionCore.ShouldAttempt(input))
         {
             if (!hasClearArc || !blastAreaClear)
                 state.NextAttemptAt = now + BlockedRetrySeconds;
@@ -109,7 +113,7 @@ internal static class RememberedGrenadeThrows
         state.Active = true;
         state.ThrowStarted = false;
         state.TargetToken = memory.ConfirmedLastKnownTargetToken;
-        state.GrenadeToken = grenade!.Pointer;
+        state.GrenadeToken = grenade.Pointer;
         state.AimPoint = targetPosition;
         state.ThrowLookRotation = throwLookRotation;
         state.ObservationAt = memory.ConfirmedLastKnownObservedAt;
@@ -414,9 +418,9 @@ internal static class RememberedGrenadeThrows
             distance,
             Physics.DefaultRaycastLayers,
             QueryTriggerInteraction.Ignore);
-        for (var i = 0; i < hitCount; i++)
+        foreach (var hit in ArcHits.AsSpan()[..hitCount])
         {
-            var collider = ArcHits[i].collider;
+            var collider = hit.collider;
             if (collider == null)
                 continue;
 
@@ -424,7 +428,7 @@ internal static class RememberedGrenadeThrows
             if (hitSoldier == soldier)
                 continue;
 
-            if ((ArcHits[i].point - targetPosition).sqrMagnitude <=
+            if ((hit.point - targetPosition).sqrMagnitude <=
                 EndpointTolerance * EndpointTolerance)
             {
                 continue;

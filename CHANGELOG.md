@@ -2,6 +2,18 @@
 
 This file records only concrete, player-visible changes in each released version of Easy Red 2 Realism Overhaul. It is a living description of the shipped mod: superseded wording is replaced with the final behavior, and changes that are removed or reverted are deleted instead of retained as historical notes.
 
+## 1.2.3 - 2026-11-19
+
+Built against Easy Red 2 **2.1.1 "Cold Steel"**, Steam build `26375879`.
+
+- Looking up in third person lifts the camera in every vehicle seat. Gunners move alongside their barrel. Drivers, commanders and passengers look up from their own position. The existing height, side offset, setback, angle and strength settings apply across seats.
+- Under **F10 > Vehicle aiming**, **Mounted Aim Sensitivity** defaults to 1.0× (your game sensitivity) and can be reduced to 0.1× for tank turrets and emplaced guns. **Zoom Sensitivity Reduction Percent** controls extra gunsight slowdown as magnification increases, from 0% (default) to 100% (full optical scaling). Infantry sensitivity is unaffected.
+- Fixed the Linux and Steam Deck extraction problem in the 1.2.1 and 1.2.2 archives. All 1.2.3 ZIPs use forward slashes internally so the DLL lands in `BepInEx/plugins/ER2RealismOverhaul/`. To repair an earlier extraction, unpack 1.2.3 beside `Easy Red 2.exe`.
+- Reduced work during heavy firefights. AI shooters in the same simulation step share soldier positions for friendly-fire checks. Wounds and deaths reported together now share one battlefield scan when applying suppression. In a simulated 256-soldier battle, a 64-shooter volley went from 64 scans to one, and 16 wounds plus four deaths went from 17 scans to one.
+- Fixed six physics queries that allocated new buffers and missed hits returned by Unity. AI cover, crowding, obstruction and throw checks now use those hits. On busy frames, soldiers with a protective position can stop comparing extra cover candidates sooner. First-person shadows and the closed settings menu also do less work during gameplay.
+- Fixed the lethal-headshot blackout lingering for up to 12 seconds. It now holds for 2.5 seconds and fades over 0.5 seconds. Opening the squadmate picker, taking control of a living squadmate or reaching deployment immediately restores the picture and sound. The skip prompt and **Change Squad** button stay hidden during the effect.
+- The optional stutter probe now records time spent on friendly-fire checks and casualty suppression in the BepInEx log. Frame-time gains on PCs that reported stuttering still need an in-game measurement.
+
 ## 1.2.2 - 2026-11-16
 
 Easy Red 2 compatibility: version **2.1.1 "Cold Steel"**, Steam public branch build `26375879` (November 2, 2026 update). 1.2.2 passes the release build and deterministic scenario suite. The flanking rework was checked in one battle, where a flanking squad reached its staging point and began its final attack 51 m off the direct line. In-game validation of the arrival cover and spacing fix and of the grenade and mortar likelihood sliders remains pending.

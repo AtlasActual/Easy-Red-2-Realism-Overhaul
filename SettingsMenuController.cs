@@ -126,6 +126,9 @@ internal sealed class SettingsMenuController : MonoBehaviour
 
     private void OnGUI()
     {
+        if (!_open && (!Settings.ShowSettingsLauncherButton.Value || !ShouldShowLauncher()))
+            return;
+
         GUI.depth = -10000;
         var menuWasOpen = _open;
 
@@ -963,9 +966,6 @@ internal sealed class SettingsMenuController : MonoBehaviour
     [HideFromIl2Cpp]
     private void DrawLauncher()
     {
-        if (!Settings.ShowSettingsLauncherButton.Value || !ShouldShowLauncher())
-            return;
-
         var width = S(330f);
         var height = S(52f);
         var edge = S(18f);

@@ -2,6 +2,7 @@ using System.Text;
 using Corvostudio.Weapons;
 using HarmonyLib;
 using Il2CppInterop.Runtime;
+using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using UnityEngine;
 
 namespace ER2RealismOverhaul;
@@ -294,10 +295,10 @@ internal static class BulletPenetration
     private static HashSet<IntPtr>? _coverRayColliderTokens;
 
     [ThreadStatic]
-    private static RaycastHit[]? _coverRayHits;
+    private static Il2CppStructArray<RaycastHit>? _coverRayHits;
 
     [ThreadStatic]
-    private static RaycastHit[]? _blockingRayHits;
+    private static Il2CppStructArray<RaycastHit>? _blockingRayHits;
 
     private static bool _loggedFailure;
     private static float _nextPruneAt;
@@ -657,7 +658,7 @@ internal static class BulletPenetration
             return default;
 
         var direction = ray / distance;
-        var hits = _coverRayHits ??= new RaycastHit[64];
+        var hits = _coverRayHits ??= new Il2CppStructArray<RaycastHit>(64);
         var hitCount = Physics.RaycastNonAlloc(
             bodyPosition,
             direction,
@@ -680,9 +681,9 @@ internal static class BulletPenetration
         var colliderTokens = _coverRayColliderTokens ??= new HashSet<IntPtr>();
         colliderTokens.Clear();
 
-        for (var i = 0; i < hitCount; i++)
+        foreach (var hit in hits.AsSpan()[..hitCount])
         {
-            var collider = hits[i].collider;
+            var collider = hit.collider;
             if (collider == null || collider.isTrigger || IsCharacterStop(collider))
                 continue;
 
@@ -732,7 +733,7 @@ internal static class BulletPenetration
             if (maximumDepth <= 0.003f ||
                 !TryFindExit(
                     collider,
-                    hits[i].point,
+                    hit.point,
                     direction,
                     maximumDepth,
                     false,
@@ -1111,7 +1112,7 @@ internal static class BulletPenetration
         if (exitDepth <= 0.04f)
             return false;
 
-        var hits = _blockingRayHits ??= new RaycastHit[32];
+        var hits = _blockingRayHits ??= new Il2CppStructArray<RaycastHit>(32);
         var hitCount = Physics.RaycastNonAlloc(
             entry + direction * 0.012f,
             direction,
@@ -1119,9 +1120,9 @@ internal static class BulletPenetration
             Mathf.Max(0f, exitDepth - 0.024f),
             ~0,
             QueryTriggerInteraction.Ignore);
-        for (var i = 0; i < hitCount; i++)
+        foreach (var hit in hits.AsSpan()[..hitCount])
         {
-            var other = hits[i].collider;
+            var other = hit.collider;
             if (other == null || other.Pointer == source.Pointer || BelongsToSameProp(source, other))
                 continue;
 
@@ -1450,8 +1451,23 @@ internal static class BulletPenetration
         };
     }
 
+    private static readonly Dictionary<IntPtr, string> SurfaceDescriptions = new();
+    private static int _surfaceFrame = -1;
+
     private static string BuildSurfaceDescription(Collider collider)
     {
+        // Body, shoulder and route rays repeatedly hit the same mesh. Its parent
+        // names, material and layer are sufficient to classify all hits this frame.
+        var frame = Time.frameCount;
+        if (_surfaceFrame != frame)
+        {
+            SurfaceDescriptions.Clear();
+            _surfaceFrame = frame;
+        }
+        var token = collider.Pointer;
+        if (SurfaceDescriptions.TryGetValue(token, out var cached))
+            return cached;
+
         var description = new StringBuilder(160);
         try
         {
@@ -1473,7 +1489,9 @@ internal static class BulletPenetration
             // generic-material profile.
         }
 
-        return description.ToString().ToLowerInvariant();
+        var names = description.ToString().ToLowerInvariant();
+        SurfaceDescriptions[token] = names;
+        return names;
     }
 
     private static bool ContainsAny(string value, string[] terms)

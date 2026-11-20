@@ -6,9 +6,17 @@ ER2RealismOverhaul is built around the rough edges that become hard to ignore af
 
 The goal is to fix those moments without replacing the game underneath them. This is not a health or damage multiplier mod; Easy Red 2's missions, armour system, and basic damage model remain intact.
 
-> **Current release:** 1.2.2
+> **Current release:** 1.2.3
 >
-> **Compatibility:** Easy Red 2 **2.1.1 "Cold Steel"**, Steam public-branch build `26375879` (November 2, 2026 update). Built against the updated game's regenerated interop assemblies. Version 1.2.2 passes the release build and deterministic scenario suite, and its flanking rework was seen working in one battle; its AI arrival cover and spacing fix, the new grenade and mortar likelihood sliders, and the 1.2.1 F10 changes and Optics Zoom fix still need in-game validation. Versions 1.1.3 and earlier do not work on Easy Red 2 2.1.0 or later.
+> **Compatibility:** Easy Red 2 **2.1.1 "Cold Steel"**, Steam public-branch build `26375879` (November 2, 2026 update). Version 1.2.3 was built against the installed game assemblies. Its combat and blackout fixes were tested in simulation. Frame-time improvement on an affected PC still needs an in-game measurement. Versions 1.1.3 and earlier do not work on Easy Red 2 2.1.0 or later.
+
+## What's new in 1.2.3
+
+- Looking up in third person lifts the camera in every vehicle seat. Gunners move alongside their barrel. Drivers, commanders and passengers look up from their own position. The existing height, side offset, setback, angle and strength settings apply across seats.
+- Under **F10 > Vehicle aiming**, **Mounted Aim Sensitivity** defaults to 1.0× (your game sensitivity) and can be reduced to 0.1× for tank turrets and emplaced guns. **Zoom Sensitivity Reduction Percent** controls extra gunsight slowdown as magnification increases, from 0% (default) to 100% (full optical scaling). Infantry sensitivity is unaffected.
+- Fixed ZIP extraction on Linux and Steam Deck. The archives now create `BepInEx/plugins/ER2RealismOverhaul/` and put the DLL inside it. Players affected by the older downloads can extract 1.2.3 over their game folder.
+- Reduced work during volleys and bursts of casualties. In a simulated 256-soldier battle, a 64-shooter volley needed one battlefield scan, down from 64. AI cover checks now read the hits Unity returns and can finish sooner once soldiers have protective cover.
+- A lethal headshot now gives 2.5 seconds of blackout followed by a 0.5-second fade. Opening the squadmate picker, taking over a living squadmate or reaching deployment clears it immediately. The skip and **Change Squad** prompts stay hidden during the blackout.
 
 ## What's new in 1.2.2
 
@@ -169,7 +177,7 @@ The goal is to fix those moments without replacing the game underneath them. Thi
 - Allied multiplayer infantry can deliberately form one squad: open the player list, select a player, and choose **Join [player]'s squad**. Joining is per life and never happens automatically on spawn or respawn. Dead players can also leave their current squad and return to deployment.
 - Configurable impact-decal lifetime, machine-gun tracer frequency, brightness, thickness, and independent streak length, battle chatter, simultaneous-sound capacity, distant sound shaping, weapon audio, tank engines, tracks, player footsteps, and rain/snow particle size, amount, and fall speed.
 - Adjustable player suppression effects—including a larger near-miss radius and optional depth-of-field blur—plus recoverable aim fatigue, true 10x Caps Lock binocular zoom with the weapon model hidden, 200-degree hold-Alt freelook, corrected first-person body shadows, an immersive world HUD, and allied multiplayer names when other markers are hidden.
-- A bullet to the head that kills you cuts to black and silence instantly instead of leaving the death camera on your body, with the death panel still readable over it; every other death is unchanged, and sight and sound always return when you take control of a soldier again.
+- A lethal bullet to the head cuts the view to black and silences combat audio. The death panel stays readable. Sight and sound return within three seconds, or immediately when you open the squadmate picker, take over a living soldier or reach deployment.
 - A map-north-aligned scrolling bottom-screen compass tape shown for five seconds with **K**, using NATO mils by default with optional degree bearings, tapered fading edges, and an option to keep it permanently visible.
 - A built-in settings menu with Apply, Cancel, reset controls, individual switches for nearly every system, one-click Enable All / Disable All system kill switches, and Quality, Balanced, and Large Battle performance presets.
 
@@ -237,9 +245,9 @@ Do not place the DLL in `Easy Red 2_Data`.
 
 ### Linux and Steam Deck (Proton)
 
-Easy Red 2 runs on Linux through Steam's Proton, so the Windows x64 IL2CPP BepInEx package is the one to use. BepInEx loads through `winhttp.dll`, which Proton ignores unless it is told to use the file in the game folder. Without the launch option below BepInEx never starts, even when everything is installed correctly, and the F10 menu does not appear.
+Use the Windows x64 **BepInEx** ZIP for a first installation through Proton. If BepInEx already works in this game, use the **mod-only** ZIP.
 
-1. Install the mod exactly as described under **Setup** above, into the game's folder (`~/.local/share/Steam/steamapps/common/Easy Red 2` on most installs). The Windows x64 BepInEx release ZIP can be extracted there directly.
+1. In Steam, open **Easy Red 2 > Manage > Browse local files**. With the game closed, extract the ZIP contents in this folder, beside `Easy Red 2.exe`. Open `BepInEx/plugins/ER2RealismOverhaul/` and check for `ER2RealismOverhaul.dll`. Some extractors showed the whole path as one filename in 1.2.1 and 1.2.2. Extracting 1.2.3 in the same game folder creates the directories and keeps your saved settings.
 2. In Steam, right-click **Easy Red 2** and select **Properties > General > Launch Options**.
 3. Enter this exactly, then close the dialog:
 
@@ -249,7 +257,7 @@ Easy Red 2 runs on Linux through Steam's Proton, so the Windows x64 IL2CPP BepIn
 
 4. Make sure the game is set to run through Proton (**Properties > Compatibility**), then launch it. The first launch is slower while BepInEx generates its files. Press **F10** in game to confirm the mod loaded.
 
-If the menu does not appear, check that `BepInEx/LogOutput.log` exists in the game folder; if it is missing, the launch option was not applied. Thanks to xxvertigoxx for reporting the launch option. This setup has not been validated on every distribution.
+If F10 does not open, check `BepInEx/LogOutput.log`. If the log is missing, check that `winhttp.dll` is beside `Easy Red 2.exe` and that Steam has the launch option above. If the log exists, look for `ER2RealismOverhaul` and verify the case-sensitive plugin path in step 1. Thanks to xxvertigoxx for reporting the Proton launch option and the archive layout problem.
 
 ### Updating
 

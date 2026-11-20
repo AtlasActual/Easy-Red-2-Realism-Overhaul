@@ -302,6 +302,13 @@ internal static class SettingsCatalog
         "7g. Vehicle aiming\u001fLockGunnerViewElevation",
         "7g. Vehicle aiming\u001fUnstabilizedGunsightEnabled",
         "7g. Vehicle aiming\u001fOpticsZoom",
+        "7g. Vehicle aiming\u001fMountedAimSensitivity",
+        "7g. Vehicle aiming\u001fGunnerCameraStrengthPercent",
+        "7g. Vehicle aiming\u001fGunnerCameraFullEffectDegrees",
+        "7g. Vehicle aiming\u001fGunnerCameraHeightMeters",
+        "7g. Vehicle aiming\u001fGunnerCameraSideOffsetMeters",
+        "7g. Vehicle aiming\u001fGunnerCameraSetbackMeters",
+        "7g. Vehicle aiming\u001fZoomSensitivityReductionPercent",
         "7j. Third-person view\u001fThirdPersonZoom",
 
         "7f. Multiplayer nameplates\u001fKeepPlayerNamesWithHudDisabled",
@@ -443,13 +450,13 @@ internal static class SettingsCatalog
 
     internal static string InferUnit(string key)
     {
-        if (key is "AttackerGarrisonPercent" or "FlankWidthPercent")
+        if (key is "AttackerGarrisonPercent" or "FlankWidthPercent" or "GunnerCameraStrengthPercent" or "ZoomSensitivityReductionPercent")
             return "%";
         if (key == "EnginePowerMultiplier")
             return "1-10";
         if (key is "Aggressiveness" or "Accuracy" or "ReactionSpeed" or "Perception" or
             "SuppressionResistance" or "VehicleEngineSound" or "TracerBrightness" or
-            "TracerSizeMultiplier" or "OpticsZoom" or "ThirdPersonZoom" or
+            "TracerSizeMultiplier" or "OpticsZoom" or "MountedAimSensitivity" or "ThirdPersonZoom" or
             "AircraftFreeLookZoom" or
             "PitchAuthority" or "RollAuthority" or "RudderAuthority")
             return "x";
@@ -649,6 +656,13 @@ internal static class SettingsCatalog
         "PlayerStaminaMultiplier" => ("less player stamina", "more player stamina"),
         "HoldBreathZoomMultiplier" => ("weaker hold-breath zoom", "stronger hold-breath zoom"),
         "OpticsZoom" => ("weaker optics zoom", "stronger optics zoom"),
+        "MountedAimSensitivity" => ("finer mounted aim", "game sensitivity"),
+        "ZoomSensitivityReductionPercent" => ("no extra slowdown", "full optical scaling"),
+        "GunnerCameraStrengthPercent" => ("original orbit", "full adjustment"),
+        "GunnerCameraFullEffectDegrees" => ("moves in sooner", "moves in later"),
+        "GunnerCameraHeightMeters" => ("lower camera", "higher camera"),
+        "GunnerCameraSideOffsetMeters" => ("left of barrel", "right of barrel"),
+        "GunnerCameraSetbackMeters" => ("closer to muzzle", "farther behind muzzle"),
         "ThirdPersonZoom" => ("weaker third-person aim zoom", "stronger third-person aim zoom"),
         "AircraftFreeLookZoom" => ("weaker aircraft freelook zoom", "stronger aircraft freelook zoom"),
         "BinocularZoomMultiplier" => ("wider binocular view", "stronger binocular zoom"),

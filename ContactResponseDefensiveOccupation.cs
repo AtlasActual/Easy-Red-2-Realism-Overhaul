@@ -128,7 +128,7 @@ internal static partial class ContactResponse
         // retry slowly, preserving the anchor and its reservation throughout.
         state.NextDefensiveCoverReassessmentAt =
             InfantryCoverDecisionCore.NextDefensiveReassessmentAt(now, soldierId);
-        if (SearchGeometryBudgetSpent())
+        if (SearchGeometryBudgetSpent() || GeometryTimeSpent())
         {
             state.NextDefensiveCoverReassessmentAt = now + 5f;
             return false;

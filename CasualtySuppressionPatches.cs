@@ -10,41 +10,27 @@ internal static class CasualtySuppression
     private static readonly Dictionary<int, float> NextWoundEventAt = new();
     private static readonly HashSet<int> ReportedDeaths = new();
 
-    // Deaths are batched: a mass-casualty frame (e.g. an artillery strike) used to
-    // run one full aliveCreatures scan + List allocation per dead soldier. All
-    // deaths reported this frame are queued here and resolved in one scan by
-    // FlushPendingDeaths, called once per frame from the BattleManager.Update
-    // postfix below.
-    private static readonly List<PendingDeath> PendingDeaths = new();
+    private readonly record struct Casualty(int SoldierId, Vector3 Origin, string Faction, float Radius, int Amount);
+    private static List<Casualty> _pending = new();
+    private static List<Casualty> _processing = new();
 
-    // Stutter-probe markers: the frame of the last death-batch flush and how many
-    // deaths it resolved. Diagnostic-only.
-    internal static int LastFlushFrame = int.MinValue;
+    internal static int LastFlushFrame = -1;
     internal static int LastFlushCount;
-
-    private readonly struct PendingDeath
-    {
-        internal PendingDeath(Soldier casualty, Vector3 origin, string faction, float radius, int maximumAmount)
-        {
-            Casualty = casualty;
-            Origin = origin;
-            Faction = faction;
-            Radius = radius;
-            MaximumAmount = maximumAmount;
-        }
-
-        internal Soldier Casualty { get; }
-        internal Vector3 Origin { get; }
-        internal string Faction { get; }
-        internal float Radius { get; }
-        internal int MaximumAmount { get; }
-    }
 
     internal static void ResetBattle()
     {
         NextWoundEventAt.Clear();
         ReportedDeaths.Clear();
-        PendingDeaths.Clear();
+        _pending.Clear();
+        _processing.Clear();
+        LastFlushFrame = -1;
+        LastFlushCount = 0;
+    }
+
+    internal static void ForgetSoldier(int id)
+    {
+        NextWoundEventAt.Remove(id);
+        ReportedDeaths.Remove(id);
     }
 
     internal static void ReportWound(Soldier casualty)
@@ -52,17 +38,13 @@ internal static class CasualtySuppression
         if (!CanReport(casualty))
             return;
 
-        var casualtyId = casualty.GetInstanceID();
+        var id = casualty.GetInstanceID();
         var now = Time.time;
-        if (NextWoundEventAt.TryGetValue(casualtyId, out var nextAt) && now < nextAt)
+        if (NextWoundEventAt.TryGetValue(id, out var nextAt) && now < nextAt)
             return;
 
-        NextWoundEventAt[casualtyId] = now + WoundDebounceSeconds;
-        ApplyNearby(
-            casualty,
-            Settings.AiWoundSuppressionRadius.Value,
-            Settings.AiWoundSuppressionAmount.Value,
-            "wound");
+        NextWoundEventAt[id] = now + WoundDebounceSeconds;
+        Enqueue(casualty, id, Settings.AiWoundSuppressionRadius.Value, Settings.AiWoundSuppressionAmount.Value);
     }
 
     internal static void ReportDeath(Soldier casualty)
@@ -70,183 +52,97 @@ internal static class CasualtySuppression
         if (!CanReport(casualty))
             return;
 
-        var casualtyId = casualty.GetInstanceID();
-        if (!ReportedDeaths.Add(casualtyId))
+        var id = casualty.GetInstanceID();
+        if (!ReportedDeaths.Add(id))
             return;
 
-        NextWoundEventAt.Remove(casualtyId);
-
-        var radius = Settings.AiDeathSuppressionRadius.Value;
-        var maximumAmount = Settings.AiDeathSuppressionAmount.Value;
-        if (radius <= 0f || maximumAmount <= 0)
-            return;
-
-        try
-        {
-            PendingDeaths.Add(new PendingDeath(
-                casualty, casualty.GetCenterOfUnit(), casualty.faction, radius, maximumAmount));
-        }
-        catch (ObjectCollectedException)
-        {
-            // The casualty despawned before its position could be captured; no
-            // retry is needed because suppression is intentionally a one-shot
-            // reaction.
-        }
-    }
-
-    /// <summary>
-    /// Resolves every death queued this frame in a single aliveCreatures scan.
-    /// A recipient near several simultaneous deaths still receives each death's
-    /// own distance-scaled contribution, evaluated inside this one pass.
-    /// </summary>
-    internal static void FlushPendingDeaths()
-    {
-        if (PendingDeaths.Count == 0)
-            return;
-
-        var deaths = PendingDeaths.ToArray();
-        PendingDeaths.Clear();
-        LastFlushFrame = Time.frameCount;
-        LastFlushCount = deaths.Length;
-
-        try
-        {
-            var creatures = Creature.aliveCreatures;
-            if (creatures == null)
-                return;
-
-            var affected = 0;
-            foreach (var creature in creatures)
-            {
-                var soldier = Il2CppTypeTests.As<Soldier>(creature);
-                if (soldier == null || !soldier.IsAlive || !AiOwnership.IsAutonomous(soldier))
-                    continue;
-
-                Vector3? position = null;
-                var soldierAffected = false;
-                // Invariant across the death loop, but it was being re-marshalled from
-                // il2cpp once per death per creature — on a mass-casualty flush with the
-                // battle's whole alive list that is the dominant cost of this pass, and
-                // the frame it landed on allocated 62KB against a 3-6KB baseline.
-                var soldierFaction = soldier.faction;
-                foreach (var death in deaths)
-                {
-                    if (soldier == death.Casualty ||
-                        !CombatSafety.SameFaction(soldierFaction, death.Faction))
-                    {
-                        continue;
-                    }
-
-                    position ??= soldier.GetCenterOfUnit();
-                    var distanceSqr = (position.Value - death.Origin).sqrMagnitude;
-                    var radiusSqr = death.Radius * death.Radius;
-                    if (distanceSqr > radiusSqr)
-                        continue;
-
-                    // Retain a restrained 35% shock at the edge, then rise smoothly
-                    // toward the configured maximum beside the casualty.
-                    var proximity = 1f - Mathf.Clamp01(Mathf.Sqrt(distanceSqr) / death.Radius);
-                    var amount = Mathf.RoundToInt(death.MaximumAmount * Mathf.Lerp(0.35f, 1f, proximity));
-                    if (amount <= 0 || !soldier.IsAlive || !AiOwnership.IsAutonomous(soldier))
-                        continue;
-
-                    IncomingFireAwareness.ApplyNonDirectionalSuppression(
-                        soldier, amount, responsible: null);
-                    soldierAffected = true;
-                }
-
-                if (soldierAffected)
-                    affected++;
-            }
-
-            if (affected > 0)
-            {
-                AiState.Trace(
-                    $"AI casualty suppression: death batch of {deaths.Length} affected {affected} allied AI");
-            }
-        }
-        catch (ObjectCollectedException)
-        {
-            // A casualty or recipient despawned during the event; no retry is
-            // needed because suppression is intentionally a one-shot reaction.
-        }
-        catch (Exception ex)
-        {
-            Plugin.LogSource.LogWarning($"AI casualty suppression skipped a death batch: {ex.Message}");
-        }
+        NextWoundEventAt.Remove(id);
+        Enqueue(casualty, id, Settings.AiDeathSuppressionRadius.Value, Settings.AiDeathSuppressionAmount.Value);
     }
 
     private static bool CanReport(Soldier casualty)
-        => casualty != null &&
-           Settings.AiCasualtySuppressionEnabled.Value &&
-           MultiplayerAuthority.CanMutateGameplay() &&
-           !string.IsNullOrEmpty(casualty.faction);
+        => casualty != null && Settings.AiCasualtySuppressionEnabled.Value &&
+           MultiplayerAuthority.CanMutateGameplay();
 
-    private static void ApplyNearby(Soldier casualty, float radius, int maximumAmount, string eventName)
+    private static void Enqueue(Soldier soldier, int id, float radius, int amount)
     {
-        if (radius <= 0f || maximumAmount <= 0)
+        if (radius <= 0f || amount <= 0)
             return;
 
         try
         {
+            var faction = AiState.FactionOf(soldier, id);
+            if (!string.IsNullOrEmpty(faction))
+                _pending.Add(new Casualty(id, soldier.GetCenterOfUnit(), faction, radius, amount));
+        }
+        catch (ObjectCollectedException) { }
+        catch (Il2CppException) { }
+    }
+
+    internal static void FlushPending()
+    {
+        if (_pending.Count == 0 || _processing.Count != 0)
+            return;
+
+        // A suppression callback can report another casualty. It goes into the
+        // next batch, while the current batch keeps its original order and size.
+        (_processing, _pending) = (_pending, _processing);
+        LastFlushFrame = Time.frameCount;
+        LastFlushCount = _processing.Count;
+        try
+        {
+            if (!Settings.AiCasualtySuppressionEnabled.Value || !MultiplayerAuthority.CanMutateGameplay())
+                return;
+
             var creatures = Creature.aliveCreatures;
             if (creatures == null)
                 return;
-
-            var origin = casualty.GetCenterOfUnit();
-            var radiusSqr = radius * radius;
-            var recipients = new List<(Soldier Soldier, float Distance)>();
-
             foreach (var creature in creatures)
             {
-                var soldier = Il2CppTypeTests.As<Soldier>(creature);
-                if (soldier == null || soldier == casualty || !soldier.IsAlive ||
-                    !AiOwnership.IsAutonomous(soldier) ||
-                    !CombatSafety.SameFaction(soldier.faction, casualty.faction))
+                try
                 {
-                    continue;
+                    var soldier = Il2CppTypeTests.As<Soldier>(creature);
+                    if (soldier != null && soldier.IsAlive)
+                        ApplyBatchTo(soldier);
                 }
-
-                var distanceSqr = (soldier.GetCenterOfUnit() - origin).sqrMagnitude;
-                if (distanceSqr <= radiusSqr)
-                    recipients.Add((soldier, Mathf.Sqrt(distanceSqr)));
+                catch (ObjectCollectedException) { }
+                catch (Il2CppException) { }
             }
-
-            foreach (var recipient in recipients)
-            {
-                if (recipient.Soldier == null || !recipient.Soldier.IsAlive ||
-                    !AiOwnership.IsAutonomous(recipient.Soldier))
-                {
-                    continue;
-                }
-
-                // Retain a restrained 35% shock at the edge, then rise smoothly
-                // toward the configured maximum beside the casualty.
-                var proximity = 1f - Mathf.Clamp01(recipient.Distance / radius);
-                var amount = Mathf.RoundToInt(maximumAmount * Mathf.Lerp(0.35f, 1f, proximity));
-                if (amount > 0)
-                {
-                    IncomingFireAwareness.ApplyNonDirectionalSuppression(
-                        recipient.Soldier,
-                        amount,
-                        responsible: null);
-                }
-            }
-
-            if (recipients.Count > 0)
-            {
-                AiState.Trace(
-                    $"AI casualty suppression: {eventName} affected {recipients.Count} allied AI within {radius:0.#}m");
-            }
-        }
-        catch (ObjectCollectedException)
-        {
-            // A casualty or recipient despawned during the event; no retry is
-            // needed because suppression is intentionally a one-shot reaction.
         }
         catch (Exception ex)
         {
-            Plugin.LogSource.LogWarning($"AI casualty suppression skipped an event: {ex.Message}");
+            Plugin.LogSource.LogWarning($"AI casualty suppression skipped a batch: {ex.Message}");
+        }
+        finally
+        {
+            _processing.Clear();
+        }
+    }
+
+    private static void ApplyBatchTo(Soldier soldier)
+    {
+        var id = soldier.GetInstanceID();
+        var faction = AiState.FactionOf(soldier, id);
+        Vector3? position = null;
+        foreach (var casualty in _processing)
+        {
+            if (id == casualty.SoldierId || !CombatSafety.SameFaction(faction, casualty.Faction))
+                continue;
+
+            position ??= soldier.GetCenterOfUnit();
+            var center = position.Value;
+            var dx = center.x - casualty.Origin.x;
+            var dy = center.y - casualty.Origin.y;
+            var dz = center.z - casualty.Origin.z;
+            var distanceSquared = dx * dx + dy * dy + dz * dz;
+            if (distanceSquared > casualty.Radius * casualty.Radius)
+                continue;
+
+            // Each wound and death contributes separately, including at the radius edge.
+            var proximity = 1f - Mathf.Clamp01(Mathf.Sqrt(distanceSquared) / casualty.Radius);
+            var amount = Mathf.RoundToInt(casualty.Amount * Mathf.Lerp(0.35f, 1f, proximity));
+            if (amount > 0 && soldier.IsAlive && AiOwnership.IsAutonomous(soldier))
+                IncomingFireAwareness.ApplyNonDirectionalSuppression(soldier, amount, responsible: null);
         }
     }
 }
@@ -260,11 +156,11 @@ internal static class CasualtySuppressionDeathBatchPatch
         var __t = ModTimeProbe.Begin();
         try
         {
-            CasualtySuppression.FlushPendingDeaths();
+            CasualtySuppression.FlushPending();
         }
         finally
         {
-            ModTimeProbe.End(ModTimeSite.Other, __t);
+            ModTimeProbe.End(ModTimeSite.Casualty, __t);
         }
     }
 }

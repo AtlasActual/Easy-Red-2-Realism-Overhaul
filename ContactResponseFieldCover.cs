@@ -1,4 +1,5 @@
 using Il2CppInterop.Runtime;
+using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using UnityEngine;
 
 namespace ER2RealismOverhaul;
@@ -25,7 +26,7 @@ internal static partial class ContactResponse
     private static readonly float[] FieldFaceAngles = { 0f, -25f, 25f, -50f, 50f, -75f, 75f, -100f, 100f };
     private static readonly List<FieldCoverCandidate> FieldCandidates = new();
     private static readonly List<FieldCoverCandidate> FieldShortlist = new();
-    private static readonly RaycastHit[] FieldRayHits = new RaycastHit[12];
+    private static readonly Il2CppStructArray<RaycastHit> FieldRayHits = new(12);
     private static readonly float[] FieldRadialGround = new float[FieldStepSamples + 1];
     private static readonly Vector3[] FieldRadialPoints = new Vector3[FieldStepSamples + 1];
 
@@ -97,7 +98,7 @@ internal static partial class ContactResponse
         {
             // The authored pass may already have spent this frame's geometry allowance.
             // One evaluation is always taken so a map without cover props cannot starve.
-            if (evaluated > 0 && SearchGeometryBudgetSpent())
+            if ((evaluated > 0 && SearchGeometryBudgetSpent()) || (found && GeometryTimeSpent()))
                 break;
 
             var coverPosition = new Vector3(candidate.X, candidate.Y, candidate.Z);
@@ -323,29 +324,15 @@ internal static partial class ContactResponse
             origin, direction, FieldRayHits, distance,
             Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
         var found = false;
-        for (var attempt = 0; attempt < hitCount && !found; attempt++)
+        foreach (var hit in FieldRayHits.AsSpan()[..hitCount])
         {
-            var nearestIndex = -1;
-            for (var index = 0; index < hitCount; index++)
-            {
-                if (FieldRayHits[index].collider != null &&
-                    (nearestIndex < 0 || FieldRayHits[index].distance < FieldRayHits[nearestIndex].distance))
-                {
-                    nearestIndex = index;
-                }
-            }
-
-            if (nearestIndex < 0)
-                break;
-
-            // Pay for the component walk only on the hit that would actually be used.
-            if (BulletPenetration.IsCharacterOrVehicle(FieldRayHits[nearestIndex].collider))
-            {
-                FieldRayHits[nearestIndex] = default;
+            if (found && hit.distance >= nearest.distance)
                 continue;
-            }
+            var collider = hit.collider;
+            if (collider == null || BulletPenetration.IsCharacterOrVehicle(collider))
+                continue;
 
-            nearest = FieldRayHits[nearestIndex];
+            nearest = hit;
             found = true;
         }
 

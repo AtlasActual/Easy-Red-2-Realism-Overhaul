@@ -1,5 +1,7 @@
 using HarmonyLib;
 using Il2CppInterop.Runtime;
+using Il2CppInterop.Runtime.InteropTypes.Arrays;
+using System.Diagnostics;
 using UnityEngine;
 
 namespace ER2RealismOverhaul;
@@ -13,7 +15,28 @@ internal static class CoverOccupancy
     private const float VerticalQueryHalfHeightMeters = 3f;
 
     [ThreadStatic]
-    private static Collider[]? _nearbyColliders;
+    private static Il2CppReferenceArray<Collider>? _nearbyColliders;
+
+    private static readonly Dictionary<IntPtr, Soldier?> ColliderOwners = new();
+    private static int _ownerFrame = -1;
+
+    private static Soldier? FindOwner(Collider collider)
+    {
+        var token = collider.Pointer;
+        if (!ColliderOwners.TryGetValue(token, out var owner))
+        {
+            owner = collider.GetComponentInParent<Soldier>();
+            ColliderOwners[token] = owner;
+        }
+        return owner;
+    }
+
+    internal static void ResetBattle()
+    {
+        ColliderOwners.Clear();
+        _nearbyColliders = null;
+        _ownerFrame = -1;
+    }
 
     internal static bool IsOccupiedByOther(Vector3 coverPosition, Soldier soldier)
         => IsOccupiedByOther(
@@ -32,8 +55,8 @@ internal static class CoverOccupancy
                 if (collider == null)
                     continue;
 
-                var other = collider.GetComponentInParent<Soldier>();
-                if (other == null || other.GetInstanceID() == soldier.GetInstanceID() ||
+                var other = FindOwner(collider);
+                if (other == null || other.Pointer == soldier.Pointer ||
                     !other.IsAlive || other.IsOnVehicle() || !other.gameObject.activeInHierarchy)
                     continue;
 
@@ -79,17 +102,18 @@ internal static class CoverOccupancy
             var nearby = GetNearbyColliders(position, radius, out var count);
             var nearestSqr = radius * radius;
             var found = false;
+            var faction = AiState.FactionOf(soldier);
             for (var index = 0; index < count; index++)
             {
                 var collider = nearby[index];
                 if (collider == null)
                     continue;
 
-                var other = collider.GetComponentInParent<Soldier>();
-                if (other == null || other.GetInstanceID() == soldier.GetInstanceID() ||
+                var other = FindOwner(collider);
+                if (other == null || other.Pointer == soldier.Pointer ||
                     !other.IsAlive || other.IsOnVehicle() ||
                     !other.gameObject.activeInHierarchy ||
-                    !string.Equals(other.faction, soldier.faction, StringComparison.Ordinal))
+                    !string.Equals(AiState.FactionOf(other), faction, StringComparison.Ordinal))
                 {
                     continue;
                 }
@@ -125,12 +149,20 @@ internal static class CoverOccupancy
         }
     }
 
-    private static Collider[] GetNearbyColliders(
+    private static Il2CppReferenceArray<Collider> GetNearbyColliders(
         Vector3 position,
         float radius,
         out int count)
     {
-        var reusable = _nearbyColliders ??= new Collider[NearbyColliderCapacity];
+        var frame = Time.frameCount;
+        if (_ownerFrame != frame)
+        {
+            ColliderOwners.Clear();
+            _ownerFrame = frame;
+        }
+        // A CLR array is implicitly copied into a new IL2CPP array. PhysX writes only
+        // to that copy. Keep and read the actual native output buffer.
+        var reusable = _nearbyColliders ??= new Il2CppReferenceArray<Collider>(NearbyColliderCapacity);
         var lower = position + Vector3.down * VerticalQueryHalfHeightMeters;
         var upper = position + Vector3.up * VerticalQueryHalfHeightMeters;
         count = Physics.OverlapCapsuleNonAlloc(
@@ -153,6 +185,12 @@ internal static class CoverOccupancy
             Physics.AllLayers,
             QueryTriggerInteraction.Collide);
         count = complete.Length;
+        // Dense trenches can saturate the same buffer on several consecutive
+        // checks. Reuse a larger one next time, while keeping the complete result.
+        const int maximumRetained = 4096;
+        if (reusable.Length < maximumRetained)
+            _nearbyColliders = new Il2CppReferenceArray<Collider>(
+                Math.Min(maximumRetained, Math.Max(reusable.Length * 2, count + 1)));
         return complete;
     }
 
@@ -173,7 +211,7 @@ internal static partial class ContactResponse
     private static int _coverSearchesThisFrame;
 
     [ThreadStatic]
-    private static RaycastHit[]? _fireLaneHits;
+    private static Il2CppStructArray<RaycastHit>? _fireLaneHits;
 
     private static bool TryBeginDetailedCoverSearch()
     {
@@ -522,15 +560,8 @@ internal static partial class ContactResponse
                 return true;
             }
 
-            // A soldier that already has a cached evaluation for this exact cover
-            // (even if it is stale by time or by axis drift) only refreshes when the
-            // global per-frame posture-evaluation budget has room; otherwise it
-            // reuses that stale answer this frame and retries on a later frame once
-            // a slot frees. A soldier with no cached evaluation at all for this cover
-            // (first contact) bypasses the budget entirely: a first evaluation is
-            // never blocked, only refreshes are. Reusing the stale answer is safe
-            // because it was the live evaluation moments ago and the stable posture
-            // axis above already damps the bearing this posture is evaluated against.
+            // An answer measured at this exact cover remains usable while its
+            // refresh waits for time on another frame.
             var hasStaleCachedEvaluation =
                 state.EvaluatedCoverPostureId == cover.Pointer &&
                 state.EvaluatedCoverThreatDirection.sqrMagnitude > 0.5f;
@@ -543,7 +574,7 @@ internal static partial class ContactResponse
             // cached answer reuses it; a first evaluation on a pose-maintenance path
             // falls back to its safe crouch/native pose for this frame and retries next
             // frame once a slot frees.
-            if (!TryBeginPostureEvaluation())
+            if ((hasStaleCachedEvaluation && GeometryTimeSpent()) || !TryBeginPostureEvaluation())
             {
                 if (hasStaleCachedEvaluation ||
                     TryReuseCachedCoverEvaluation(
@@ -814,10 +845,13 @@ internal static partial class ContactResponse
         if (directFirePosition.HasValue)
             AppendDistinctThreat(knownThreats, directFirePosition.Value);
 
+        var soldierId = soldier.GetInstanceID();
+        var faction = AiState.FactionOf(soldier, soldierId);
+        var spacing = InfantryCoverPolicy.OccupancyRadiusMeters;
         var candidates = CoverManager.GetCovers(
             position,
             searchRadius,
-            soldier.faction,
+            faction,
             towardThreat,
             true);
         if (candidates == null)
@@ -857,7 +891,7 @@ internal static partial class ContactResponse
                 var candidateId = candidate.Pointer;
                 if (state.FailedCoverId == candidateId && now < state.FailedCoverUntil)
                     continue;
-                if (!candidate.IsCoverAvailable(towardThreat, soldier.faction))
+                if (!candidate.IsCoverAvailable(towardThreat, faction))
                     continue;
 
                 if (!ExclusiveCoverAssignmentPatch.TryGetUsableCoverPosition(candidate, out var coverPosition))
@@ -871,9 +905,9 @@ internal static partial class ContactResponse
                 if (AiState.CoverReservedByOther(
                         candidateId,
                         coverPosition,
-                        soldier.GetInstanceID(),
+                        soldierId,
                         now,
-                        InfantryCoverPolicy.OccupancyRadiusMeters))
+                        spacing))
                 {
                     continue;
                 }
@@ -973,7 +1007,8 @@ internal static partial class ContactResponse
             // is best so far. The shortlist presents nearby and distributed candidates
             // early, so this cutoff still compares local cover with deeper building and
             // trench slots.
-            if (detailedEvaluated >= MinimumDetailedCandidates && SearchGeometryBudgetSpent())
+            if (CoverCandidateSamplingCore.StopRefining(detailedEvaluated, bestQuality.IsProtective,
+                    SearchGeometryBudgetSpent(), GeometryTimeSpent()))
                 break;
 
             try
@@ -1039,7 +1074,7 @@ internal static partial class ContactResponse
                 // this budgeted detailed loop.
                 var nearbyReservations = AiState.CountNearbyReservations(
                     coverPosition,
-                    soldier.GetInstanceID(),
+                    soldierId,
                     now,
                     InfantryCoverPolicy.CoverDispersionSpacingMeters);
                 // A blocked ray to a distant enemy is common in buildings and
@@ -1207,35 +1242,23 @@ internal static partial class ContactResponse
     }
 
     /// <summary>
-    /// Full ballistic geometry costs ~5.6ms measured — 12 penetration lines plus 3
-    /// fire-lane casts. The detailed cover search runs one per CANDIDATE, up to 12
-    /// (20 for defensive occupation), all inside a single frame: 67-112ms of raycasting
-    /// for one soldier looking for cover. That is the largest single-frame cost in this
-    /// mod, and it is event-driven rather than headcount-driven — which is why it shows
-    /// up the same at maximum AI as in a small battle. It depends on somebody needing
-    /// cover, not on how many soldiers exist.
+    /// Earlier captures measured about 5.6 ms for one full posture comparison.
+    /// The count ceiling bounds searches even when a large inventory is available.
     /// </summary>
     private const int SearchGeometryBudgetPerFrame = 5;
 
-    // Never choose cover from one or two candidates just because the frame was busy; a
-    // search that scored six good positions instead of twelve picks slightly worse cover,
-    // which is a far better outcome than a 112ms stall.
-    private const int MinimumDetailedCandidates = 3;
-
     private static int _geometryFrame = -1;
     private static int _geometryRunsThisFrame;
+    private static long _geometryTicksThisFrame;
+    // Two milliseconds of measured geometry is a soft allowance for extra comparisons.
+    // Required first evaluations for a relocation decision still run.
+    private static readonly long OptionalGeometryTicks = Math.Max(1L, Stopwatch.Frequency / 500);
 
-    private static bool SearchGeometryBudgetSpent()
-    {
-        var frame = Time.frameCount;
-        if (frame != _geometryFrame)
-        {
-            _geometryFrame = frame;
-            _geometryRunsThisFrame = 0;
-        }
+    private static bool SearchGeometryBudgetSpent() =>
+        _geometryFrame == Time.frameCount && _geometryRunsThisFrame >= SearchGeometryBudgetPerFrame;
 
-        return _geometryRunsThisFrame >= SearchGeometryBudgetPerFrame;
-    }
+    private static bool GeometryTimeSpent() =>
+        _geometryFrame == Time.frameCount && _geometryTicksThisFrame >= OptionalGeometryTicks;
 
     private static CoverGeometryEvaluation EvaluateCoverGeometry(
         Vector3 coverPosition,
@@ -1247,11 +1270,12 @@ internal static partial class ContactResponse
         {
             _geometryFrame = frame;
             _geometryRunsThisFrame = 0;
+            _geometryTicksThisFrame = 0;
         }
 
         _geometryRunsThisFrame++;
         ModTimeProbe.CountCoverGeometryRun();
-        var __t = ModTimeProbe.Begin();
+        var started = Stopwatch.GetTimestamp();
         try
         {
             return EvaluateCoverGeometryCore(
@@ -1259,7 +1283,9 @@ internal static partial class ContactResponse
         }
         finally
         {
-            ModTimeProbe.EndSub(ModSubSite.CoverGeometry, __t);
+            _geometryTicksThisFrame += Stopwatch.GetTimestamp() - started;
+            if (Settings.StutterProbeEnabled.Value)
+                ModTimeProbe.EndSub(ModSubSite.CoverGeometry, started);
         }
     }
 
@@ -1516,7 +1542,7 @@ internal static partial class ContactResponse
         if (castDistance <= 0.1f)
             return false;
 
-        var hits = _fireLaneHits ??= new RaycastHit[32];
+        var hits = _fireLaneHits ??= new Il2CppStructArray<RaycastHit>(32);
         var hitCount = Physics.RaycastNonAlloc(
             origin,
             ray / distance,
@@ -1524,9 +1550,9 @@ internal static partial class ContactResponse
             castDistance,
             Physics.DefaultRaycastLayers,
             QueryTriggerInteraction.Ignore);
-        for (var i = 0; i < hitCount; i++)
+        foreach (var hit in hits.AsSpan()[..hitCount])
         {
-            var collider = hits[i].collider;
+            var collider = hit.collider;
             if (collider == null ||
                 collider.GetComponentInParent<Soldier>() != null ||
                 BulletPenetration.IsNonProtectiveCoverScreen(collider))

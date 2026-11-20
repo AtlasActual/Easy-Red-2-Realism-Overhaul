@@ -1,14 +1,11 @@
 using HarmonyLib;
 using UnityEngine;
-using UnityEngine.InputSystem;
 
 namespace ER2RealismOverhaul;
 
 internal static class DirectTurretAiming
 {
     private const float ZeroingAngleEpsilon = 0.0001f;
-    private const float MousePixelsPerSecondForFullTraverse = 600f;
-    private const float MouseDeltaEpsilon = 0.001f;
 
     private static Quaternion _lastGunsightRotation = Quaternion.identity;
     private static int _lastGunsightRotationFrame = -1;
@@ -72,11 +69,13 @@ internal static class DirectTurretAiming
 
     internal static bool TryGetLastGunsightRotation(
         PlayerController controller,
-        out Quaternion rotation)
+        out Quaternion rotation,
+        out TurretGun turret)
     {
+        turret = null!;
         rotation = _lastGunsightRotation;
         return _lastGunsightRotationFrame == Time.frameCount &&
-               TryGetSelectedPlayerTurret(controller, out _, out _);
+               TryGetSelectedPlayerTurret(controller, out _, out turret);
     }
 
     internal static bool TryHandleDirectGunnerControl(
@@ -122,12 +121,11 @@ internal static class DirectTurretAiming
                 frame,
                 targetAngleAdjust);
 
-            if (!TryGetDirectInput(out var input))
-                return false;
-
+            var input = controller.GetRotationInput(controller.ControlledVehicle);
+            var travel = Time.deltaTime * turret.GetTurretRotationSpeed();
             rotationComplete = turret.ManualRotate(
-                input.x,
-                lockGunnerViewElevation ? 0f : input.y);
+                MountedAimSensitivityCore.ManualAxis(input.y, travel),
+                lockGunnerViewElevation ? 0f : MountedAimSensitivityCore.ManualAxis(input.x, travel * 0.5f));
             _lastDirectTurretId = turretId;
             _lastDirectHandledFrame = frame;
             _lastDirectRotationComplete = rotationComplete;
@@ -241,54 +239,6 @@ internal static class DirectTurretAiming
                turret.GetLookTargetRotation() != null;
     }
 
-    private static bool TryGetDirectInput(out Vector2 input)
-    {
-        input = Vector2.zero;
-
-        var mouse = Mouse.current;
-        if (mouse != null)
-        {
-            var mouseDelta = mouse.delta.ReadValue();
-            if (mouseDelta.sqrMagnitude >
-                MouseDeltaEpsilon * MouseDeltaEpsilon)
-            {
-                var deltaTime = Mathf.Max(
-                    Time.unscaledDeltaTime,
-                    1f / 240f);
-                var scale =
-                    1f /
-                    (MousePixelsPerSecondForFullTraverse * deltaTime);
-                // Mirrors the sign the game itself applies to the stick's
-                // vertical axis, so invert-Y is honored once on either device.
-                var verticalDirection =
-                    SavableData.Settings?.controls?.YAxisDirection_tank ?? 1;
-
-                input = new Vector2(
-                    Mathf.Clamp(mouseDelta.x * scale, -1f, 1f),
-                    Mathf.Clamp(
-                        -mouseDelta.y * scale * verticalDirection,
-                        -1f,
-                        1f));
-                return true;
-            }
-        }
-
-        if (GamepadsAPI.GetGamepad() != null)
-        {
-            // GetCameraRotationInput_Tank returns (vertical, horizontal), not
-            // (horizontal, vertical): .x is the pitch axis (right stick Y,
-            // already multiplied by -YAxisDirection_tank inside the game) and
-            // .y is the yaw axis (right stick X, raw). ManualRotate takes
-            // (leftRight, upDown), so the components have to be transposed, and
-            // no extra negation belongs here -- the game applies the player's
-            // invert-Y setting itself, exactly once.
-            var stick = PlayerController.GetCameraRotationInput_Tank();
-            input = new Vector2(stick.y, stick.x);
-        }
-
-        return true;
-    }
-
     private static void PreserveAdjustableZeroing(
         Turret turret,
         int turretId,
@@ -327,6 +277,27 @@ internal static class DirectTurretAiming
     }
 }
 
+[HarmonyPatch(typeof(PlayerController), "GetRotationInput")]
+internal static class MountedPointAimSensitivityPatch
+{
+    private static void Postfix(PlayerController __instance, Vehicle __0, ref Vector2 __result)
+    {
+        var gain = MountedAimSensitivityCore.InputGain(Settings.MountedAimSensitivity.Value);
+        var zoomReduction = Settings.ZoomSensitivityReductionPercent.Value;
+        if ((gain == 1f && zoomReduction == 0f) || __0 == null ||
+            __instance != PlayerController.currentController || __instance.ControlledVehicle != __0 ||
+            PlayerVehicleFreeLook.IsCameraDetached || __0.IsAirVehicle() ||
+            !DirectTurretAiming.IsOperatingSeatTurret(__instance))
+            return;
+
+        if (zoomReduction > 0f && __instance.IsAiming && ResourcesManager.mainCamera != null)
+            gain *= MountedAimSensitivityCore.ZoomGain(ResourcesManager.mainCamera.fieldOfView,
+                SavableData.Settings?.system?.fieldOfView ?? 60, zoomReduction);
+
+        __result *= gain;
+    }
+}
+
 [HarmonyPatch(typeof(PlayerController), "GetCameraRotationsVehicle")]
 internal static class DirectTurretGunsightCameraPatch
 {
@@ -346,6 +317,45 @@ internal static class DirectTurretGunsightCameraPatch
     }
 }
 
+[HarmonyPatch(typeof(Vehicle), nameof(Vehicle.TPSCamPos))]
+internal static class ElevatedVehicleCameraPositionPatch
+{
+    private static void Postfix(Vehicle __instance, Vector3 __0, ref Vector3 __result)
+    {
+        var strength = Settings.GunnerCameraStrengthPercent.Value / 100f;
+        if (strength <= 0f)
+            return;
+        var controller = PlayerController.currentController;
+        if (!PlayerController.TPSEnabled || controller == null || controller.ControlledVehicle != __instance ||
+            __0.y <= 0f)
+            return;
+
+        var soldier = controller.GetControlledCharacter();
+        var seat = soldier?.GetCurrentVehicleSeat();
+        if (soldier == null || seat == null)
+            return;
+
+        var muzzle = soldier.IsUsingSeatTurret
+            ? seat.connectedTurret?.TryCast<TurretGun>()?.GetFirePosTransform()
+            : null;
+        var anchor = muzzle != null ? muzzle.position : soldier.GetCenterOfUnit();
+        var right = muzzle != null ? muzzle.right : __instance.transform.right;
+        var up = __instance.transform.up;
+        var clearance = Vector3.Dot(__result - anchor, up);
+        var height = Settings.GunnerCameraHeightMeters.Value;
+        var aboveAnchor = __result + up * Mathf.Max(0f, height - clearance);
+        var deckForward = Vector3.Cross(right, up).normalized;
+        var shoulder = anchor + up * height + right * Settings.GunnerCameraSideOffsetMeters.Value
+            - deckForward * Settings.GunnerCameraSetbackMeters.Value;
+        var fullElevation = Mathf.Sin(Settings.GunnerCameraFullEffectDegrees.Value * Mathf.Deg2Rad);
+        var elevation = Mathf.Clamp01(__0.y / fullElevation);
+        var lift = Mathf.SmoothStep(0f, 1f, elevation / 0.35f);
+        var approach = Mathf.SmoothStep(0f, 1f, elevation);
+        var adjusted = Vector3.Lerp(Vector3.Lerp(__result, aboveAnchor, lift), shoulder, approach);
+        __result = Vector3.Lerp(__result, adjusted, strength);
+    }
+}
+
 [HarmonyPatch(typeof(PlayerController), "LateUpdate")]
 internal static class DirectTurretFinalCameraPatch
 {
@@ -355,7 +365,7 @@ internal static class DirectTurretFinalCameraPatch
     {
         if (!DirectTurretAiming.TryGetLastGunsightRotation(
                 __instance,
-                out var rotation))
+                out var rotation, out _))
         {
             return;
         }

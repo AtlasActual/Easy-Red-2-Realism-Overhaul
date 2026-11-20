@@ -65,7 +65,7 @@ internal static class KnownTargetSuppressiveFire
                 origin,
                 fireDirection,
                 Settings.FriendlyFireLaneRadius.Value,
-                distance + 2f))
+                distance + 2f, insideTimedUpdate: true))
         {
             state.NextAttemptAt = now + BlockedRetrySeconds;
             return;
@@ -117,7 +117,7 @@ internal static class KnownTargetSuppressiveFire
                     origin,
                     fireDirection,
                     Settings.FriendlyFireLaneRadius.Value,
-                    distance + 2f))
+                    distance + 2f, insideTimedUpdate: true))
             {
                 Cancel(ai, soldier, state, preserveNativeAim: false);
                 return;

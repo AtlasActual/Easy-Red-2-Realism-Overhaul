@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using HarmonyLib;
 using Il2CppInterop.Runtime;
@@ -21,6 +22,8 @@ internal enum ModTimeSite
     SuppressiveFire,     // KnownTargetSuppressiveFire FixedUpdate postfix
     VehicleAi,           // per-frame AIVehicle/vehicle-tactics patches
     Projectile,          // per-bullet-per-frame BulletInstance patches (penetration, flyby)
+    FiringLane,          // uncached native weapon checks outside the timed AI updates
+    Casualty,            // combined wound/death batch
     Other                // any additional per-frame site found
 }
 
@@ -109,7 +112,8 @@ internal enum ModSubSite
 /// </summary>
 internal static class ModTimeProbe
 {
-    private static readonly long[] TicksBySite = new long[8];
+    internal const int SiteCount = (int)ModTimeSite.Other + 1;
+    private static readonly long[] TicksBySite = new long[SiteCount];
     private static readonly long[] SubTicksBySite = new long[5];
 
     // The most expensive single TacticalMove invocation (one prefix or one postfix)
@@ -167,7 +171,7 @@ internal static class ModTimeProbe
     // patches allocate, so the remainder is in sites nothing has measured yet — the
     // per-bullet path especially, which runs at far higher volume than anything
     // per-soldier.
-    private static readonly long[] AllocBySite = new long[8];
+    private static readonly long[] AllocBySite = new long[SiteCount];
 
     internal static void EndSiteAlloc(ModTimeSite site, long begin)
     {
@@ -574,20 +578,35 @@ internal static class StutterProbe
 
     internal static void InstallExceptionCounter()
     {
+        Settings.StutterProbeEnabled.SettingChanged += (_, _) => UpdateExceptionCounter();
+        UpdateExceptionCounter();
+    }
+
+    private static void UpdateExceptionCounter()
+    {
         try
         {
-            AppDomain.CurrentDomain.FirstChanceException += (_, _) => _exceptionsTotal++;
+            AppDomain.CurrentDomain.FirstChanceException -= CountException;
+            if (Settings.StutterProbeEnabled.Value)
+                AppDomain.CurrentDomain.FirstChanceException += CountException;
         }
         catch (Exception ex)
         {
             Plugin.LogSource.LogWarning($"Could not install exception counter: {ex.Message}");
         }
     }
+
+    private static void CountException(object? sender, FirstChanceExceptionEventArgs args)
+        => Interlocked.Increment(ref _exceptionsTotal);
+
+    private static bool IsRecentFrame(int marker, int frame)
+        => marker >= 0 && (marker == frame || marker == frame - 1);
+
     private static readonly int[] LastGcCounts = new int[3];
 
     // Reused every frame by ModTimeProbe.Drain so the drain never allocates. Length
     // matches the site-tick buffer; the string breakdown is built only on spike frames.
-    private static readonly float[] SiteMsScratch = new float[8];
+    private static readonly float[] SiteMsScratch = new float[ModTimeProbe.SiteCount];
 
     private static string BuildSiteBreakdown(float[] siteMs)
     {
@@ -766,6 +785,13 @@ internal static class StutterProbe
             // Also reached when the probe is switched back on mid-session, so the
             // interval starts empty instead of blending counts from before the gap.
             _lastFrameAt = now;
+            _lastAllocatedBytes = GC.GetAllocatedBytesForCurrentThread();
+            _lastFrameExceptionTotal = Interlocked.Read(ref _exceptionsTotal);
+            _lastSoldierCount = -1;
+            _lastIl2CppUsedBytes = -1;
+            _smoothedFrameSeconds = 1f / 60f;
+            _lastSpikeAt = -1f;
+            _nextLogAllowedAt = now;
             _nextCacheCensusAt = now + CacheCensusIntervalSeconds;
             ResetFrameDistribution();
             for (var generation = 0; generation < 3; generation++)
@@ -780,8 +806,9 @@ internal static class StutterProbe
         var allocDelta = _lastAllocatedBytes >= 0 ? allocatedBytes - _lastAllocatedBytes : 0;
         _lastAllocatedBytes = allocatedBytes;
 
-        var frameExceptions = _exceptionsTotal - _lastFrameExceptionTotal;
-        _lastFrameExceptionTotal = _exceptionsTotal;
+        var exceptionTotal = Interlocked.Read(ref _exceptionsTotal);
+        var frameExceptions = exceptionTotal - _lastFrameExceptionTotal;
+        _lastFrameExceptionTotal = exceptionTotal;
         _intervalExceptions += frameExceptions;
 
         RecordFrame(frameSeconds, modMs, modCalls, allocDelta);
@@ -857,17 +884,17 @@ internal static class StutterProbe
         // The measured duration covers the previous frame's work, so markers
         // stamped on this frame or the one before both count as coincident.
         var frame = Time.frameCount;
-        var coverSearchCoincided = frame - ContactResponse.LastCoverSearchFrame <= 1;
-        var casualtyBatch = frame - CasualtySuppression.LastFlushFrame <= 1
+        var coverSearchCoincided = IsRecentFrame(ContactResponse.LastCoverSearchFrame, frame);
+        var casualtyBatch = IsRecentFrame(CasualtySuppression.LastFlushFrame, frame)
             ? CasualtySuppression.LastFlushCount
             : 0;
-        var explosions = frame - ExplosionProbeMarker.LastExplosionFrame <= 1
+        var explosions = IsRecentFrame(ExplosionProbeMarker.LastExplosionFrame, frame)
             ? ExplosionProbeMarker.LastExplosionCount
             : 0;
-        var postureEvals = frame - ContactResponse.LastPostureEvalFrame <= 1
+        var postureEvals = IsRecentFrame(ContactResponse.LastPostureEvalFrame, frame)
             ? ContactResponse.LastPostureEvalCount
             : 0;
-        var staggerSkips = frame - ContactResponse.LastStaggerSkipFrame <= 1
+        var staggerSkips = IsRecentFrame(ContactResponse.LastStaggerSkipFrame, frame)
             ? ContactResponse.LastStaggerSkipCount
             : 0;
 
