@@ -289,6 +289,7 @@ internal static class SettingsCatalog
         "7e. First-person view\u001fBinocularsEnabled",
         "7e. First-person view\u001fBinocularsKey",
         "7e. First-person view\u001fBinocularZoomMultiplier",
+        "7e. First-person view\u001fBinocularSensitivityReductionPercent",
         "7e. First-person view\u001fFreeLookEnabled",
         "7e. First-person view\u001fFreeLookKey",
         "7e. First-person view\u001fFreeLookHorizontalArcDegrees",
@@ -450,7 +451,7 @@ internal static class SettingsCatalog
 
     internal static string InferUnit(string key)
     {
-        if (key is "AttackerGarrisonPercent" or "FlankWidthPercent" or "GunnerCameraStrengthPercent" or "ZoomSensitivityReductionPercent")
+        if (key is "AttackerGarrisonPercent" or "FlankWidthPercent" or "GunnerCameraStrengthPercent" or "ZoomSensitivityReductionPercent" or "BinocularSensitivityReductionPercent")
             return "%";
         if (key == "EnginePowerMultiplier")
             return "1-10";
@@ -666,6 +667,7 @@ internal static class SettingsCatalog
         "ThirdPersonZoom" => ("weaker third-person aim zoom", "stronger third-person aim zoom"),
         "AircraftFreeLookZoom" => ("weaker aircraft freelook zoom", "stronger aircraft freelook zoom"),
         "BinocularZoomMultiplier" => ("wider binocular view", "stronger binocular zoom"),
+        "BinocularSensitivityReductionPercent" => ("normal look speed", "full optical scaling"),
         "FreeLookHorizontalArcDegrees" => ("narrower freelook arc", "wider freelook arc"),
         "ContextualSquadNameRangeMeters" => ("names appear closer", "names appear farther"),
         "RagdollMomentumMultiplier" => ("less inherited motion", "more inherited motion"),

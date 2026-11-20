@@ -89,7 +89,7 @@ internal static class StaticGunInfantryTargeting
             for (var index = 0; index < squad.CountMembers; index++)
             {
                 var member = squad.GetMember(index);
-                if (member == null || !member.CanFight() || member.IsOnVehicle() ||
+                if (member == null || !member.CanFight() || member.HasSurrended() || member.IsOnVehicle() ||
                     !ResourcesManager.IsEnemyFaction(faction, member.faction))
                 {
                     continue;

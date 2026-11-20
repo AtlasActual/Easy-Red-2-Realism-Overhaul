@@ -1,5 +1,6 @@
 using System.Reflection;
 using HarmonyLib;
+using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using UnityEngine;
 
 namespace ER2RealismOverhaul;
@@ -88,8 +89,7 @@ internal static class SoldierMeleeDamageCoroutinePatch
     private static void Prefix(object __instance, out bool __state)
     {
         __state = false;
-        if (!Settings.ImprovedMeleeHitRegistrationEnabled.Value ||
-            !MultiplayerAuthority.CanMutateGameplay())
+        if (!MultiplayerAuthority.CanMutateGameplay())
         {
             return;
         }
@@ -137,7 +137,7 @@ internal static class MeleeOverlapCapsulePatch
     private static void Prefix(ref Vector3 point0, ref Vector3 point1, ref float radius)
     {
         var attacker = MeleeHitQueryScope.ActiveAttacker;
-        if (attacker == null)
+        if (attacker == null || !Settings.ImprovedMeleeHitRegistrationEnabled.Value)
             return;
 
         var forward = point1 - point0;
@@ -155,5 +155,32 @@ internal static class MeleeOverlapCapsulePatch
         }
 
         radius = Mathf.Max(radius, Settings.MeleeMinimumSweepRadius.Value);
+    }
+
+    // The delayed sweep selects victims from colliders independently of the AI's
+    // visible target. Exclude prisoner body parts before native damage and RPCs.
+    private static void Postfix(ref Il2CppReferenceArray<Collider> __result)
+    {
+        var attacker = MeleeHitQueryScope.ActiveAttacker;
+        if (attacker == null || !attacker.IsAI() || __result == null)
+            return;
+
+        List<Collider>? kept = null;
+        for (var i = 0; i < __result.Length; i++)
+        {
+            var collider = __result[i];
+            var owner = collider != null ? collider.GetComponent<BodyPart>()?.unit : null;
+            if (owner != null && owner.TryCast<Soldier>()?.HasSurrended() == true)
+            {
+                if (kept == null)
+                {
+                    kept = new List<Collider>(__result.Length);
+                    for (var j = 0; j < i; j++) kept.Add(__result[j]);
+                }
+            }
+            else kept?.Add(collider!);
+        }
+        if (kept != null)
+            __result = new Il2CppReferenceArray<Collider>(kept.ToArray());
     }
 }

@@ -259,6 +259,7 @@ internal static class Settings
     internal static ConfigEntry<bool> BinocularsEnabled = null!;
     internal static ConfigEntry<KeyCode> BinocularsKey = null!;
     internal static ConfigEntry<float> BinocularZoomMultiplier = null!;
+    internal static ConfigEntry<float> BinocularSensitivityReductionPercent = null!;
     internal static ConfigEntry<bool> FreeLookEnabled = null!;
     internal static ConfigEntry<KeyCode> FreeLookKey = null!;
     internal static ConfigEntry<float> FreeLookHorizontalArcDegrees = null!;
@@ -779,6 +780,8 @@ internal static class Settings
             "Key that toggles first-person binoculars. Rebind it from the F10 settings menu.");
         BinocularZoomMultiplier = config.Bind("7e. First-person view", "BinocularZoomMultiplier", 10f,
             new ConfigDescription("Optical magnification of the binocular view. The overlay contains no range markings.", new AcceptableValueRange<float>(2f, 20f)));
+        BinocularSensitivityReductionPercent = config.Bind("7e. First-person view", "BinocularSensitivityReductionPercent", 100f,
+            new ConfigDescription("Slows panning while binoculars are raised. At 100%, 10x binoculars turn at one tenth of normal sensitivity. At 0%, they turn at normal speed.", new AcceptableValueRange<float>(0f, 100f)));
         FreeLookEnabled = config.Bind("7e. First-person view", "FreeLookEnabled", true,
             "Enables hold-to-freelook while alive and on foot. Releasing the bound key smoothly recenters the view.");
         FreeLookKey = config.Bind("7e. First-person view", "FreeLookKey", KeyCode.LeftAlt,

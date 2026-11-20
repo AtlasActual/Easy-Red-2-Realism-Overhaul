@@ -1167,6 +1167,11 @@ internal static class SoldierVisibilityConePatch
         Spottable seeTarget,
         ref bool __result)
     {
+        if (PrisonerTargeting.IsPrisoner(seeTarget) && !__instance.IsPlayer())
+        {
+            __result = false;
+            return false;
+        }
         if (!Settings.PerceptionEnabled.Value ||
             !MultiplayerAuthority.CanMutateGameplay() ||
             __instance == null)
@@ -1253,6 +1258,11 @@ internal static class SoldierTargetAcquisitionPatch
         ref Spottable __result,
         Spottable? __state)
     {
+        if (PrisonerTargeting.IsPrisoner(__result))
+        {
+            __result = null!;
+            dist = float.MaxValue;
+        }
         if (!ShouldApply(__instance))
             return;
 
@@ -1646,7 +1656,7 @@ internal static class TargetAcquisition
 
         try
         {
-            return !target.WasCollected && target.Pointer != IntPtr.Zero;
+            return !target.WasCollected && target.Pointer != IntPtr.Zero && !PrisonerTargeting.IsPrisoner(target);
         }
         catch (ObjectCollectedException)
         {

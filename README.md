@@ -12,6 +12,8 @@ The goal is to fix those moments without replacing the game underneath them. Thi
 
 ## What's new in 1.2.3
 
+- Binocular pan speed now scales with magnification. At the default 10x zoom, the same mouse movement turns one tenth as far. Adjust **Binocular Sensitivity Reduction Percent** under **F10 > First-person view**. Set it to 0% for the previous pan speed.
+- Medics can revive wounded soldiers on either side. AI troops now drop a surrendered soldier as a target, and AI melee swings skip prisoners even if the swing began before they surrendered.
 - Looking up in third person lifts the camera in every vehicle seat. Gunners move alongside their barrel. Drivers, commanders and passengers look up from their own position. The existing height, side offset, setback, angle and strength settings apply across seats.
 - Under **F10 > Vehicle aiming**, **Mounted Aim Sensitivity** defaults to 1.0× (your game sensitivity) and can be reduced to 0.1× for tank turrets and emplaced guns. **Zoom Sensitivity Reduction Percent** controls extra gunsight slowdown as magnification increases, from 0% (default) to 100% (full optical scaling). Infantry sensitivity is unaffected.
 - Fixed ZIP extraction on Linux and Steam Deck. The archives now create `BepInEx/plugins/ER2RealismOverhaul/` and put the DLL inside it. Players affected by the older downloads can extract 1.2.3 over their game folder.

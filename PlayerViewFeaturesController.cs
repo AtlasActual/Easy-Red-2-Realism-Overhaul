@@ -705,6 +705,11 @@ internal static class PlayerFreeLookInputPatch
     [HarmonyPostfix]
     private static void Postfix(ref Vector2 __result)
     {
+        if (PlayerViewFeaturesController.BinocularsActive)
+        {
+            var zoom = Mathf.Max(1f, Settings.BinocularZoomMultiplier.Value);
+            __result *= Mathf.Lerp(1f, 1f / zoom, Settings.BinocularSensitivityReductionPercent.Value / 100f);
+        }
         PlayerViewFeaturesController.CaptureAndSuppressRotation(ref __result);
     }
 }
