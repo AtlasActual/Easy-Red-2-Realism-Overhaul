@@ -327,7 +327,7 @@ internal static class ElevatedVehicleCameraPositionPatch
             return;
         var controller = PlayerController.currentController;
         if (!PlayerController.TPSEnabled || controller == null || controller.ControlledVehicle != __instance ||
-            __0.y <= 0f)
+            __0.y <= 0f || __instance.IsAirVehicle())
             return;
 
         var soldier = controller.GetControlledCharacter();

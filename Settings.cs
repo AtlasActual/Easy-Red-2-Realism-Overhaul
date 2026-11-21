@@ -760,7 +760,7 @@ internal static class Settings
             "While using the right-click optical gunsight, directly moves the selected weapon with relative mouse or stick input and attaches the view to the physical gun. This removes the artificial vertical stabilization that otherwise makes the gun chase a world aim point while the vehicle moves. Disable this option to keep the native stabilized point-aim behavior inside the gunsight. Third-person aiming is unchanged.");
         OpticsZoom = BindOpticsZoom(config);
         GunnerCameraStrengthPercent = config.Bind("7g. Vehicle aiming", "GunnerCameraStrengthPercent", 100f,
-            new ConfigDescription("Strength of the upward third-person camera in every vehicle seat adjustment. Set to zero for the original camera orbit.", new AcceptableValueRange<float>(0f, 100f)));
+            new ConfigDescription("Strength of the upward third-person camera adjustment for surface vehicles. Applies to every crew seat. Set to zero for the original camera orbit.", new AcceptableValueRange<float>(0f, 100f)));
         GunnerCameraFullEffectDegrees = config.Bind("7g. Vehicle aiming", "GunnerCameraFullEffectDegrees", 90f,
             new ConfigDescription("Elevation where the camera reaches its final position beside the barrel or occupied seat. Lower values bring it in sooner.", new AcceptableValueRange<float>(15f, 90f)));
         GunnerCameraHeightMeters = config.Bind("7g. Vehicle aiming", "GunnerCameraHeightMeters", 0.35f,
