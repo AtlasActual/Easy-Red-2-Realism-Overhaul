@@ -302,6 +302,7 @@ internal static class SettingsCatalog
         "7g. Vehicle aiming\u001fShowGroundVehicleAimRings",
         "7g. Vehicle aiming\u001fLockGunnerViewElevation",
         "7g. Vehicle aiming\u001fUnstabilizedGunsightEnabled",
+        "7g. Vehicle aiming\u001fCustomVehicleZoom",
         "7g. Vehicle aiming\u001fOpticsZoom",
         "7g. Vehicle aiming\u001fMountedAimSensitivity",
         "7g. Vehicle aiming\u001fGunnerCameraStrengthPercent",
@@ -350,7 +351,7 @@ internal static class SettingsCatalog
                 continue;
 
             var id = entry.Definition.Section + "\u001f" + entry.Definition.Key;
-            if (ConfigOnlyIds.Contains(id))
+            if (entry.Definition.Section == Settings.CompatibilitySection || ConfigOnlyIds.Contains(id))
                 continue;
 
             var primary = PrimarySettingIds.Contains(id);

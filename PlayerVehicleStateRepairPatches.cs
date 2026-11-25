@@ -26,7 +26,7 @@ internal static class WedgedSeatFireRepairPatch
     {
         try
         {
-            var soldier = user as Soldier;
+            var soldier = Il2CppTypeTests.As<Soldier>(user);
             if (soldier == null || !soldier.IsOnVehicle())
                 return;
 

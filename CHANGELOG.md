@@ -2,6 +2,12 @@
 
 This file records only concrete, player-visible changes in each released version of Easy Red 2 Realism Overhaul. It is a living description of the shipped mod: superseded wording is replaced with the final behavior, and changes that are removed or reverted are deleted instead of retained as historical notes.
 
+## 1.2.4 - 2026-11-24
+
+- Turn off **Custom Vehicle Zoom** under **F10 > Vehicle aiming** to use the game's normal focus in ground gunsights and disable extra aircraft freelook zoom. Turning it back on restores your saved magnifications.
+- Gunfire hooks, tracer changes and custom bullet penetration each have a startup switch under `[Compatibility - startup]` in `BepInEx/config/ca.antoi.er2.tacticalai.cfg`. Set the desired switch to `false` and restart the game. All three default to enabled.
+- The infantry firing repair now recognizes a soldier passed through the game's generic creature type when clearing a stale vehicle-seat reference. Compatibility with ERV 2.0 still needs an in-game test.
+
 ## 1.2.3 - 2026-11-19
 
 Built against Easy Red 2 **2.1.1 "Cold Steel"**, Steam build `26375879`.

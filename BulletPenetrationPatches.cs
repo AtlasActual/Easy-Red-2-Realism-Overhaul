@@ -671,7 +671,7 @@ internal static class BulletPenetration
 
         var initialBudget = BallisticCoverDecisionCore.RepresentativeOrdinaryRoundBudget *
                             Mathf.Max(0f, Settings.OrdinaryRoundPenetrationStrength.Value);
-        var penetrationEnabled = Settings.BulletPenetrationEnabled.Value;
+        var penetrationEnabled = Settings.InstallBulletPenetration.Value && Settings.BulletPenetrationEnabled.Value;
         var maximumPenetrations = Mathf.Max(1, Settings.MaximumPropPenetrations.Value);
         var cumulativeResistance = 0f;
         var penetrableBarriers = 0;

@@ -92,7 +92,8 @@ public sealed class Plugin : BasePlugin
         _immersiveWorldHudController = TryAddComponent<ImmersiveWorldHudController>();
         _leaveSquadRedeployController = TryAddComponent<LeaveSquadRedeployController>();
         _spectatorHudController = TryAddComponent<SpectatorHudController>();
-        _bulletPenetrationController = TryAddComponent<BulletPenetrationController>();
+        if (Settings.InstallGameplayPatches.Value && Settings.InstallBulletPenetration.Value)
+            _bulletPenetrationController = TryAddComponent<BulletPenetrationController>();
         _aiDebugOverlayController = TryAddComponent<AiDebugOverlayController>();
 
         _harmony = new Harmony(PluginGuid);
@@ -191,10 +192,42 @@ public sealed class Plugin : BasePlugin
         // skipping installation outright makes the mod genuinely inert, which is what
         // isolating a stutter to the mod (or clearing it) requires.
         var gameplayPatchesEnabled = Settings.InstallGameplayPatches.Value;
+        var disabled = new HashSet<Type>();
+        if (!Settings.InstallGunfirePatches.Value)
+        {
+            disabled.UnionWith(new[] {
+                typeof(HandheldFriendlyFirePatch), typeof(MountedFriendlyFirePatch),
+                typeof(InvalidTurretFireStatePatch), typeof(SuppressedMountedGunnerFirePatch),
+                typeof(HandheldGunfireAwarenessPatch), typeof(MountedGunfireAwarenessPatch),
+                typeof(WedgedSeatFireRepairPatch), typeof(AircraftPointAimSelfGunShakePatch),
+                typeof(TurretMachineGunTracerScopePatch), typeof(TurretMachineGunProjectileTracerPatch),
+                typeof(TurretMachineGunFakeProjectileTracerPatch)
+            });
+        }
+        if (!Settings.InstallTracerPatches.Value)
+        {
+            disabled.UnionWith(new[] {
+                typeof(GenericGunTracerPatch), typeof(TracerVisualPatch),
+                typeof(TurretMachineGunTracerScopePatch), typeof(TurretMachineGunProjectileTracerPatch),
+                typeof(TurretMachineGunFakeProjectileTracerPatch)
+            });
+        }
+        if (!Settings.InstallBulletPenetration.Value)
+        {
+            disabled.UnionWith(new[] {
+                typeof(BulletInstancePenetrationImpactPatch), typeof(BulletInstancePenetrationRicochetPatch),
+                typeof(BulletInstancePenetrationLifecyclePatch)
+            });
+        }
 
         var skipped = 0;
         foreach (var patchType in GetLoadableTypes(assembly).OrderBy(type => type.FullName, StringComparer.Ordinal))
         {
+            if (disabled.Contains(patchType))
+            {
+                LogSource.LogInfo($"Skipping {patchType.Name} per startup compatibility settings.");
+                continue;
+            }
             // Reading the HarmonyPatch attribute resolves the game types named in it.
             // One that this game build no longer has must fail only its own module: an
             // unguarded throw here used to abort the loop before any module was applied.

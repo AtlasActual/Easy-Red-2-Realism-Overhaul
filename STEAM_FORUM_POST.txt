@@ -1,6 +1,6 @@
 [h1]Easy Red 2 Realism Overhaul[/h1]
 
-[b]Current mod version:[/b] 1.2.3
+[b]Current mod version:[/b] 1.2.4
 [b]Compatible game version:[/b] 2.1.1 "Cold Steel" (Steam public build 26375879, November 2, 2026)
 [b]Download:[/b] [url=https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul/releases/]Easy Red 2 Realism Overhaul releases[/url]
 
@@ -140,7 +140,7 @@ After installation, this file should exist:
 
 [code]Easy Red 2\BepInEx\plugins\ER2RealismOverhaul\ER2RealismOverhaul.dll[/code]
 
-[b]Linux / Steam Deck (Proton):[/b] Extract 1.2.3 beside Easy Red 2.exe in Steam's Browse local files folder. Verify that [code]BepInEx/plugins/ER2RealismOverhaul/ER2RealismOverhaul.dll[/code] exists. The release fixes older ZIPs that extracted the entire path as one filename. Then open Easy Red 2 > Properties > General > Launch Options and enter:
+[b]Linux / Steam Deck (Proton):[/b] Extract 1.2.4 beside Easy Red 2.exe in Steam's Browse local files folder. Verify that [code]BepInEx/plugins/ER2RealismOverhaul/ER2RealismOverhaul.dll[/code] exists. The release fixes older ZIPs that extracted the entire path as one filename. Then open Easy Red 2 > Properties > General > Launch Options and enter:
 
 [code]WINEDLLOVERRIDES="winhttp=n,b" %command%[/code]
 
@@ -160,7 +160,7 @@ If an unmodded player becomes host after the original host leaves, the host-auth
 
 [h2]Compatibility and feedback[/h2]
 
-Version 1.2.3 targets Easy Red 2 version 2.1.1 "Cold Steel", Steam public-branch build [b]26375879[/b] (November 2, 2026). Combat stress tests showed fewer battlefield scans during volleys and bursts of casualties. Frame-time improvement on PCs that reported stuttering still needs in-game measurement. The blackout was tested in simulated squadmate selection and respawn flows.
+Version 1.2.4 targets Easy Red 2 version 2.1.1 "Cold Steel", Steam public-branch build [b]26375879[/b] (November 2, 2026). Combat stress tests showed fewer battlefield scans during volleys and bursts of casualties. Frame-time improvement on PCs that reported stuttering still needs in-game measurement. The blackout was tested in simulated squadmate selection and respawn flows.
 
 Game updates can sometimes break BepInEx mods. Please report loading problems, unusual AI behaviour, multiplayer issues, performance regressions, or settings that need adjustment on the [url=https://github.com/AtlasActual/Easy-Red-2-Realism-Overhaul/issues]GitHub Issues page[/url].
 

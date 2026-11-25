@@ -49,6 +49,13 @@ internal static class AircraftFreeLookZoom
 
     internal static void ApplyAfterCameraUpdate(PlayerController controller)
     {
+        // The prefix already restored the native FOV before this camera update.
+        if (!Settings.CustomVehicleZoom.Value)
+        {
+            Reset();
+            return;
+        }
+
         try
         {
             var camera = ResourcesManager.mainCamera;

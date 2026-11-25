@@ -247,6 +247,7 @@ internal static class Settings
     internal static ConfigEntry<bool> GroundVehicleAimRingsEnabled = null!;
     internal static ConfigEntry<bool> GunnerViewElevationLockEnabled = null!;
     internal static ConfigEntry<bool> UnstabilizedGunsightEnabled = null!;
+    internal static ConfigEntry<bool> CustomVehicleZoom = null!;
     internal static ConfigEntry<float> OpticsZoom = null!;
     internal static ConfigEntry<float> MountedAimSensitivity = null!;
     internal static ConfigEntry<float> GunnerCameraStrengthPercent = null!;
@@ -286,6 +287,10 @@ internal static class Settings
 
     internal static ConfigEntry<bool> StutterProbeEnabled = null!;
     internal static ConfigEntry<bool> InstallGameplayPatches = null!;
+    internal const string CompatibilitySection = "Compatibility - startup";
+    internal static ConfigEntry<bool> InstallGunfirePatches = null!;
+    internal static ConfigEntry<bool> InstallTracerPatches = null!;
+    internal static ConfigEntry<bool> InstallBulletPenetration = null!;
     internal static ConfigEntry<bool> DeferredInteropHandleCleanupEnabled = null!;
     internal static ConfigEntry<bool> IncrementalGarbageCollectionEnabled = null!;
     internal static ConfigEntry<int> IncrementalGarbageCollectionSliceMicroseconds = null!;
@@ -758,6 +763,8 @@ internal static class Settings
             "In the unzoomed first-person gunner/periscope view, allows horizontal turret traversal but prevents the mouse or stick from changing gun elevation. The gun holds its local elevation, so hull movement still moves the bore naturally. The right-click optical gunsight, third-person view, commander and driver seats, AI, and remote players are unchanged.");
         UnstabilizedGunsightEnabled = config.Bind("7g. Vehicle aiming", "UnstabilizedGunsightEnabled", true,
             "While using the right-click optical gunsight, directly moves the selected weapon with relative mouse or stick input and attaches the view to the physical gun. This removes the artificial vertical stabilization that otherwise makes the gun chase a world aim point while the vehicle moves. Disable this option to keep the native stabilized point-aim behavior inside the gunsight. Third-person aiming is unchanged.");
+        CustomVehicleZoom = config.Bind("7g. Vehicle aiming", "CustomVehicleZoom", true,
+            "Apply the configured ground gunsight magnification and aircraft freelook zoom. Turn off to use the game's normal vehicle focus zoom.");
         OpticsZoom = BindOpticsZoom(config);
         GunnerCameraStrengthPercent = config.Bind("7g. Vehicle aiming", "GunnerCameraStrengthPercent", 100f,
             new ConfigDescription("Strength of the upward third-person camera adjustment for surface vehicles. Applies to every crew seat. Set to zero for the original camera orbit.", new AcceptableValueRange<float>(0f, 100f)));
@@ -852,6 +859,13 @@ internal static class Settings
             "Asks the game engine to collect garbage in small timed slices rather than in one pass. The engine's own memory cleanup is the largest remaining source of frame hitches in long or very large battles, and a single pass can pause the game for tens of milliseconds. Slicing it trades a little overall throughput for a much shorter worst-case pause. Has no effect if the game was not built with incremental collection; the log says which on the first battle.");
         IncrementalGarbageCollectionSliceMicroseconds = config.Bind("AI - Diagnostics", "IncrementalGarbageCollectionSliceMicroseconds", 400,
             new ConfigDescription("How long the engine may spend reclaiming memory each frame, in microseconds, when incremental collection is on. Judge it against your frame time, not in isolation: at 200 frames per second a frame lasts only 5000 microseconds, so a 3000 microsecond slice spends more than half of every frame collecting and makes the game jerkier overall even though it removes the large pauses. Raise it only if memory still builds up faster than it is reclaimed.", new AcceptableValueRange<int>(100, 10000)));
+
+        InstallGunfirePatches = config.Bind(CompatibilitySection, "InstallGunfirePatches", true,
+            "Install hooks on handheld Fire/Shoot and mounted StartFire/Shoot. Turning this off also disables shot-based AI cues, fire vetoes, and mounted tracer thinning. Requires a restart.");
+        InstallTracerPatches = config.Bind(CompatibilitySection, "InstallTracerPatches", true,
+            "Install tracer selection and appearance hooks. Requires a restart.");
+        InstallBulletPenetration = config.Bind(CompatibilitySection, "InstallBulletPenetration", true,
+            "Install the bullet impact, ricochet and lifecycle hooks and the penetration controller. Requires a restart.");
 
         InstallGameplayPatches = config.Bind("AI - Diagnostics", "InstallGameplayPatches", true,
             "Master switch. Set to false to make the mod load but install no gameplay patches at all, so it cannot affect performance or behavior. Turning individual systems off still leaves their patches installed, so this is the only way to rule the mod out as a stutter cause without uninstalling it. Requires a game restart to take effect.");

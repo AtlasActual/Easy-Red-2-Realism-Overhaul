@@ -339,7 +339,8 @@ internal static class PlayerVehicleHoldBreathZoomPatch
         // Gate on the native flag rather than the raw input so the zoom follows
         // the game's own stamina, bleeding, and inhale rules exactly, and so the
         // fixed native offset is compensated only when the game applies it.
-        if (__instance == null ||
+        if (!Settings.CustomVehicleZoom.Value ||
+            __instance == null ||
             !__instance.IsAiming ||
             !__instance.holdingBreath)
             return;
